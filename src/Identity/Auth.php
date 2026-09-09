@@ -19,8 +19,28 @@ final class Auth
     {
         $user=$this->db->one('SELECT * FROM users WHERE email=?',[mb_strtolower(trim($email))]);
         $hash=$user['password_hash']??'$argon2id$v=19$m=65536,t=4,p=1$ZXhhbXBsZXNhbHRleGFtcA$el3WCJBajqpnjEmAU/Ut6WxFgDKR6wKvLGKHvmbU8qM';
-        if (!password_verify($password,$hash) || !$user || (int)($user['disabled']??0)===1) throw new BillingError('Неверная почта или пароль.');
+        $ok=password_verify($password,$hash);
+        if (!$ok && $user && is_string($hash) && str_starts_with($hash,'pbkdf2_sha256$')) {
+            $ok=self::verifyDjangoPbkdf2($password,$hash);
+            if ($ok) {
+                // Upgrade legacy Django hash to Argon2id on successful login.
+                $this->db->execute('UPDATE users SET password_hash=? WHERE id=?',[password_hash($password,PASSWORD_ARGON2ID),$user['id']]);
+            }
+        }
+        if (!$ok || !$user || (int)($user['disabled']??0)===1) throw new BillingError('Неверная почта или пароль.');
         return $user['id'];
+    }
+    /** Verify Django-style `pbkdf2_sha256$iterations$salt$base64` hashes (migration compat). */
+    public static function verifyDjangoPbkdf2(string $password,string $hash): bool
+    {
+        $parts=explode('$',$hash);
+        if (count($parts)!==4 || $parts[0]!=='pbkdf2_sha256') return false;
+        $iterations=(int)$parts[1];
+        if ($iterations<1 || $iterations>5000000 || $parts[2]==='' || $parts[3]==='') return false;
+        $expected=base64_decode($parts[3],true);
+        if ($expected===false) return false;
+        $calc=hash_pbkdf2('sha256',$password,$parts[2],$iterations,strlen($expected),true);
+        return hash_equals($expected,$calc);
     }
     public function issue(string $userId): string
     {
