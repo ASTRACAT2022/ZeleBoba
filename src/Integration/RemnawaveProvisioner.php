@@ -7,7 +7,8 @@ final class RemnawaveProvisioner implements Provisioner
     public function __construct(private HttpClientInterface $http, private string $baseUrl, private string $token, private string $squad) {}
     public function provision(array $subscription): array
     {
-        if (!str_starts_with($this->baseUrl,'https://') || !$this->token || !($subscription['squad_uuid']??$this->squad)) throw new \RuntimeException('Remnawave configuration missing');
+        $squad=($subscription['squad_uuid']??'')!==''?$subscription['squad_uuid']:$this->squad;
+        if (!str_starts_with($this->baseUrl,'https://') || !$this->token || !$squad) throw new \RuntimeException('Remnawave configuration missing');
         $username='zb_'.$subscription['id'];
         // Deterministic username recovers a create that succeeded remotely but timed out locally.
         $response=$this->request('GET','/api/users/by-username/'.$username);
@@ -15,7 +16,7 @@ final class RemnawaveProvisioner implements Provisioner
             $response=$this->request('POST','/api/users',['username'=>$username,'status'=>'ACTIVE',
                 'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$subscription['expires_at']),
                 'trafficLimitBytes'=>(int)$subscription['traffic_bytes'],'trafficLimitStrategy'=>'NO_RESET',
-                'hwidDeviceLimit'=>(int)$subscription['devices'],'activeInternalSquads'=>[$subscription['squad_uuid']??$this->squad]]);
+                'hwidDeviceLimit'=>(int)$subscription['devices'],'activeInternalSquads'=>[$squad]]);
             if ($response->getStatusCode()===409) $response=$this->request('GET','/api/users/by-username/'.$username);
         }
         $user=$response->toArray()['response'];
@@ -39,6 +40,29 @@ final class RemnawaveProvisioner implements Provisioner
             'hwidDeviceLimit'=>(int)($subscription['devices']??3),
             'status'=>'ACTIVE',
         ]);
+    }
+    public function fetch(string $username): ?array
+    {
+        $response=$this->request('GET','/api/users/by-username/'.$username);
+        if ($response->getStatusCode()===404) return null;
+        $data=$response->toArray()['response']??null;
+        return $data===null||$data===[] ? null : $data;
+    }
+    public function disable(string $username): void
+    {
+        $user=$this->fetch($username);
+        if (!$user) return;
+        $id=$user['id']??null;
+        if (!$id) return;
+        $this->request('PATCH','/api/users',['id'=>(int)$id,'status'=>'DISABLED']);
+    }
+    public function remove(string $username): void
+    {
+        $user=$this->fetch($username);
+        if (!$user) return;
+        $id=$user['id']??null;
+        if (!$id) return;
+        $this->request('DELETE','/api/users/'.$id);
     }
     private function request(string $method,string $path,?array $body=null): \Symfony\Contracts\HttpClient\ResponseInterface
     {

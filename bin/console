@@ -51,4 +51,13 @@ $cli->add((new Command('app:health'))->setDescription('Check schema and optional
     if($name=$i->getArgument('process')){$row=$c->db->one('SELECT seen_at FROM runtime_heartbeats WHERE name=?',[$name]);if(!$row||(int)$row['seen_at']<time()-180)return 1;}
     $o->writeln('healthy');return 0;
 }));
+$cli->add((new Command('remnawave:sync'))->setDescription('Sync local subscriptions with Remnawave panel')->addOption('dry-run',null,InputOption::VALUE_NONE,'Check without fixing')->addOption('limit',null,InputOption::VALUE_REQUIRED,'Max subscriptions to check',50)->setCode(function(InputInterface $i,OutputInterface $o)use($c){
+    $limit=(int)$i->getOption('limit'); if($limit<1||$limit>500) $limit=50;
+    $dry=(bool)$i->getOption('dry-run');
+    $sync=new \App\Integration\RemnawaveSync($c->db,new \App\Integration\RemnawaveProvisioner(\Symfony\Component\HttpClient\HttpClient::create(),$c->config['REMNAWAVE_URL'],$c->config['REMNAWAVE_TOKEN'],$c->config['REMNAWAVE_SQUAD_UUID']));
+    $report=$sync->run($limit,!$dry);
+    $o->writeln(sprintf('Checked %d, fixed %d, reprovisioned %d, disabled %d, missing %d, errors %d',$report['checked'],$report['fixed'],$report['reprovisioned'],$report['disabled'],$report['missing'],$report['errors']));
+    foreach($report['details'] as $line) $o->writeln('  '.$line);
+    return $report['errors']>0?1:0;
+}));
 exit($cli->run());

@@ -17,6 +17,13 @@ trait AdminActions
             (new IntegrationCheck($this->app))->check($id,$input->get('register')==='1');$this->app->billing->audit($uid,'integration.checked',$id);return new RedirectResponse('/admin/config?checked=1',303);
         }
         if($handler==='admin-config')return $this->render('admin-config',array_merge($this->app->settings->form(),['checks'=>$db->all('SELECT integration,status,checked_at FROM integration_checks'),'saved'=>$this->request->query->has('saved'),'checked'=>$this->request->query->has('checked')]));
+        if($handler==='admin-sync'){
+            if($this->app->config['PAYMENT_DRIVER']==='demo' || empty($this->app->config['REMNAWAVE_URL']) || empty($this->app->config['REMNAWAVE_TOKEN']))throw new BillingError('Сначала настройте Remnawave и реальный платежный драйвер.');
+            $sync=new \App\Integration\RemnawaveSync($db,new \App\Integration\RemnawaveProvisioner(\Symfony\Component\HttpClient\HttpClient::create(),$this->app->config['REMNAWAVE_URL'],$this->app->config['REMNAWAVE_TOKEN'],$this->app->config['REMNAWAVE_SQUAD_UUID']));
+            $report=$sync->run(100,true);
+            $this->app->billing->audit($uid,'remnawave.sync',sprintf('checked=%d fixed=%d reprovisioned=%d disabled=%d errors=%d',$report['checked'],$report['fixed'],$report['reprovisioned'],$report['disabled'],$report['errors']));
+            return $this->render('admin-sync',['report'=>$report]);
+        }
         if($handler==='admin-readiness')return $this->render('readiness',['checks'=>Readiness::report($this->app)]);
         if($handler==='admin-plans')return $this->render('admin-plans',['plans'=>$db->all('SELECT * FROM plans ORDER BY active DESC,price_minor')]);
         if($handler==='admin-plan-save'){

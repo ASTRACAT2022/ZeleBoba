@@ -42,6 +42,30 @@ final class Reconciler
                 // Expired renew window: if subscription expired and auto_renew still on, disable after max fails
                 $db->execute("UPDATE subscriptions SET auto_renew=0 WHERE auto_renew=1 AND status='expired'");
             }
+            // Remnawave sync: periodic drift check (once per hour, via advisory lease)
+            $syncLease=$db->one("SELECT * FROM advisory_leases WHERE name='remnawave-sync'");
+            $shouldSync=!$syncLease || (int)$syncLease['expires_at']<time();
+            if($shouldSync){
+                $db->execute("INSERT INTO advisory_leases VALUES('remnawave-sync',?,?) ON CONFLICT(name) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at",[Database::id(),time()+3600]);
+                // Only sync if remnawave is configured
+                $hasRemnawave=$db->one("SELECT value FROM app_settings WHERE name='REMNAWAVE_URL'");
+                if($hasRemnawave && $hasRemnawave['value']!==''){
+                    try {
+                        $sync=new \App\Integration\RemnawaveSync($db,new \App\Integration\RemnawaveProvisioner(
+                            \Symfony\Component\HttpClient\HttpClient::create(),
+                            $this->app->config['REMNAWAVE_URL']??'',
+                            $this->app->config['REMNAWAVE_TOKEN']??'',
+                            $this->app->config['REMNAWAVE_SQUAD_UUID']??''
+                        ));
+                        $report=$sync->run(50,true);
+                        if($report['fixed']>0||$report['reprovisioned']>0||$report['disabled']>0){
+                            error_log(json_encode(['event'=>'remnawave.sync','fixed'=>$report['fixed'],'reprovisioned'=>$report['reprovisioned'],'disabled'=>$report['disabled'],'errors'=>$report['errors']]));
+                        }
+                    } catch (\Throwable $e) {
+                        error_log(json_encode(['event'=>'remnawave.sync.failed','error'=>get_class($e)]));
+                    }
+                }
+            }
             $db->execute("UPDATE subscriptions SET status='expired' WHERE status='active' AND expires_at<=?",[time()]);
             foreach(['sessions','telegram_links','login_challenges','mfa_enrollments','rate_limits'] as $table)$db->execute("DELETE FROM $table WHERE expires_at<=?",[time()]);
             $db->execute("DELETE FROM outbox WHERE status='done' AND created_at<?",[time()-30*86400]);
