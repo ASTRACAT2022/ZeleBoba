@@ -1,0 +1,58 @@
+x-app: &app
+  build: .
+  environment:
+    DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
+    DATABASE_USER: billing
+    DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+  depends_on:
+    db: {condition: service_healthy}
+  restart: unless-stopped
+  init: true
+  volumes: ["app-secrets:/app/var"]
+  security_opt: ["no-new-privileges:true"]
+  stop_grace_period: 45s
+services:
+  db:
+    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    environment:
+      POSTGRES_DB: billing
+      POSTGRES_USER: billing_owner
+      POSTGRES_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set a separate DATABASE_MIGRATION_PASSWORD in .env}
+      BILLING_RUNTIME_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    volumes: ["postgres:/var/lib/postgresql/data", "./infra/postgres:/docker-entrypoint-initdb.d:ro"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billing_owner -d billing"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    <<: *app
+    profiles: [maintenance]
+    restart: "no"
+    environment:
+      DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
+      DATABASE_USER: billing_owner
+      DATABASE_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD}
+    command: ["sh", "-c", "php bin/console db:migrate && php bin/console db:grant-runtime"]
+  app:
+    <<: *app
+  worker:
+    <<: *app
+    command: ["php", "bin/console", "worker:run"]
+    healthcheck:
+      test: ["CMD", "php", "bin/console", "app:health", "worker"]
+  scheduler:
+    <<: *app
+    command: ["sh", "-c", "while true; do php bin/console billing:reconcile; sleep 60; done"]
+    healthcheck:
+      test: ["CMD", "php", "bin/console", "app:health", "scheduler"]
+  web:
+    image: nginx:1.28-bookworm@sha256:552e7481ca93ffccd046aa658dbbed22caefbc09c66fa7cd247cbb90b8a5c609
+    ports: ["127.0.0.1:${BILLING_HTTP_PORT:-8080}:80"]
+    volumes: ["./public:/app/public:ro", "./infra/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on: [app]
+    restart: unless-stopped
+volumes:
+  postgres:
+  app-secrets:

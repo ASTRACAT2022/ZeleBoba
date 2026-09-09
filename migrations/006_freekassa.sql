@@ -1,0 +1,2 @@
+ALTER TABLE orders ADD COLUMN client_ip VARCHAR(45);
+ALTER TABLE orders ADD COLUMN freekassa_intid VARCHAR(100);
