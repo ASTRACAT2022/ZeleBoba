@@ -22,6 +22,22 @@ final class RemnawaveProvisioner implements Provisioner
         if (($user['username']??'')!==$username || empty($user['uuid']) || empty($user['subscriptionUrl']) || !str_starts_with($user['subscriptionUrl'],'https://')) throw new \RuntimeException('Invalid Remnawave response');
         return ['id'=>$user['uuid'],'url'=>$user['subscriptionUrl']];
     }
+    public function extend(array $subscription): void
+    {
+        if (!str_starts_with($this->baseUrl,'https://') || !$this->token) throw new \RuntimeException('Remnawave configuration missing');
+        $username='zb_'.$subscription['id'];
+        $response=$this->request('GET','/api/users/by-username/'.$username);
+        if ($response->getStatusCode()===404) throw new \RuntimeException('Remnawave user not found for renewal');
+        $user=$response->toArray()['response'];
+        $uuid=$user['uuid']??null;
+        if (!$uuid) throw new \RuntimeException('Invalid Remnawave response for renewal');
+        $this->request('PATCH','/api/users/'.$uuid,[
+            'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$subscription['expires_at']),
+            'trafficLimitBytes'=>(int)($subscription['traffic_bytes']??0),
+            'hwidDeviceLimit'=>(int)($subscription['devices']??3),
+            'status'=>'ACTIVE',
+        ]);
+    }
     private function request(string $method,string $path,?array $body=null): \Symfony\Contracts\HttpClient\ResponseInterface
     {
         $options=['auth_bearer'=>$this->token,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0];

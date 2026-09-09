@@ -25,7 +25,7 @@ final class Application
         $this->request=$r; $this->user=null; $requestId=Database::id();
         try {
             $routes=new RouteCollection();
-            foreach ([['tg-start','/telegram/start',['POST']],['tg-status','/telegram/status',['GET']],['tg-finish','/telegram/finish',['POST']],['tg-magic','/telegram/magic',['GET','POST']],['security','/security',['GET']],['mfa-begin','/security/begin',['POST']],['mfa-enroll','/security/enroll',['POST']],['mfa-verify','/security/verify',['POST']],['admin-config','/admin/config',['GET']],['admin-config-save','/admin/config',['POST']],['admin-check','/admin/check/{id}',['POST']],['admin-readiness','/admin/readiness',['GET']],['admin-plans','/admin/plans',['GET']],['admin-plan-save','/admin/plans/{id}',['POST']],['admin-users','/admin/users',['GET']],['admin-user-toggle','/admin/users/{id}/toggle',['POST']],['health','/health/live',['GET']],['ready','/health/ready',['GET']],['login','/login',['GET','POST']],['register','/register',['GET','POST']],['logout','/logout',['POST']],['home','/',['GET']],['plans','/plans',['GET']],['orders','/orders',['GET']],['buy','/orders',['POST']],['order','/orders/{id}',['GET']],['demo','/orders/{id}/demo-pay',['POST']],['settings','/settings',['GET']],['link','/settings/telegram',['POST']],['admin','/admin',['GET']],['retry','/admin/jobs/{id}/retry',['POST']],['plan','/admin/plans',['POST']],['yookassa','/webhooks/yookassa',['POST']],['freekassa','/webhooks/freekassa',['GET','POST']],['telegram','/webhooks/telegram',['POST']]] as [$name,$path,$methods]) $routes->add($name,new Route($path,['_handler'=>$name],[],[], '',[],$methods));
+            foreach ([['tg-start','/telegram/start',['POST']],['tg-status','/telegram/status',['GET']],['tg-finish','/telegram/finish',['POST']],['tg-magic','/telegram/magic',['GET','POST']],['security','/security',['GET']],['mfa-begin','/security/begin',['POST']],['mfa-enroll','/security/enroll',['POST']],['mfa-verify','/security/verify',['POST']],['admin-config','/admin/config',['GET']],['admin-config-save','/admin/config',['POST']],['admin-check','/admin/check/{id}',['POST']],['admin-readiness','/admin/readiness',['GET']],['admin-plans','/admin/plans',['GET']],['admin-plan-save','/admin/plans/{id}',['POST']],['admin-users','/admin/users',['GET']],['admin-user-toggle','/admin/users/{id}/toggle',['POST']],['health','/health/live',['GET']],['ready','/health/ready',['GET']],['login','/login',['GET','POST']],['register','/register',['GET','POST']],['logout','/logout',['POST']],['home','/',['GET']],['plans','/plans',['GET']],['orders','/orders',['GET']],['buy','/orders',['POST']],['order','/orders/{id}',['GET']],['demo','/orders/{id}/demo-pay',['POST']],['autorenew','/subscriptions/{id}/autorenew',['POST']],['settings','/settings',['GET']],['link','/settings/telegram',['POST']],['admin','/admin',['GET']],['retry','/admin/jobs/{id}/retry',['POST']],['plan','/admin/plans',['POST']],['yookassa','/webhooks/yookassa',['POST']],['freekassa','/webhooks/freekassa',['GET','POST']],['telegram','/webhooks/telegram',['POST']]] as [$name,$path,$methods]) $routes->add($name,new Route($path,['_handler'=>$name],[],[], '',[],$methods));
             $match=(new UrlMatcher($routes,(new RequestContext())->fromRequest($r)))->match($r->getPathInfo());
             $handler=$match['_handler'];
             if ($handler==='health') return new JsonResponse(['status'=>'ok']);
@@ -62,7 +62,7 @@ final class Application
         switch ($handler) {
             case 'logout': $this->app->auth->logout($this->request->cookies->get('zb_session','')); $response=new RedirectResponse('/login'); $response->headers->clearCookie('zb_session'); return $response;
             case 'home':
-                return $this->render('home',['subscriptions'=>$db->all('SELECT s.*,o.plan_name,o.devices,o.traffic_bytes FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50',[$uid]),'orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 5',[$uid])]);
+                return $this->render('home',['subscriptions'=>$db->all('SELECT s.*,o.plan_name,o.devices,o.traffic_bytes FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50',[$uid]),'orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 5',[$uid]),'autorenew_enabled'=>$this->app->config['AUTORENEW_ENABLED']==='1']);
             case 'plans': return $this->render('plans',['plans'=>$db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor'),'key'=>Database::id()]);
             case 'buy': $order=$this->app->billing->order($uid,$input->get('plan_id',''),$input->get('idempotency_key',''),$input->get('receipt_email'),self::clientIp($this->request)); return new RedirectResponse('/orders/'.$order['id'],303);
             case 'orders': return $this->render('orders',['orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100',[$uid])]);
@@ -76,6 +76,10 @@ final class Application
                     return new RedirectResponse('/orders/'.$id,303);
                 }
                 return $this->render('order',['order'=>$order,'subscription'=>$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$id])]);
+            case 'autorenew':
+                $enable=$input->get('enable','')==='1';
+                $this->app->billing->setAutoRenew($uid,$id,$enable);
+                return new RedirectResponse('/',303);
             case 'settings': return $this->render('settings',['link_token'=>null]);
             case 'link':
                 $token=bin2hex(random_bytes(24));

@@ -12,6 +12,7 @@ final class Settings
         'YOOKASSA_SHOP_ID'=>'','YOOKASSA_SECRET'=>'',
         'YOOKASSA_RECEIPT'=>'0','YOOKASSA_VAT_CODE'=>'1','YOOKASSA_TAX_SYSTEM'=>'',
         'FREEKASSA_SHOP_ID'=>'','FREEKASSA_API_KEY'=>'','FREEKASSA_SECRET2'=>'','FREEKASSA_PAYMENT_ID'=>'44',
+        'AUTORENEW_ENABLED'=>'0','AUTORENEW_DAYS_BEFORE'=>'3','AUTORENEW_MAX_FAILS'=>'3',
         'REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>'',
         'TELEGRAM_BOT_TOKEN'=>'','TELEGRAM_BOT_USERNAME'=>'','TELEGRAM_WEBHOOK_SECRET'=>'','TELEGRAM_API_BASE'=>'https://astracattg.netlify.app',
     ];
@@ -69,7 +70,7 @@ final class Settings
     }
     private function validate(array $v):void
     {
-        foreach(['APP_ENV'=>['dev','prod'],'PAYMENT_DRIVER'=>['demo','yookassa','freekassa'],'PROVISION_DRIVER'=>['demo','remnawave'],'PURCHASES_ENABLED'=>['0','1'],'REGISTRATION_ENABLED'=>['0','1'],'YOOKASSA_RECEIPT'=>['0','1']] as $key=>$allowed)if(!in_array($v[$key],$allowed,true))throw new BillingError('Некорректная настройка '.$key);
+        foreach(['APP_ENV'=>['dev','prod'],'PAYMENT_DRIVER'=>['demo','yookassa','freekassa'],'PROVISION_DRIVER'=>['demo','remnawave'],'PURCHASES_ENABLED'=>['0','1'],'REGISTRATION_ENABLED'=>['0','1'],'YOOKASSA_RECEIPT'=>['0','1'],'AUTORENEW_ENABLED'=>['0','1']] as $key=>$allowed)if(!in_array($v[$key],$allowed,true))throw new BillingError('Некорректная настройка '.$key);
         if (!filter_var($v['APP_URL'],FILTER_VALIDATE_URL) || !preg_match('/^https?:\/\/[^\s]+$/D',$v['APP_URL']) || parse_url($v['APP_URL'],PHP_URL_USER)!==null || parse_url($v['APP_URL'],PHP_URL_QUERY)!==null || parse_url($v['APP_URL'],PHP_URL_FRAGMENT)!==null || !in_array(parse_url($v['APP_URL'],PHP_URL_PATH),[null,'','/'],true)) throw new BillingError('Укажите корневой URL кабинета, без пути и параметров.');
         if (mb_strlen($v['SITE_NAME'])<1 || mb_strlen($v['SITE_NAME'])>60) throw new BillingError('Название: от 1 до 60 символов.');
         foreach(['REMNAWAVE_URL','SUPPORT_URL'] as $key) if($v[$key]!=='' && (!filter_var($v[$key],FILTER_VALIDATE_URL) || !str_starts_with($v[$key],'https://') || parse_url($v[$key],PHP_URL_USER)!==null || parse_url($v[$key],PHP_URL_FRAGMENT)!==null))throw new BillingError($key.': нужен HTTPS URL без логина и фрагмента.');
@@ -82,6 +83,8 @@ final class Settings
         if (!in_array($v['YOOKASSA_VAT_CODE'],array_map('strval',range(1,12)),true) || !in_array($v['YOOKASSA_TAX_SYSTEM'],['','1','2','3','4','5','6'],true)) throw new BillingError('Проверьте параметры чека.');
         if ($v['FREEKASSA_SHOP_ID']!=='' && !preg_match('/^[0-9]{1,10}$/D',$v['FREEKASSA_SHOP_ID'])) throw new BillingError('ID магазина FreeKassa: только цифры.');
         if ($v['FREEKASSA_PAYMENT_ID']!=='' && !preg_match('/^[0-9]{1,5}$/D',$v['FREEKASSA_PAYMENT_ID'])) throw new BillingError('ID платёжной системы FreeKassa: только цифры.');
+        if (!preg_match('/^[0-9]{1,2}$/D',$v['AUTORENEW_DAYS_BEFORE']) || (int)$v['AUTORENEW_DAYS_BEFORE']<1 || (int)$v['AUTORENEW_DAYS_BEFORE']>14) throw new BillingError('Автопродление: за сколько дней — от 1 до 14.');
+        if (!preg_match('/^[0-9]{1,2}$/D',$v['AUTORENEW_MAX_FAILS']) || (int)$v['AUTORENEW_MAX_FAILS']<1 || (int)$v['AUTORENEW_MAX_FAILS']>10) throw new BillingError('Автопродление: максимум попыток — от 1 до 10.');
         if ($v['APP_ENV']==='prod' && (!$this->db->postgres() || !str_starts_with($v['APP_URL'],'https://'))) throw new BillingError('Боевой режим требует PostgreSQL и HTTPS.');
         if ($v['PURCHASES_ENABLED']==='1') {
             foreach(self::purchaseErrors($v) as $error) throw new BillingError($error);

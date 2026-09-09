@@ -5,14 +5,14 @@ use App\Infrastructure\{Database,Outbox};
 final class BillingService
 {
     public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null) {}
-    public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null): array
+    public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null, ?string $renewSubscriptionId=null): array
     {
         if ($this->config!==null) {
             if ($this->config['PURCHASES_ENABLED']!=='1') throw new BillingError('Покупки временно приостановлены.');
             foreach(\App\Settings\Settings::purchaseErrors($this->config) as $error) throw new BillingError($error);
         }
         if (!preg_match('/^[a-zA-Z0-9:_-]{8,128}$/D',$key)) throw new BillingError('Некорректный ключ операции.');
-        return $this->db->transaction(function () use ($userId,$planId,$key,$receiptEmail,$clientIp) {
+        return $this->db->transaction(function () use ($userId,$planId,$key,$receiptEmail,$clientIp,$renewSubscriptionId) {
             if (!$this->db->one('SELECT id FROM users WHERE id=? AND disabled=0'.$this->db->lock(),[$userId])) throw new BillingError('Аккаунт не найден.');
             $existing=$this->db->one('SELECT * FROM orders WHERE user_id=? AND idempotency_key=?',[$userId,$key]);
             if ($existing) {
@@ -34,6 +34,12 @@ final class BillingService
             $this->db->execute('UPDATE orders SET return_url=? WHERE id=?',[rtrim($this->config['APP_URL']??'http://127.0.0.1:8080','/').'/orders/'.$id,$id]);
             $this->outbox->enqueue('payment.create','checkout:'.$id,['order_id'=>$id]);
             $this->audit($userId,'order.created',$id);
+            if ($renewSubscriptionId!==null) {
+                $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$renewSubscriptionId]);
+                if (!$sub || $sub['user_id']!==$userId) throw new BillingError('Подписка для продления не найдена.');
+                $this->db->execute('UPDATE subscriptions SET renew_order_id=? WHERE id=?',[$id,$renewSubscriptionId]);
+                $this->audit($userId,'subscription.renew_ordered',$renewSubscriptionId);
+            }
             return $this->db->one('SELECT * FROM orders WHERE id=?',[$id]);
         });
     }
@@ -55,11 +61,44 @@ final class BillingService
                 $this->db->execute('INSERT INTO ledger_entries VALUES(?,?,?,?,?,?)',[Database::id(),$orderId,$account,$value,$currency,$now]);
             }
             $this->db->execute("UPDATE orders SET status='paid',provider_payment_id=?,paid_at=? WHERE id=?",[$paymentId,$now,$orderId]);
-            $sub=Database::id();
-            // Each purchase is an independent subscription; explicit renewal is a later capability.
-            $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at) VALUES(?,?,?,'provisioning',?,?)",[$sub,$orderId,$order['user_id'],$now+(int)$order['duration_days']*86400,$now]);
-            $this->outbox->enqueue('subscription.provision','provision:'.$sub,['subscription_id'=>$sub]);
+            // Renewal: extend the existing subscription instead of creating a new one.
+            $renewSub=$this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
+            if ($renewSub) {
+                $base=max($now,(int)$renewSub['expires_at']);
+                $newExpiry=$base+(int)$order['duration_days']*86400;
+                $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',renew_order_id=NULL,renew_at=NULL,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?",[$newExpiry,$renewSub['id']]);
+                $this->outbox->enqueue('subscription.extend','extend:'.$renewSub['id'],['subscription_id'=>$renewSub['id']]);
+                $this->audit('provider:'.$provider,'subscription.renewed',$renewSub['id']);
+            } else {
+                $sub=Database::id();
+                // Each purchase is an independent subscription unless it is a renewal order.
+                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at) VALUES(?,?,?,'provisioning',?,?)",[$sub,$orderId,$order['user_id'],$now+(int)$order['duration_days']*86400,$now]);
+                $this->outbox->enqueue('subscription.provision','provision:'.$sub,['subscription_id'=>$sub]);
+            }
             $this->audit('provider:'.$provider,'payment.settled',$orderId);
+        });
+    }
+    /** Enable or disable auto-renew for a subscription. Returns updated row. */
+    public function setAutoRenew(string $userId,string $subscriptionId,bool $enable): array
+    {
+        return $this->db->transaction(function() use ($userId,$subscriptionId,$enable) {
+            $sub=$this->db->one('SELECT s.*,o.plan_id,o.price_minor,o.duration_days FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.id=?'.$this->db->lock(),[$subscriptionId]);
+            if (!$sub || $sub['user_id']!==$userId) throw new BillingError('Подписка не найдена.');
+            if ($sub['status']!=='active' || (int)$sub['expires_at']<=time()) throw new BillingError('Автопродление доступно только для активной подписки.');
+            if ($enable) {
+                if (($this->config['AUTORENEW_ENABLED']??'0')!=='1') throw new BillingError('Автопродление отключено администратором.');
+                $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$sub['plan_id']]);
+                if (!$plan) throw new BillingError('Тариф подписки больше недоступен.');
+                $daysBefore=max(1,min(14,(int)($this->config['AUTORENEW_DAYS_BEFORE']??3)));
+                $renewAt=(int)$sub['expires_at']-$daysBefore*86400;
+                if ($renewAt<time()) $renewAt=time()+60;
+                $this->db->execute('UPDATE subscriptions SET auto_renew=1,renew_plan_id=?,renew_price_minor=?,renew_at=?,renew_order_id=NULL,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?',[$plan['id'],(int)$plan['price_minor'],$renewAt,$subscriptionId]);
+                $this->audit($userId,'subscription.autorenew_on',$subscriptionId);
+            } else {
+                $this->db->execute('UPDATE subscriptions SET auto_renew=0,renew_at=NULL,renew_order_id=NULL WHERE id=?',[$subscriptionId]);
+                $this->audit($userId,'subscription.autorenew_off',$subscriptionId);
+            }
+            return $this->db->one('SELECT * FROM subscriptions WHERE id=?',[$subscriptionId]);
         });
     }
     public function audit(string $actor,string $action,string $subject): void
