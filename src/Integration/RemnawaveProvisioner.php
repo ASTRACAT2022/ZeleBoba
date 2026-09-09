@@ -19,8 +19,10 @@ final class RemnawaveProvisioner implements Provisioner
             if ($response->getStatusCode()===409) $response=$this->request('GET','/api/users/by-username/'.$username);
         }
         $user=$response->toArray()['response'];
-        if (($user['username']??'')!==$username || empty($user['uuid']) || empty($user['subscriptionUrl']) || !str_starts_with($user['subscriptionUrl'],'https://')) throw new \RuntimeException('Invalid Remnawave response');
-        return ['id'=>$user['uuid'],'url'=>$user['subscriptionUrl']];
+        // Panel returns id (int) and shortUuid; subscriptionUrl is the client link.
+        $remoteId=$user['id']??$user['shortUuid']??$user['uuid']??null;
+        if (($user['username']??'')!==$username || empty($remoteId) || empty($user['subscriptionUrl']) || !str_starts_with($user['subscriptionUrl'],'https://')) throw new \RuntimeException('Invalid Remnawave response');
+        return ['id'=>(string)$remoteId,'url'=>$user['subscriptionUrl']];
     }
     public function extend(array $subscription): void
     {
@@ -29,9 +31,9 @@ final class RemnawaveProvisioner implements Provisioner
         $response=$this->request('GET','/api/users/by-username/'.$username);
         if ($response->getStatusCode()===404) throw new \RuntimeException('Remnawave user not found for renewal');
         $user=$response->toArray()['response'];
-        $uuid=$user['uuid']??null;
-        if (!$uuid) throw new \RuntimeException('Invalid Remnawave response for renewal');
-        $this->request('PATCH','/api/users/'.$uuid,[
+        $id=$user['id']??null;
+        if (!$id) throw new \RuntimeException('Invalid Remnawave response for renewal');
+        $this->request('PATCH','/api/users',['id'=>(int)$id,
             'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$subscription['expires_at']),
             'trafficLimitBytes'=>(int)($subscription['traffic_bytes']??0),
             'hwidDeviceLimit'=>(int)($subscription['devices']??3),

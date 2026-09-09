@@ -76,8 +76,8 @@ final class BillingTest extends TestCase
     }
     public function testRemnawaveRecoversPreviouslyCreatedUser():void
     {
-        $calls=0;$http=new MockHttpClient(function($method,$url)use(&$calls){$calls++;self::assertSame('GET',$method);self::assertStringContainsString('/api/users/by-username/zb_abc',$url);return new MockResponse(json_encode(['response'=>['username'=>'zb_abc','uuid'=>'remote-id','subscriptionUrl'=>'https://sub.example/key']]));});
-        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');$result=$p->provision(['id'=>'abc']);self::assertSame('remote-id',$result['id']);self::assertSame(1,$calls);
+        $calls=0;$http=new MockHttpClient(function($method,$url)use(&$calls){$calls++;self::assertSame('GET',$method);self::assertStringContainsString('/api/users/by-username/zb_abc',$url);return new MockResponse(json_encode(['response'=>['username'=>'zb_abc','id'=>123,'shortUuid'=>'abc123','subscriptionUrl'=>'https://sub.example/key']]));});
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');$result=$p->provision(['id'=>'abc']);self::assertSame('123',$result['id']);self::assertSame(1,$calls);
     }
     public function testProviderStatusIsFetchedBeforeSettlement():void
     {
