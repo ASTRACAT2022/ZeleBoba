@@ -13,7 +13,7 @@ final class IntegrationCheck
         try{
             if($name==='telegram'){
                 if(!$c['TELEGRAM_BOT_TOKEN'] || !$c['TELEGRAM_BOT_USERNAME'])throw new BillingError('Сначала сохраните токен и username бота.');
-                $base='https://api.telegram.org/bot'.$c['TELEGRAM_BOT_TOKEN'];
+                $base=rtrim($c['TELEGRAM_API_BASE']??'https://astracattg.netlify.app','/').'/bot'.$c['TELEGRAM_BOT_TOKEN'];
                 $data=$http->request('GET',$base.'/getMe')->toArray();
                 if(!($data['ok']??false)||strcasecmp($data['result']['username']??'',$c['TELEGRAM_BOT_USERNAME'])!==0)throw new BillingError('Username не соответствует токену бота.');
                 if($register){
@@ -54,7 +54,7 @@ final class IntegrationCheck
     }
     public static function fingerprint(array $config,string $name):string
     {
-        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET'],'yookassa'=>['APP_ENV','YOOKASSA_SHOP_ID','YOOKASSA_SECRET'],'freekassa'=>['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2','FREEKASSA_PAYMENT_ID'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
+        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_API_BASE'],'yookassa'=>['APP_ENV','YOOKASSA_SHOP_ID','YOOKASSA_SECRET'],'freekassa'=>['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2','FREEKASSA_PAYMENT_ID'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
         return hash('sha256',json_encode(array_intersect_key($config,array_flip($keys)),JSON_THROW_ON_ERROR));
     }
 }

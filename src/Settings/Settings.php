@@ -13,7 +13,7 @@ final class Settings
         'YOOKASSA_RECEIPT'=>'0','YOOKASSA_VAT_CODE'=>'1','YOOKASSA_TAX_SYSTEM'=>'',
         'FREEKASSA_SHOP_ID'=>'','FREEKASSA_API_KEY'=>'','FREEKASSA_SECRET2'=>'','FREEKASSA_PAYMENT_ID'=>'44',
         'REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>'',
-        'TELEGRAM_BOT_TOKEN'=>'','TELEGRAM_BOT_USERNAME'=>'','TELEGRAM_WEBHOOK_SECRET'=>'',
+        'TELEGRAM_BOT_TOKEN'=>'','TELEGRAM_BOT_USERNAME'=>'','TELEGRAM_WEBHOOK_SECRET'=>'','TELEGRAM_API_BASE'=>'https://astracattg.netlify.app',
     ];
     public const SECRETS=['YOOKASSA_SECRET','FREEKASSA_API_KEY','FREEKASSA_SECRET2','REMNAWAVE_TOKEN','TELEGRAM_BOT_TOKEN','TELEGRAM_WEBHOOK_SECRET'];
     public function __construct(private Database $db,public readonly Vault $vault) {}
@@ -77,6 +77,8 @@ final class Settings
         if ($v['TELEGRAM_BOT_USERNAME']!=='' && !preg_match('/^[a-zA-Z0-9_]{2,29}bot$/iD',$v['TELEGRAM_BOT_USERNAME'])) throw new BillingError('Введите username бота без @.');
         if ($v['TELEGRAM_BOT_TOKEN']!=='' && !preg_match('/^[0-9]+:[a-zA-Z0-9_-]{20,}$/D',$v['TELEGRAM_BOT_TOKEN'])) throw new BillingError('Некорректный токен Telegram.');
         if ($v['TELEGRAM_WEBHOOK_SECRET']!=='' && !preg_match('/^[a-zA-Z0-9_-]{32,256}$/D',$v['TELEGRAM_WEBHOOK_SECRET'])) throw new BillingError('Секрет webhook: 32–256 латинских символов, цифр, _ или -.');
+        if ($v['TELEGRAM_API_BASE']!=='' && (!filter_var($v['TELEGRAM_API_BASE'],FILTER_VALIDATE_URL) || !str_starts_with($v['TELEGRAM_API_BASE'],'https://') || parse_url($v['TELEGRAM_API_BASE'],PHP_URL_USER)!==null || parse_url($v['TELEGRAM_API_BASE'],PHP_URL_FRAGMENT)!==null || parse_url($v['TELEGRAM_API_BASE'],PHP_URL_QUERY)!==null)) throw new BillingError('TELEGRAM_API_BASE: нужен HTTPS URL без параметров и фрагмента.');
+        if ($v['TELEGRAM_API_BASE']!=='' && !in_array(parse_url($v['TELEGRAM_API_BASE'],PHP_URL_PATH),[null,'','/'],true)) throw new BillingError('TELEGRAM_API_BASE: укажите корневой URL без пути, например https://astracattg.netlify.app');
         if (!in_array($v['YOOKASSA_VAT_CODE'],array_map('strval',range(1,12)),true) || !in_array($v['YOOKASSA_TAX_SYSTEM'],['','1','2','3','4','5','6'],true)) throw new BillingError('Проверьте параметры чека.');
         if ($v['FREEKASSA_SHOP_ID']!=='' && !preg_match('/^[0-9]{1,10}$/D',$v['FREEKASSA_SHOP_ID'])) throw new BillingError('ID магазина FreeKassa: только цифры.');
         if ($v['FREEKASSA_PAYMENT_ID']!=='' && !preg_match('/^[0-9]{1,5}$/D',$v['FREEKASSA_PAYMENT_ID'])) throw new BillingError('ID платёжной системы FreeKassa: только цифры.');

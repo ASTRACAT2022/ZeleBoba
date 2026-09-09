@@ -5,7 +5,7 @@ use App\Integration\{Payments,Provisioner};
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app') {}
     public function handle(string $topic,array $payload): void
     {
         match ($topic) {
@@ -13,6 +13,7 @@ final class Worker
             'payment.verify'=>$this->payments->refresh($payload['payment_id']),
             'subscription.provision'=>$this->provision($payload['subscription_id']),
             'telegram.send'=>$this->send($payload),
+            'telegram.answer'=>$this->answer($payload),
             default=>throw new \RuntimeException('Unknown outbox topic')
         };
     }
@@ -33,7 +34,13 @@ final class Worker
     private function send(array $payload): void
     {
         if (!$this->botToken) throw new \RuntimeException('Telegram is not configured');
-        $result=$this->http->request('POST','https://api.telegram.org/bot'.$this->botToken.'/sendMessage',['json'=>$payload,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray();
+        $result=$this->http->request('POST',rtrim($this->telegramApiBase,'/').'/bot'.$this->botToken.'/sendMessage',['json'=>$payload,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray();
         if (!($result['ok']??false)) throw new \RuntimeException('Telegram rejected message');
+    }
+    private function answer(array $payload): void
+    {
+        if (!$this->botToken) throw new \RuntimeException('Telegram is not configured');
+        $result=$this->http->request('POST',rtrim($this->telegramApiBase,'/').'/bot'.$this->botToken.'/answerCallbackQuery',['json'=>$payload,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray();
+        if (!($result['ok']??false)) throw new \RuntimeException('Telegram rejected callback answer');
     }
 }
