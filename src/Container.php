@@ -5,7 +5,7 @@ use App\Infrastructure\{Database,Outbox,Worker};
 use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService};
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
-use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService};
+use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService,Mailer};
 use App\Integration\Payment\{ProviderRegistry,CryptoBotProvider,TelegramStarsProvider,LavaProvider,WataProvider,HeleketProvider,PlategaProvider,TributeProvider,YooKassaProvider,FreeKassaProvider,MulenPayProvider,Pal24Provider,CloudPaymentsProvider,KassaAiProvider,RioPayProvider,SeverPayProvider,PayPearProvider,RollyPayProvider,OverpayProvider,AuraPayProvider,EtoplatezhiProvider,AntilopayProvider,JupiterProvider,DonutProvider,CisPayProvider,TabPayProvider,ParityPayProvider};
 use Symfony\Component\HttpClient\HttpClient;
 final class Container
@@ -36,6 +36,7 @@ final class Container
     public readonly CompensationService $compensations;
     public readonly Payments $payments;
     public readonly PaymentService $paymentService;
+    public readonly Mailer $mailer;
     public readonly ProviderRegistry $providers;
     public readonly Worker $worker;
     public readonly Auth $auth;
@@ -83,6 +84,7 @@ final class Container
         $this->providers=new ProviderRegistry($http,$config);
         foreach ([new YooKassaProvider($http,$config),new FreeKassaProvider($http,$config,$this->db),new CryptoBotProvider($http,$config),new TelegramStarsProvider($http,$config),new LavaProvider($http,$config),new WataProvider($http,$config),new HeleketProvider($http,$config),new PlategaProvider($http,$config),new TributeProvider($http,$config),new MulenPayProvider($http,$config),new Pal24Provider($http,$config),new CloudPaymentsProvider($http,$config),new KassaAiProvider($http,$config),new RioPayProvider($http,$config),new SeverPayProvider($http,$config),new PayPearProvider($http,$config),new RollyPayProvider($http,$config),new OverpayProvider($http,$config),new AuraPayProvider($http,$config),new EtoplatezhiProvider($http,$config),new AntilopayProvider($http,$config),new JupiterProvider($http,$config),new DonutProvider($http,$config),new CisPayProvider($http,$config),new TabPayProvider($http,$config),new ParityPayProvider($http,$config)] as $provider) $this->providers->register($provider);
         $this->paymentService=new PaymentService($this->db,$this->billing,$http,$config,$this->providers);
+        $this->mailer=new Mailer($this->db,$config);
         $tgBase=rtrim($config['TELEGRAM_API_BASE']??'https://astracattg.netlify.app','/');
         if ($tgBase==='') $tgBase='https://astracattg.netlify.app';
         $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations);

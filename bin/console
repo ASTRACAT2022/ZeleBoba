@@ -6,6 +6,7 @@ use App\Infrastructure\Database;
 $c=require dirname(__DIR__).'/bootstrap.php';
 $cli=new Application('ZeleBoba Billing','0.2.0');
 $cli->add((new Command('db:migrate'))->setDescription('Apply versioned migrations')->setCode(function(InputInterface $i,OutputInterface $o) use($c){$c->db->migrate(dirname(__DIR__).'/migrations');$o->writeln('Migrations applied.');return 0;}));
+$cli->add((new Command('mailer:flush'))->setDescription('Send pending transactional emails from the queue')->setCode(function(InputInterface $i,OutputInterface $o) use($c){$r=$c->mailer->flushQueue(200);$o->writeln('Sent: '.$r['sent'].', failed: '.$r['failed']);return $r['failed']?1:0;}));
 $cli->add((new Command('db:seed'))->setDescription('Create initial example plans; never creates accounts')->setCode(function(InputInterface $i,OutputInterface $o) use($c){
     foreach ([['basic','Старт',19900,30,100*1073741824,3],['plus','Свобода',49900,90,0,5],['max','Горизонт',159900,365,0,10]] as [$id,$name,$price,$days,$traffic,$devices]) $c->db->execute('INSERT INTO plans(id,name,price_minor,currency,duration_days,traffic_bytes,devices,active) VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(id) DO NOTHING',[$id,$name,$price,'RUB',$days,$traffic,$devices]);
     $o->writeln('Plans seeded.');return 0;

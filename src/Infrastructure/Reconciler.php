@@ -67,6 +67,8 @@ final class Reconciler
                 }
             }
             $db->execute("UPDATE subscriptions SET status='expired' WHERE status='active' AND expires_at<=?",[time()]);
+            // Flush pending transactional emails (registration welcome, password reset)
+            try { $this->app->mailer->flushQueue(50); } catch (\Throwable $e) { error_log(json_encode(['event'=>'mail.flush.failed','error'=>get_class($e)])); }
             foreach(['sessions','telegram_links','login_challenges','mfa_enrollments','rate_limits'] as $table)$db->execute("DELETE FROM $table WHERE expires_at<=?",[time()]);
             $db->execute("DELETE FROM outbox WHERE status='done' AND created_at<?",[time()-30*86400]);
             $db->execute('DELETE FROM telegram_updates WHERE created_at<?',[time()-7*86400]);

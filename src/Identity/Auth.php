@@ -15,6 +15,33 @@ final class Auth
         catch (\PDOException $e) { if (in_array($e->getCode(),['23000','23505'])) throw new BillingError('Не удалось создать аккаунт с этой почтой.'); throw $e; }
         return $id;
     }
+    /** Create a password-reset token (returns raw token; store hash). */
+    public function createPasswordReset(string $email): ?string
+    {
+        $user=$this->db->one('SELECT id FROM users WHERE email=?',[mb_strtolower(trim($email))]);
+        if (!$user) return null; // never reveal whether the email exists
+        $raw=bin2hex(random_bytes(32));
+        $this->db->execute('INSERT INTO password_resets(id,user_id,token_hash,expires_at,created_at) VALUES(?,?,?,?,?)',[Database::id(),$user['id'],hash('sha256',$raw),time()+86400,time()]);
+        return $raw;
+    }
+    /** Validate a reset token; returns user id or null. */
+    public function validResetToken(string $token): ?string
+    {
+        $row=$this->db->one('SELECT user_id FROM password_resets WHERE token_hash=? AND expires_at>? AND consumed_at IS NULL',[hash('sha256',$token),time()]);
+        return $row['user_id']??null;
+    }
+    /** Apply a new password for a reset token; consumes the token. */
+    public function applyPasswordReset(string $token,string $password): bool
+    {
+        if (strlen($password)<12 || strlen($password)>128) throw new BillingError('Пароль должен быть от 12 до 128 символов.');
+        $uid=$this->validResetToken($token);
+        if (!$uid) return false;
+        $this->db->transaction(function()use($token,$password,$uid){
+            $this->db->execute('UPDATE users SET password_hash=? WHERE id=?',[password_hash($password,PASSWORD_ARGON2ID),$uid]);
+            $this->db->execute('UPDATE password_resets SET consumed_at=? WHERE token_hash=?',[time(),hash('sha256',$token)]);
+        });
+        return true;
+    }
     public function login(string $email,string $password): string
     {
         $user=$this->db->one('SELECT * FROM users WHERE email=?',[mb_strtolower(trim($email))]);
