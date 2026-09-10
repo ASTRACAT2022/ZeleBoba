@@ -22,7 +22,15 @@ final class IntegrationCheck
                     if(!($r['ok']??false))throw new BillingError('Telegram не принял webhook.');
                 }
                 $info=$http->request('GET',$base.'/getWebhookInfo')->toArray();
-                if(($info['result']['url']??'')!==rtrim($c['APP_URL'],'/').'/webhooks/telegram')throw new BillingError('Бот доступен, но webhook не зарегистрирован на этот кабинет.');
+                $webhookUrl=$info['result']['url']??'';
+                $expected=rtrim($c['APP_URL'],'/').'/webhooks/telegram';
+                if($webhookUrl!==$expected){
+                    // Polling mode (this host cannot receive inbound Telegram
+                    // connections — no IPv6; api.telegram.org unreachable). The
+                    // bot runs telegram:poll with a fresh heartbeat instead.
+                    $hb=$this->app->db->one('SELECT seen_at FROM runtime_heartbeats WHERE name=?',['telegram']);
+                    if(!$hb || (int)$hb['seen_at']<time()-180)throw new BillingError('Бот доступен, но webhook не зарегистрирован и polling не активен.');
+                }
             }elseif($name==='yookassa'){
                 if(!$c['YOOKASSA_SHOP_ID']||!$c['YOOKASSA_SECRET'])throw new BillingError('Заполните магазин и ключ.');
                 $data=$http->request('GET','https://api.yookassa.ru/v3/me',['auth_basic'=>[$c['YOOKASSA_SHOP_ID'],$c['YOOKASSA_SECRET']]])->toArray();
@@ -31,14 +39,19 @@ final class IntegrationCheck
             }elseif($name==='freekassa'){
                 if(!$c['FREEKASSA_SHOP_ID']||!$c['FREEKASSA_API_KEY'])throw new BillingError('Заполните ID магазина и API ключ FreeKassa.');
                 $shopId=(int)$c['FREEKASSA_SHOP_ID']; $apiKey=(string)$c['FREEKASSA_API_KEY'];
-                $nonce=(int)(microtime(true)*1000);
+                // FreeKassa rejects nonces <= the last one it saw. Use the same
+                // PostgreSQL sequence as the provider (strictly monotonic, atomic).
+                $row=$this->app->db->one("SELECT nextval('freekassa_nonce_seq') AS v");
+                $nonce=(int)($row['v'] ?? (int)(microtime(true)*1000));
                 $params=['shopId'=>$shopId,'nonce'=>$nonce];
                 ksort($params);
                 $sign=hash_hmac('sha256', implode('|', array_map('strval', array_values($params))), $apiKey);
                 $params['signature']=$sign;
-                $data=$http->request('POST','https://api.fk.life/v1/balance',['json'=>$params])->toArray(false);
+                // /v1/balance is not a real endpoint; /v1/orders is the documented
+                // status call (Django used it the same way).
+                $data=$http->request('POST','https://api.fk.life/v1/orders',['json'=>$params])->toArray(false);
                 if(($data['type']??'')==='error') throw new BillingError('FreeKassa: '.($data['error']??'ошибка авторизации'));
-                if(($data['type']??'')!=='success' && !isset($data['balance'])) throw new BillingError('FreeKassa не вернула баланс.');
+                if(($data['type']??'')!=='success') throw new BillingError('FreeKassa не вернула список заказов.');
             }elseif($name==='remnawave'){
                 if(!$c['REMNAWAVE_URL']||!$c['REMNAWAVE_TOKEN']||!$c['REMNAWAVE_SQUAD_UUID'])throw new BillingError('Заполните URL, токен и UUID группы.');
                 $data=$http->request('GET',rtrim($c['REMNAWAVE_URL'],'/').'/api/internal-squads',['auth_bearer'=>$c['REMNAWAVE_TOKEN']])->toArray();
