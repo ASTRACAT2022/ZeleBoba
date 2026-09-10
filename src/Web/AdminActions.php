@@ -68,6 +68,13 @@ trait AdminActions
         if($handler==='admin-broadcast-create'){
             $this->app->broadcasts->create($input->get('target_type',''),$input->get('message_text',''),$uid,$this->user['email']??'admin',$input->get('category','system'));return new RedirectResponse('/admin/broadcasts',303);
         }
+        if($handler==='admin-compensations')return $this->render('admin-compensations',['compensations'=>$this->app->compensations->list()]);
+        if($handler==='admin-compensation-create'){
+            $kind=$input->get('kind','');
+            $value=$input->getInt('value',0);
+            if($kind==='balance')$value*=100;
+            $this->app->compensations->create($input->get('segment',''),$kind,$value,$input->get('reason',''),$uid,$this->user['email']??'admin');return new RedirectResponse('/admin/compensations',303);
+        }
         if($handler==='admin-channels')return $this->render('admin-channels',['channels'=>$this->app->channels->list()]);
         if($handler==='admin-channel-add'){
             $this->app->channels->add($input->get('channel_id',''),$input->get('channel_link',''),$input->get('title',''),$uid);return new RedirectResponse('/admin/channels',303);

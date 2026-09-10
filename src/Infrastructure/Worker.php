@@ -6,7 +6,7 @@ use App\Billing\TopupService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null) {}
     public function handle(string $topic,array $payload): void
     {
         match ($topic) {
@@ -23,6 +23,8 @@ final class Worker
             'gift.create'=>$this->giftCreate($payload),
             'broadcast.run'=>$this->broadcastRun($payload['broadcast_id']),
             'broadcast.send'=>$this->broadcastSend($payload['broadcast_id'],$payload['chat_id'],$payload['text']),
+            'compensation.run'=>$this->compensationRun($payload['compensation_id']),
+            'compensation.grant'=>$this->compensationGrant($payload['compensation_id'],$payload['user_id']),
             'telegram.send'=>$this->send($payload),
             'telegram.answer'=>$this->answer($payload),
             default=>throw new \RuntimeException('Unknown outbox topic')
@@ -31,6 +33,14 @@ final class Worker
     private function broadcastRun(string $id): void
     {
         if ($this->broadcasts) $this->broadcasts->run($id);
+    }
+    private function compensationRun(string $id): void
+    {
+        if ($this->compensations) $this->compensations->run($id);
+    }
+    private function compensationGrant(string $id, string $userId): void
+    {
+        if ($this->compensations) $this->compensations->grant($id, $userId);
     }
     private function broadcastSend(string $id, string $chatId, string $text): void
     {

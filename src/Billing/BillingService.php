@@ -79,7 +79,7 @@ final class BillingService
             } else {
                 $sub=Database::id();
                 // Each purchase is an independent subscription unless it is a renewal order.
-                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at) VALUES(?,?,?,'provisioning',?,?)",[$sub,$orderId,$order['user_id'],$now+(int)$order['duration_days']*86400,$now]);
+                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit) VALUES(?,?,?,'provisioning',?,?,?,?)",[$sub,$orderId,$order['user_id'],$now+(int)$order['duration_days']*86400,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices']]);
                 $this->outbox->enqueue('subscription.provision','provision:'.$sub,['subscription_id'=>$sub]);
             }
             $this->audit('provider:'.$provider,'payment.settled',$orderId);

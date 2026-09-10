@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace App;
 use App\Infrastructure\{Database,Outbox,Worker};
-use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService};
+use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService};
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService};
@@ -33,6 +33,7 @@ final class Container
     public readonly BackupService $backups;
     public readonly MaintenanceService $maintenance;
     public readonly UserAdminService $userAdmin;
+    public readonly CompensationService $compensations;
     public readonly Payments $payments;
     public readonly PaymentService $paymentService;
     public readonly ProviderRegistry $providers;
@@ -76,6 +77,7 @@ final class Container
         $this->backups=new BackupService($this->db,dirname(__DIR__).'/var/backups');
         $this->maintenance=new MaintenanceService($this->db);
         $this->userAdmin=new UserAdminService($this->db,$this->wallet);
+        $this->compensations=new CompensationService($this->db,$this->outbox,$this->wallet);
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
         $this->providers=new ProviderRegistry($http,$config);
@@ -83,7 +85,7 @@ final class Container
         $this->paymentService=new PaymentService($this->db,$this->billing,$http,$config,$this->providers);
         $tgBase=rtrim($config['TELEGRAM_API_BASE']??'https://astracattg.netlify.app','/');
         if ($tgBase==='') $tgBase='https://astracattg.netlify.app';
-        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts);
+        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations);
         $this->auth=new Auth($this->db);$this->mfa=new Mfa($this->db,$this->settings->vault);
         $this->telegramLogin=new TelegramLogin($this->db,$this->auth);
         $this->telegram=new Telegram($this->db,$this->outbox,$this->billing,$config['APP_URL'],$this->telegramLogin,$tgBase);
