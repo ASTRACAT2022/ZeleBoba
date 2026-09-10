@@ -50,7 +50,7 @@ final class Auth
     }
     public function session(string $raw): ?array
     {
-        return $this->db->one('SELECT u.id,u.email,u.telegram_id,u.role,s.csrf,s.admin_verified_until,CASE WHEN u.totp_secret IS NULL THEN 0 ELSE 1 END AS mfa_enabled FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.expires_at>? AND u.disabled=0',[hash('sha256',$raw),time()]);
+        return $this->db->one('SELECT u.id,u.email,u.telegram_id,u.role,u.balance_kopeks,s.csrf,s.admin_verified_until,CASE WHEN u.totp_secret IS NULL THEN 0 ELSE 1 END AS mfa_enabled FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.expires_at>? AND u.disabled=0',[hash('sha256',$raw),time()]);
     }
     public function logout(string $raw): void { $this->db->execute('DELETE FROM sessions WHERE id=?',[hash('sha256',$raw)]); }
     public function throttle(string $key,int $limit,int $seconds=900): void

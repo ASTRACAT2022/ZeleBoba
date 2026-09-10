@@ -5,7 +5,9 @@ use App\Infrastructure\{Database,Outbox};
 use App\Billing\{BillingService,BillingError};
 final class Telegram
 {
+    private ?\App\Container $app = null;
     public function __construct(private Database $db,private Outbox $outbox,private BillingService $billing,private string $appUrl, private ?\App\Identity\TelegramLogin $login=null, private string $apiBase='https://astracattg.netlify.app') {}
+    public function setApp(\App\Container $app): void { $this->app = $app; }
     public function apiBase(): string { return rtrim($this->apiBase,'/')===''?'https://astracattg.netlify.app':rtrim($this->apiBase,'/'); }
     public function receive(array $update): void
     {
@@ -26,6 +28,43 @@ final class Telegram
             if($this->login->pending($token)){
                 $this->db->transaction(fn()=> $this->outbox->enqueue('telegram.send','login-prompt:'.$id,['chat_id'=>$tg,'text'=>'Подтвердите вход на '.parse_url($this->appUrl,PHP_URL_HOST).'. Подтверждайте только запрос, который вы только что начали в своём браузере.','reply_markup'=>['inline_keyboard'=>[[['text'=>'Это я, войти','callback_data'=>'login:'.$token]]]]]));
             }
+            return;
+        }
+        if(str_starts_with($text,'/start ref_') || str_starts_with($text,'start ref_')){
+            $code=substr($text,strpos($text,'ref_')+4);
+            $user=$this->ensureUser($tg);
+            if($user && $this->app){
+                $this->app->referrals->attachReferrer($user['id'],$code);
+            }
+            $this->sendWelcome($id,$tg);
+            return;
+        }
+        if(str_starts_with($text,'/start GIFT_') || str_starts_with($text,'start GIFT_')){
+            $code=substr($text,strpos($text,'GIFT_'));
+            $user=$this->ensureUser($tg);
+            if($user && $this->app){
+                try {
+                    $purchase=$this->app->gifts->claim($user['id'],$code);
+                    $this->reply($id,$tg,'🎁 Подарок активирован! Подписка на '.$purchase['period_days'].' дней оформляется. Отправьте /status для проверки.',$this->mainMenu());
+                } catch (BillingError $e) {
+                    $this->reply($id,$tg,'🎁 '.$e->getMessage(),$this->mainMenu());
+                }
+            }
+            return;
+        }
+        if(str_starts_with($text,'/start ') || str_starts_with($text,'start ')){
+            $param=trim(substr($text,strpos($text,' ')+1));
+            if($param!=='' && !str_starts_with($param,'login_') && !str_starts_with($param,'ref_') && !str_starts_with($param,'GIFT_') && $this->app){
+                $user=$this->ensureUser($tg);
+                if($user){
+                    $campaign=$this->app->campaigns->register($user['id'],$param);
+                    if($campaign){
+                        $this->reply($id,$tg,'🎁 Бонус кампании «'.$campaign['name'].'» активирован!',$this->mainMenu());
+                        return;
+                    }
+                }
+            }
+            $this->sendWelcome($id,$tg);
             return;
         }
         // Normalize commands: support /start, /help, /plans, /buy, /status, /orders, /subs, /cabinet, /support, /link
@@ -60,6 +99,56 @@ final class Telegram
         }
         if($command==='/orders'||$command==='orders'){
             $this->sendOrders($id,$tg,$user); return;
+        }
+        if(str_starts_with($command,'/promo')||str_starts_with($text,'/promo ')){
+            $arg=trim(substr($text,6));
+            if($arg===''){ $this->reply($id,$tg,'Отправьте /promo <код>, например /promo SUMMER2026',$this->mainMenu()); return; }
+            $result=$this->app->promocodes->activate($user['id'],$arg);
+            $this->reply($id,$tg,$result['success']?$result['description']:$this->promoError($result['error']),$this->mainMenu());
+            return;
+        }
+        if(str_starts_with($command,'/gift_buy')||str_starts_with($text,'/gift_buy ')){
+            $arg=trim(substr($text,9));
+            if($arg===''||!$this->app){ $this->reply($id,$tg,'Отправьте /gift_buy <id тарифа>.',$this->mainMenu()); return; }
+            try {
+                $purchase=$this->app->gifts->purchaseFromBalance($user['id'],$arg,'tg-gift:'.$id.':'.$arg,null,null,null,'bot');
+                $code=$this->app->gifts->publicCode($purchase['token']);
+                $this->reply($id,$tg,'🎁 Подарок куплен! Код: <code>'.$code.'</code>'."\nОтправьте его другу. Активировать собственный подарок нельзя.",$this->mainMenu());
+            } catch (BillingError $e) { $this->reply($id,$tg,$e->getMessage(),$this->mainMenu()); }
+            return;
+        }
+        if(str_starts_with($command,'/gift_claim')||str_starts_with($text,'/gift_claim ')){
+            $arg=trim(substr($text,11));
+            if($arg===''||!$this->app){ $this->reply($id,$tg,'Отправьте /gift_claim <код>.',$this->mainMenu()); return; }
+            try {
+                $purchase=$this->app->gifts->claim($user['id'],$arg);
+                $this->reply($id,$tg,'🎁 Подарок активирован! Подписка на '.$purchase['period_days'].' дней оформляется. Отправьте /status для проверки.',$this->mainMenu());
+            } catch (BillingError $e) { $this->reply($id,$tg,'🎁 '.$e->getMessage(),$this->mainMenu()); }
+            return;
+        }
+        if(str_starts_with($command,'/trial')||str_starts_with($text,'/trial ')){
+            $arg=trim(substr($text,6));
+            if($arg===''||!$this->app){ $this->reply($id,$tg,'Отправьте /trial <id тарифа>.',$this->mainMenu()); return; }
+            try {
+                $sub=$this->app->trials->start($user['id'],$arg);
+                $this->reply($id,$tg,'🎁 Триал активирован! Подписка действует до '.gmdate('d.m.Y',(int)$sub['expires_at']).' UTC. Отправьте /status для проверки.',$this->mainMenu());
+            } catch (BillingError $e) { $this->reply($id,$tg,$e->getMessage(),$this->mainMenu()); }
+            return;
+        }
+        if($command==='/gift'||$command==='gift'||$command==='/gifts'||$command==='gifts'){
+            $this->sendGifts($id,$tg,$user); return;
+        }
+        if($command==='/referral'||$command==='referral'||$command==='/ref'||$command==='ref'){
+            $this->sendReferral($id,$tg,$user); return;
+        }
+        if(str_starts_with($command,'/topup')||str_starts_with($text,'/topup ')){
+            $arg=trim(substr($text,6));
+            if($arg===''){ $this->sendBalance($id,$tg,$user); return; }
+            $this->topupAmount($id,$tg,$user,$arg);
+            return;
+        }
+        if($command==='/balance'||$command==='balance'||$command==='/topup'||$command==='topup'){
+            $this->sendBalance($id,$tg,$user); return;
         }
         if($command==='/subs'||$command==='/mysubs'||$command==='subs'){
             $this->sendSubs($id,$tg,$user); return;
@@ -117,12 +206,12 @@ final class Telegram
     private function sendWelcome(int $id,string $tg): void
     {
         $this->ensureUser($tg);
-        $text="Привет! Это дублер веб-кабинета.\nЗдесь можно купить подписку, оплатить и получить доступ — всё как на сайте.\n\nКабинет: ".$this->appUrl;
+        $text=$this->app?$this->app->branding->welcomeText():"Привет! Это дублер веб-кабинета.\nЗдесь можно купить подписку, оплатить и получить доступ — всё как на сайте.\n\nКабинет: ".$this->appUrl;
         $this->reply($id,$tg,$text,$this->mainMenu());
     }
     private function sendHelp(int $id,string $tg): void
     {
-        $text="Команды:\n/plans — тарифы\n/buy <id> — купить\n/status — подписки + pending заказы\n/orders — мои заказы\n/subs — мои подписки\n/cabinet — открыть веб-кабинет\n/login — вход в кабинет\n/support — поддержка\n\nКабинет и бот работают в тандеме: заказы и подписки общие.";
+        $text=$this->app?$this->app->branding->helpText():"Команды:\n/plans — тарифы\n/buy <id> — купить\n/status — подписки + pending заказы\n/orders — мои заказы\n/subs — мои подписки\n/cabinet — открыть веб-кабинет\n/login — вход в кабинет\n/support — поддержка\n\nКабинет и бот работают в тандеме: заказы и подписки общие.";
         $this->reply($id,$tg,$text,$this->mainMenu());
     }
     private function sendPlans(int $id,string $tg,?string $prefix=null): void
@@ -202,6 +291,81 @@ final class Telegram
         $keyboard[]= [['text'=>'Тарифы','callback_data'=>'menu:plans'],['text'=>'Меню','callback_data'=>'menu:main']];
         if($orders) $text.="\n\nНеоплаченные заказы — нажмите чтобы открыть:";
         $this->reply($id,$tg,$text,['inline_keyboard'=>$keyboard]);
+    }
+    private function promoError(string $key): string
+    {
+        return match ($key) {
+            'not_found' => 'Промокод не найден.',
+            'inactive' => 'Промокод неактивен.',
+            'used' => 'Промокод уже использован.',
+            'not_yet_valid' => 'Промокод ещё не действует.',
+            'expired' => 'Срок действия промокода истёк.',
+            'already_used_by_user' => 'Вы уже использовали этот промокод.',
+            'daily_limit' => 'Слишком много активаций за сутки.',
+            'not_first_purchase' => 'Промокод действует только для первой покупки.',
+            'active_discount_exists' => 'У вас уже есть активная скидка.',
+            'no_subscription_for_days' => 'Нет подписки для начисления дней.',
+            'trial_subscription_exists' => 'Триал недоступен: у вас уже есть подписка.',
+            'traffic_not_applicable' => 'Трафик не начислен: у подписки безлимит.',
+            default => 'Не удалось активировать промокод.',
+        };
+    }
+    private function sendGifts(int $id,string $tg,array $user): void
+    {
+        if(!$this->app){ $this->reply($id,$tg,'Подарки недоступны.',$this->mainMenu()); return; }
+        $bought=$this->app->gifts->boughtBy($user['id']);
+        $lines=['🎁 Подарки'];
+        if($bought){
+            foreach($bought as $g){
+                $code=$this->app->gifts->publicCode($g['token']);
+                $lines[]='— '.$g['period_days'].' дн. · '.($g['status']==='delivered'?'активирован':'код: <code>'.$code.'</code>');
+            }
+        } else {
+            $lines[]='Пока нет купленных подарков.';
+        }
+        $lines[]='\nКупить подарок: /gift_buy <id тарифа> или в веб-кабинете.';
+        $lines[]='Активировать: /gift_claim <код>';
+        $this->reply($id,$tg,implode("\n",$lines),['inline_keyboard'=>[[['text'=>'Меню','callback_data'=>'menu:main']]]]);
+    }
+    private function sendReferral(int $id,string $tg,array $user): void
+    {
+        if(!$this->app){ $this->reply($id,$tg,'Реферальная программа недоступна.',$this->mainMenu()); return; }
+        $stats=$this->app->referrals->stats($user['id']);
+        $username=$this->app->config['TELEGRAM_BOT_USERNAME']??'';
+        $text='👥 Реферальная программа'."\n\nПриглашайте друзей и получайте комиссию с их пополнений.\n\nВаш код: <b>".$stats['code']."</b>\nПриглашено: ".count($stats['referrals'])."\nОплативших: ".$stats['paid_referrals']."\nЗаработано: ".Payments::decimal($stats['earnings_kopeks']).' ₽';
+        if($username!=='') $text.="\n\nСсылка: https://t.me/".$username.'?start=ref_'.$stats['code'];
+        $this->reply($id,$tg,$text,['inline_keyboard'=>[[['text'=>'Меню','callback_data'=>'menu:main']]]]);
+    }
+    private function sendBalance(int $id,string $tg,array $user): void
+    {
+        $balance=$this->db->one('SELECT balance_kopeks FROM users WHERE id=?',[$user['id']]);
+        $text='💰 Баланс: '.Payments::decimal((int)($balance['balance_kopeks']??0)).' ₽'."\n\nПополните баланс и покупайте подписки без повторной оплаты. Отправьте /topup <сумма>, например /topup 500.";
+        $keyboard=[];
+        if ($this->app) {
+            foreach ($this->app->providers->enabled() as $pid=>$provider) {
+                $keyboard[]=[['text'=>$provider->name(),'callback_data'=>'topup-provider:'.$pid]];
+            }
+        }
+        $keyboard[]=[['text'=>'Тарифы','callback_data'=>'menu:plans'],['text'=>'Меню','callback_data'=>'menu:main']];
+        $this->reply($id,$tg,$text,['inline_keyboard'=>$keyboard]);
+    }
+    private function topupAmount(int $id,string $tg,array $user,string $arg): void
+    {
+        $amount=filter_var(trim($arg),FILTER_VALIDATE_INT);
+        if ($amount===false || $amount<1 || $amount>1000000){ $this->reply($id,$tg,'Сумма пополнения: от 1 до 1 000 000 ₽. Пример: /topup 500',$this->mainMenu()); return; }
+        $provider=$this->db->one('SELECT value FROM app_settings WHERE name=?',['TOPUP_PROVIDER'])['value']??null;
+        try {
+            $topup=$this->app->topups->create($user['id'],$amount*100,'telegram:'.$id,$provider);
+        } catch (BillingError $e) { $this->reply($id,$tg,$e->getMessage(),$this->mainMenu()); return; }
+        if($topup['provider']==='demo'){
+            try { $this->app->topups->settle($topup['id'],'demo','demo_'.$topup['id'],(int)$topup['amount_kopeks'],$topup['currency']); } catch (BillingError) {}
+            $this->reply($id,$tg,'Баланс пополнен на '.Payments::decimal((int)$topup['amount_kopeks']).' ₽ (демо).',$this->mainMenu());
+            return;
+        }
+        $topup=$this->db->one('SELECT * FROM topups WHERE id=?',[$topup['id']]);
+        $keyboard=$topup['checkout_url']?[['text'=>'Оплатить','url'=>$topup['checkout_url']]]:[];
+        $keyboard[]=['text'=>'Обновить статус','callback_data'=>'topup:'.$topup['id']];
+        $this->reply($id,$tg,'Пополнение на '.Payments::decimal((int)$topup['amount_kopeks']).' ₽ создано.'.($topup['checkout_url']?"\nОплатите по ссылке ниже.":"\nГотовим ссылку — нажмите «Обновить статус»."),['inline_keyboard'=>[$keyboard,[['text'=>'Меню','callback_data'=>'menu:main']]]]);
     }
     private function sendOrders(int $id,string $tg,array $user): void
     {
@@ -287,6 +451,25 @@ final class Telegram
             $order=$this->db->one('SELECT * FROM orders WHERE id=? AND user_id=?',[$orderId,$user['id']]);
             if(!$order){ $this->reply($updateId,$tg,'Заказ не найден.',$this->mainMenu()); return; }
             $this->reply($updateId,$tg,$this->orderText($order)."\nКабинет: ".rtrim($this->appUrl,'/').'/orders/'.$order['id'],$this->orderKeyboard($order));
+            return;
+        }
+        if(str_starts_with($data,'topup-provider:')){
+            $pid=substr($data,15);
+            if(!$this->app || !$this->app->providers->has($pid)){ $this->reply($updateId,$tg,'Провайдер недоступен.',$this->mainMenu()); return; }
+            $this->db->execute('INSERT INTO app_settings VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',['TOPUP_PROVIDER',$pid,time()]);
+            $this->reply($updateId,$tg,'Способ оплаты: '.$this->app->providers->get($pid)->name().'. Отправьте /topup <сумма>.',$this->mainMenu());
+            return;
+        }
+        if(str_starts_with($data,'topup:')){
+            $topupId=substr($data,6);
+            if(!preg_match('/^[a-f0-9]{32}$/D',$topupId)){ $this->reply($updateId,$tg,'Пополнение не найдено.',$this->mainMenu()); return; }
+            $topup=$this->db->one('SELECT * FROM topups WHERE id=? AND user_id=?',[$topupId,$user['id']]);
+            if(!$topup){ $this->reply($updateId,$tg,'Пополнение не найдено.',$this->mainMenu()); return; }
+            if($topup['status']==='paid'){ $this->reply($updateId,$tg,'Средства зачислены на баланс.',$this->mainMenu()); return; }
+            if($topup['status']==='canceled'){ $this->reply($updateId,$tg,'Платёж отменён. Создайте новое пополнение: /topup <сумма>',$this->mainMenu()); return; }
+            $keyboard=$topup['checkout_url']?[['text'=>'Оплатить','url'=>$topup['checkout_url']]]:[];
+            $keyboard[]=['text'=>'Обновить статус','callback_data'=>'topup:'.$topup['id']];
+            $this->reply($updateId,$tg,'Пополнение на '.Payments::decimal((int)$topup['amount_kopeks']).' ₽.'.($topup['checkout_url']?"\nОплатите по ссылке ниже.":"\nГотовим ссылку — нажмите «Обновить статус»."),['inline_keyboard'=>[$keyboard,[['text'=>'Меню','callback_data'=>'menu:main']]]]);
             return;
         }
         if(str_starts_with($data,'autorenew:')){

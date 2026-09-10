@@ -41,6 +41,30 @@ final class RemnawaveProvisioner implements Provisioner
             'status'=>'ACTIVE',
         ]);
     }
+    public function setTraffic(array $subscription, int $trafficGb): void
+    {
+        if (!str_starts_with($this->baseUrl,'https://') || !$this->token) throw new \RuntimeException('Remnawave configuration missing');
+        $username='zb_'.$subscription['id'];
+        $user=$this->fetch($username);
+        if (!$user) throw new \RuntimeException('Remnawave user not found for traffic update');
+        $id=$user['id']??null;
+        if (!$id) throw new \RuntimeException('Invalid Remnawave response for traffic update');
+        $this->request('PATCH','/api/users',['id'=>(int)$id,
+            'trafficLimitBytes'=>(int)($subscription['traffic_bytes']??0)+$trafficGb*1073741824,
+        ]);
+    }
+    public function setDevices(array $subscription, int $devices): void
+    {
+        if (!str_starts_with($this->baseUrl,'https://') || !$this->token) throw new \RuntimeException('Remnawave configuration missing');
+        $username='zb_'.$subscription['id'];
+        $user=$this->fetch($username);
+        if (!$user) throw new \RuntimeException('Remnawave user not found for device update');
+        $id=$user['id']??null;
+        if (!$id) throw new \RuntimeException('Invalid Remnawave response for device update');
+        $this->request('PATCH','/api/users',['id'=>(int)$id,
+            'hwidDeviceLimit'=>(int)($subscription['device_limit']??$subscription['devices']??1)+$devices,
+        ]);
+    }
     public function fetch(string $username): ?array
     {
         $response=$this->request('GET','/api/users/by-username/'.$username);

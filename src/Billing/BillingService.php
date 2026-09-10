@@ -4,6 +4,7 @@ namespace App\Billing;
 use App\Infrastructure\{Database,Outbox};
 final class BillingService
 {
+    private ?\App\Billing\TopupService $topups = null;
     public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null) {}
     public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null, ?string $renewSubscriptionId=null): array
     {
@@ -77,6 +78,22 @@ final class BillingService
             }
             $this->audit('provider:'.$provider,'payment.settled',$orderId);
         });
+    }
+    /** Settle an order paid from the internal wallet balance (no provider payment). */
+    public function settleFromBalance(string $orderId, int $amount, string $currency): void
+    {
+        $order = $this->db->one('SELECT provider FROM orders WHERE id=?', [$orderId]);
+        $provider = $order['provider'] ?? 'balance';
+        $this->settle($orderId, $provider, 'balance_' . $orderId, $amount, $currency);
+    }
+    /** Settle a balance topup after provider verification. Delegates to TopupService. */
+    public function settleTopup(string $topupId, string $provider, string $paymentId, int $amount, string $currency): void
+    {
+        $this->topups?->settle($topupId, $provider, $paymentId, $amount, $currency);
+    }
+    public function setTopups(\App\Billing\TopupService $topups): void
+    {
+        $this->topups = $topups;
     }
     /** Enable or disable auto-renew for a subscription. Returns updated row. */
     public function setAutoRenew(string $userId,string $subscriptionId,bool $enable): array

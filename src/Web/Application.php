@@ -25,13 +25,13 @@ final class Application
         $this->request=$r; $this->user=null; $requestId=Database::id();
         try {
             $routes=new RouteCollection();
-            foreach ([['tg-start','/telegram/start',['POST']],['tg-status','/telegram/status',['GET']],['tg-finish','/telegram/finish',['POST']],['tg-magic','/telegram/magic',['GET','POST']],['security','/security',['GET']],['mfa-begin','/security/begin',['POST']],['mfa-enroll','/security/enroll',['POST']],['mfa-verify','/security/verify',['POST']],['admin-config','/admin/config',['GET']],['admin-config-save','/admin/config',['POST']],['admin-check','/admin/check/{id}',['POST']],['admin-readiness','/admin/readiness',['GET']],['admin-plans','/admin/plans',['GET']],['admin-plan-save','/admin/plans/{id}',['POST']],['admin-users','/admin/users',['GET']],['admin-user-toggle','/admin/users/{id}/toggle',['POST']],['admin-sync','/admin/sync',['POST']],['health','/health/live',['GET']],['ready','/health/ready',['GET']],['login','/login',['GET','POST']],['register','/register',['GET','POST']],['logout','/logout',['POST']],['home','/',['GET']],['plans','/plans',['GET']],['orders','/orders',['GET']],['buy','/orders',['POST']],['order','/orders/{id}',['GET']],['demo','/orders/{id}/demo-pay',['POST']],['autorenew','/subscriptions/{id}/autorenew',['POST']],['settings','/settings',['GET']],['link','/settings/telegram',['POST']],['admin','/admin',['GET']],['retry','/admin/jobs/{id}/retry',['POST']],['plan','/admin/plans',['POST']],['yookassa','/webhooks/yookassa',['POST']],['freekassa','/webhooks/freekassa',['GET','POST']],['telegram','/webhooks/telegram',['POST']]] as [$name,$path,$methods]) $routes->add($name,new Route($path,['_handler'=>$name],[],[], '',[],$methods));
+            foreach ([['tg-start','/telegram/start',['POST']],['tg-status','/telegram/status',['GET']],['tg-finish','/telegram/finish',['POST']],['tg-magic','/telegram/magic',['GET','POST']],['security','/security',['GET']],['mfa-begin','/security/begin',['POST']],['mfa-enroll','/security/enroll',['POST']],['mfa-verify','/security/verify',['POST']],['admin-config','/admin/config',['GET']],['admin-config-save','/admin/config',['POST']],['admin-check','/admin/check/{id}',['POST']],['admin-readiness','/admin/readiness',['GET']],['admin-plans','/admin/plans',['GET']],['admin-plan-save','/admin/plans/{id}',['POST']],['admin-users','/admin/users',['GET']],['admin-user-toggle','/admin/users/{id}/toggle',['POST']],['admin-sync','/admin/sync',['POST']],['admin-promocodes','/admin/promocodes',['GET']],['admin-promocode-create','/admin/promocodes',['POST']],['admin-promocode-toggle','/admin/promocodes/{id}/toggle',['POST']],['admin-withdrawals','/admin/withdrawals',['GET']],['admin-withdrawal-process','/admin/withdrawals/{id}',['POST']],['admin-broadcasts','/admin/broadcasts',['GET']],['admin-broadcast-create','/admin/broadcasts',['POST']],['admin-channels','/admin/channels',['GET']],['admin-channel-add','/admin/channels',['POST']],['admin-channel-toggle','/admin/channels/{id}/toggle',['POST']],['admin-channel-remove','/admin/channels/{id}/remove',['POST']],['admin-landings','/admin/landings',['GET']],['admin-landing-save','/admin/landings',['POST']],['admin-landing-toggle','/admin/landings/{id}/toggle',['POST']],['admin-contests','/admin/contests',['GET']],['admin-contest-create','/admin/contests',['POST']],['admin-contest-round','/admin/contests/{id}/round',['POST']],['admin-polls','/admin/polls',['GET']],['admin-poll-create','/admin/polls',['POST']],['admin-campaigns','/admin/campaigns',['GET']],['admin-campaign-create','/admin/campaigns',['POST']],['admin-reports','/admin/reports',['GET']],['admin-monitoring','/admin/monitoring',['GET']],['admin-monitoring-clear','/admin/monitoring/clear',['POST']],['admin-backups','/admin/backups',['GET']],['admin-backup-create','/admin/backups',['POST']],['admin-backup-restore','/admin/backups/{id}/restore',['POST']],['admin-roles','/admin/roles',['GET']],['admin-role-create','/admin/roles',['POST']],['admin-role-assign','/admin/roles/assign',['POST']],['admin-role-revoke','/admin/roles/revoke',['POST']],['admin-audit','/admin/audit',['GET']],['admin-maintenance','/admin/maintenance',['POST']],['landing','/l/{id}',['GET']],['health','/health/live',['GET']],['ready','/health/ready',['GET']],['login','/login',['GET','POST']],['register','/register',['GET','POST']],['logout','/logout',['POST']],['home','/',['GET']],['plans','/plans',['GET']],['orders','/orders',['GET']],['buy','/orders',['POST']],['order','/orders/{id}',['GET']],['demo','/orders/{id}/demo-pay',['POST']],['autorenew','/subscriptions/{id}/autorenew',['POST']],['trial','/trial',['POST']],['trial-convert','/trial/{id}/convert',['POST']],['settings','/settings',['GET']],['link','/settings/telegram',['POST']],['promo','/promo',['POST']],['referral','/referral',['GET']],['withdraw','/referral/withdraw',['POST']],['gifts','/gifts',['GET']],['gift-buy','/gifts/buy',['POST']],['gift-claim','/gifts/claim',['POST']],['gift-claim-page','/gifts/claim',['GET']],['gift-buy-page','/buy/gift/{id}',['GET']],['balance','/balance',['GET']],['topup','/balance/topup',['POST']],['topup-order','/balance/topup/{id}',['GET']],['topup-demo','/balance/topup/{id}/demo-pay',['POST']],['buy-balance','/orders/balance',['POST']],['admin','/admin',['GET']],['retry','/admin/jobs/{id}/retry',['POST']],['plan','/admin/plans',['POST']],['yookassa','/webhooks/yookassa',['POST']],['freekassa','/webhooks/freekassa',['GET','POST']],['cryptobot','/webhooks/cryptobot',['POST']],['lava','/webhooks/lava',['POST']],['wata','/webhooks/wata',['POST']],['heleket','/webhooks/heleket',['POST']],['platega','/webhooks/platega',['POST']],['tribute','/webhooks/tribute',['POST']],['mulenpay','/webhooks/mulenpay',['POST']],['pal24','/webhooks/pal24',['POST']],['cloudpayments','/webhooks/cloudpayments',['POST']],['kassa_ai','/webhooks/kassa_ai',['POST']],['riopay','/webhooks/riopay',['POST']],['severpay','/webhooks/severpay',['POST']],['paypear','/webhooks/paypear',['POST']],['rollypay','/webhooks/rollypay',['POST']],['overpay','/webhooks/overpay',['POST']],['aurapay','/webhooks/aurapay',['POST']],['etoplatezhi','/webhooks/etoplatezhi',['POST']],['antilopay','/webhooks/antilopay',['POST']],['jupiter','/webhooks/jupiter',['POST']],['donut','/webhooks/donut',['POST']],['cispay','/webhooks/cispay',['POST']],['tabpay','/webhooks/tabpay',['POST']],['paritypay','/webhooks/paritypay',['POST']],['telegram','/webhooks/telegram',['POST']]] as [$name,$path,$methods]) $routes->add($name,new Route($path,['_handler'=>$name],[],[], '',[],$methods));
             $match=(new UrlMatcher($routes,(new RequestContext())->fromRequest($r)))->match($r->getPathInfo());
             $handler=$match['_handler'];
             if ($handler==='health') return new JsonResponse(['status'=>'ok']);
             if ($handler==='ready') { $this->app->db->one('SELECT version FROM migrations LIMIT 1'); return new JsonResponse(['status'=>'ready']); }
             if (strlen($r->getContent())>65536) return new JsonResponse(['error'=>'Request too large'],413);
-            if (in_array($handler,['yookassa','freekassa','telegram'],true)) return $this->webhook($handler);
+            if (in_array($handler,['yookassa','freekassa','telegram','cryptobot','lava','wata','heleket','platega','tribute','mulenpay','pal24','cloudpayments','kassa_ai','riopay','severpay','paypear','rollypay','overpay','aurapay','etoplatezhi','antilopay','jupiter','donut','cispay','tabpay','paritypay'],true)) return $this->webhook($handler);
             $this->user=$this->app->auth->session($r->cookies->get('zb_session',''));
             if(str_starts_with($handler,'tg-')) return $this->telegramAuth($handler);
             if (in_array($handler,['login','register'],true)) return $this->authentication($handler);
@@ -62,8 +62,8 @@ final class Application
         switch ($handler) {
             case 'logout': $this->app->auth->logout($this->request->cookies->get('zb_session','')); $response=new RedirectResponse('/login'); $response->headers->clearCookie('zb_session'); return $response;
             case 'home':
-                return $this->render('home',['subscriptions'=>$db->all('SELECT s.*,o.plan_name,o.devices,o.traffic_bytes FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50',[$uid]),'orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 5',[$uid]),'autorenew_enabled'=>$this->app->config['AUTORENEW_ENABLED']==='1']);
-            case 'plans': return $this->render('plans',['plans'=>$db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor'),'key'=>Database::id()]);
+                return $this->render('home',['subscriptions'=>$db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices,COALESCE(o.traffic_bytes,0) AS traffic_bytes FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50',[$uid]),'orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 5',[$uid]),'autorenew_enabled'=>$this->app->config['AUTORENEW_ENABLED']==='1']);
+            case 'plans': return $this->render('plans',['plans'=>$db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor'),'key'=>Database::id(),'trial_available'=>$this->app->trials->available($uid)]);
             case 'buy': $order=$this->app->billing->order($uid,$input->get('plan_id',''),$input->get('idempotency_key',''),$input->get('receipt_email'),self::clientIp($this->request)); return new RedirectResponse('/orders/'.$order['id'],303);
             case 'orders': return $this->render('orders',['orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100',[$uid])]);
             case 'order':
@@ -80,6 +80,53 @@ final class Application
                 $enable=$input->get('enable','')==='1';
                 $this->app->billing->setAutoRenew($uid,$id,$enable);
                 return new RedirectResponse('/',303);
+            case 'trial':
+                $this->app->trials->start($uid,$input->get('plan_id',''));
+                return new RedirectResponse('/',303);
+            case 'trial-convert':
+                $planId=$input->get('plan_id','');
+                $plan=$db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
+                if (!$plan) throw new BillingError('Тариф недоступен.');
+                $this->app->trials->convertToPaid($uid,$id,$planId,(int)$plan['price_minor']);
+                return new RedirectResponse('/',303);
+            case 'promo':
+                $result=$this->app->promocodes->activate($uid,$input->get('code',''));
+                if(!$result['success']) throw new BillingError($this->promoError($result['error']));
+                return $this->render('promo',['result'=>$result]);
+            case 'balance':
+                $balance=$this->app->wallet->balance($uid);
+                $history=$this->app->wallet->history($uid,50);
+                $topups=$db->all('SELECT * FROM topups WHERE user_id=? ORDER BY created_at DESC LIMIT 10',[$uid]);
+                $providers=[];
+                foreach ($this->app->providers->enabled() as $id=>$provider) $providers[$id]=$provider->name();
+                if ($this->app->config['PAYMENT_DRIVER']==='demo') $providers=['demo'=>'Демо'];
+                return $this->render('balance',['balance'=>$balance['balance_kopeks'],'history'=>$history,'topups'=>$topups,'key'=>Database::id(),'providers'=>$providers]);
+            case 'topup':
+                $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
+                $key=$input->get('idempotency_key','');
+                $provider=$input->get('provider','');
+                $topup=$this->app->topups->create($uid,($amount??0)*100,$key,$provider);
+                return new RedirectResponse('/balance/topup/'.$topup['id'],303);
+            case 'topup-order':
+            case 'topup-demo':
+                $topup=$db->one('SELECT * FROM topups WHERE id=? AND user_id=?',[$id,$uid]);
+                if (!$topup) return $this->render('error',['message'=>'Пополнение не найдено.'],404);
+                if ($handler==='topup-demo') {
+                    if ($this->app->config['APP_ENV']==='prod' || $topup['provider']!=='demo') return new Response('Not found',404);
+                    $this->app->topups->settle($id,'demo','demo_'.$id,(int)$topup['amount_kopeks'],$topup['currency']);
+                    return new RedirectResponse('/balance',303);
+                }
+                return $this->render('topup',['topup'=>$topup]);
+            case 'buy-balance':
+                $planId=$input->get('plan_id','');
+                $plan=$db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
+                if (!$plan) throw new BillingError('Тариф недоступен.');
+                $db->transaction(function() use ($uid,$plan) {
+                    $this->app->wallet->debit($uid,(int)$plan['price_minor'],'subscription_purchase','Покупка подписки: '.$plan['name']);
+                    $order=$this->app->billing->order($uid,$plan['id'],'balance:'.$uid.':'.$plan['id'].':'.time(),null,null);
+                    $this->app->billing->settleFromBalance($order['id'],(int)$plan['price_minor'],'RUB');
+                });
+                return new RedirectResponse('/',303);
             case 'settings': return $this->render('settings',['link_token'=>null]);
             case 'link':
                 $token=bin2hex(random_bytes(24));
@@ -88,7 +135,55 @@ final class Application
                     $db->execute('INSERT INTO telegram_links VALUES(?,?,?)',[hash('sha256',$token),$uid,time()+600]);
                 });
                 return $this->render('settings',['link_token'=>$token]);
-            case 'admin': return $this->render('admin',['jobs'=>$db->all("SELECT id,topic,status,attempts,last_error FROM outbox WHERE status!='done' ORDER BY created_at LIMIT 100"),'recent'=>$db->all('SELECT o.*,u.email FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 30'),'plans'=>$db->all('SELECT * FROM plans ORDER BY price_minor'),'audit'=>$db->all('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 20')]);
+            case 'promo':
+                $result=$this->app->promocodes->activate($uid,$input->get('code',''));
+                if(!$result['success']) throw new BillingError($this->promoError($result['error']));
+                return $this->render('promo',['result'=>$result]);
+            case 'referral':
+                $stats=$this->app->referrals->stats($uid);
+                $withdrawals=$this->app->referrals->withdrawals($uid);
+                $withdrawalEnabled=($this->app->config['REFERRAL_WITHDRAWAL_ENABLED']??'0')==='1';
+                $minWithdrawal=(int)($this->app->config['REFERRAL_WITHDRAWAL_MIN_AMOUNT_KOPEKS']??100000);
+                return $this->render('referral',['stats'=>$stats,'withdrawals'=>$withdrawals,'withdrawal_enabled'=>$withdrawalEnabled,'min_withdrawal'=>$minWithdrawal,'telegram_username'=>$this->app->config['TELEGRAM_BOT_USERNAME']]);
+            case 'withdraw':
+                $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
+                $details=$input->get('payment_details','');
+                $this->app->referrals->requestWithdrawal($uid,($amount??0)*100,$details);
+                return new RedirectResponse('/referral',303);
+            case 'gifts':
+                $bought=$this->app->gifts->boughtBy($uid);
+                $received=$this->app->gifts->receivedBy($uid);
+                $plans=$db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor');
+                return $this->render('gifts',['bought'=>$bought,'received'=>$received,'plans'=>$plans,'gift_enabled'=>$this->app->gifts->enabled(),'key'=>Database::id()]);
+            case 'gift-buy':
+                $planId=$input->get('plan_id','');
+                $key=$input->get('idempotency_key','');
+                $recipientType=$input->get('recipient_type','');
+                $recipientValue=$input->get('recipient_value','');
+                $message=$input->get('gift_message','');
+                $purchase=$this->app->gifts->purchaseFromBalance($uid,$planId,$key,$recipientType?:null,$recipientValue?:null,$message?:null,'cabinet');
+                return new RedirectResponse('/gifts',303);
+            case 'gift-claim':
+                $purchase=$this->app->gifts->claim($uid,$input->get('code',''));
+                return $this->render('gift-claimed',['purchase'=>$purchase]);
+            case 'gift-claim-page':
+                return $this->render('gift-claim',['key'=>Database::id()]);
+            case 'gift-buy-page':
+                $purchase=$this->db->one('SELECT * FROM guest_purchases WHERE id=?',[$id]);
+                if (!$purchase) return $this->render('error',['message'=>'Подарок не найден.'],404);
+                if ($purchase['status']==='delivered') return $this->render('gift-claimed',['purchase'=>$purchase]);
+                if ($purchase['user_id']!==null && $purchase['user_id']!==$uid) return $this->render('error',['message'=>'Подарок уже активирован.'],404);
+                if ($purchase['buyer_user_id']===$uid) return $this->render('error',['message'=>'Нельзя активировать собственный подарок.'],422);
+                $purchase=$this->app->gifts->claim($uid,$purchase['token']);
+                return $this->render('gift-claimed',['purchase'=>$purchase]);
+            case 'landing':
+                $landing=$this->app->landings->get($id);
+                if (!$landing) return $this->render('error',['message'=>'Лендинг не найден.'],404);
+                $plans=$db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor');
+                $prices=[];
+                foreach ($plans as $p) $prices[$p['id']]=$this->app->landings->effectivePrice($landing,$p);
+                return $this->render('landing',['landing'=>$landing,'plans'=>$plans,'prices'=>$prices,'key'=>Database::id()]);
+            case 'admin': return $this->render('admin',['jobs'=>$db->all("SELECT id,topic,status,attempts,last_error FROM outbox WHERE status!='done' ORDER BY created_at LIMIT 100"),'recent'=>$db->all('SELECT o.*,u.email FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 30'),'plans'=>$db->all('SELECT * FROM plans ORDER BY price_minor'),'audit'=>$db->all('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 20'),'maintenance'=>$this->app->maintenance->isMaintenance()]);
             case 'retry':
                 $db->transaction(function () use ($db,$id,$uid) {
                     if ($db->execute("UPDATE outbox SET status='pending',attempts=0,available_at=?,locked_until=NULL,lock_token=NULL WHERE id=? AND status='dead'",[time(),$id])) $this->app->billing->audit($uid,'job.retried',$id);
@@ -132,22 +227,32 @@ final class Application
             $secret=$this->app->config['TELEGRAM_WEBHOOK_SECRET'];
             if (strlen($secret)<32 || !hash_equals($secret,$this->request->headers->get('X-Telegram-Bot-Api-Secret-Token',''))) return new JsonResponse(['error'=>'Forbidden'],403);
             $this->app->telegram->receive($this->request->toArray());
-        } elseif ($handler==='freekassa') {
-            return $this->freekassaWebhook();
-        } else {
-            if ($this->app->config['PAYMENT_DRIVER']!=='yookassa') return new JsonResponse(['error'=>'Disabled'],404);
-            $this->app->auth->throttle('webhook:'.$this->request->getClientIp(),120,60);
-            $data=$this->request->toArray();
-            if (!in_array($data['event']??'',['payment.succeeded','payment.canceled'],true)) return new JsonResponse(['ok'=>true]);
-            // Webhook content only identifies a payment. Authoritative status is fetched with merchant credentials.
-            $paymentId=$data['object']['id']??'';
-            if(!is_string($paymentId)||!preg_match('/^[a-zA-Z0-9_-]{1,100}$/D',$paymentId))return new JsonResponse(['error'=>'Invalid payment id'],400);
-            $hint=$data['object']['metadata']['order_id']??'';
-            if(!is_string($hint))return new JsonResponse(['error'=>'Invalid order id'],400);
-            $known=$this->app->db->one("SELECT id FROM orders WHERE provider='yookassa' AND (provider_payment_id=? OR (id=? AND provider_payment_id IS NULL AND status='pending'))",[$paymentId,$hint]);
-            if(!$known)return new JsonResponse(['ok'=>true]);
-            $this->app->db->transaction(function()use($paymentId,$data){$this->app->outbox->enqueue('payment.verify','verify:'.$paymentId.':'.$data['event'],['payment_id'=>$paymentId]);});
+            return new JsonResponse(['ok'=>true]);
         }
+        if (in_array($handler,['cryptobot','lava','wata','heleket','platega','tribute','mulenpay','pal24','cloudpayments','kassa_ai','riopay','severpay','paypear','rollypay','overpay','aurapay','etoplatezhi','antilopay','jupiter','donut','cispay','tabpay','paritypay'],true)) {
+            $this->app->auth->throttle('webhook:'.$this->request->getClientIp(),240,60);
+            $handled=$this->app->paymentService->handleWebhook($handler,$this->request);
+            return new JsonResponse(['ok'=>$handled]);
+        }
+        if ($handler==='freekassa') {
+            return $this->freekassaWebhook();
+        }
+        if ($this->app->config['PAYMENT_DRIVER']!=='yookassa') return new JsonResponse(['error'=>'Disabled'],404);
+        $this->app->auth->throttle('webhook:'.$this->request->getClientIp(),120,60);
+        $data=$this->request->toArray();
+        if (!in_array($data['event']??'',['payment.succeeded','payment.canceled'],true)) return new JsonResponse(['ok'=>true]);
+        // Webhook content only identifies a payment. Authoritative status is fetched with merchant credentials.
+        $paymentId=$data['object']['id']??'';
+        if(!is_string($paymentId)||!preg_match('/^[a-zA-Z0-9_-]{1,100}$/D',$paymentId))return new JsonResponse(['error'=>'Invalid payment id'],400);
+        $hint=$data['object']['metadata']['order_id']??'';
+        if(!is_string($hint))return new JsonResponse(['error'=>'Invalid order id'],400);
+        $known=$this->app->db->one("SELECT id FROM orders WHERE provider='yookassa' AND (provider_payment_id=? OR (id=? AND provider_payment_id IS NULL AND status='pending'))",[$paymentId,$hint]);
+        if(!$known){
+            $knownTopup=$this->app->db->one("SELECT id FROM topups WHERE provider_payment_id=? OR (id=? AND provider_payment_id IS NULL AND status='pending')",[$paymentId,$hint]);
+            if($knownTopup) $this->app->db->transaction(function()use($paymentId,$data){$this->app->outbox->enqueue('payment.verify','verify:'.$paymentId.':'.$data['event'],['payment_id'=>$paymentId]);});
+            return new JsonResponse(['ok'=>true]);
+        }
+        $this->app->db->transaction(function()use($paymentId,$data){$this->app->outbox->enqueue('payment.verify','verify:'.$paymentId.':'.$data['event'],['payment_id'=>$paymentId]);});
         return new JsonResponse(['ok'=>true]);
     }
     private function freekassaWebhook(): Response
@@ -176,7 +281,18 @@ final class Application
         if (!\App\Integration\Payments::verifyFreekassaNotification(['MERCHANT_ID'=>$merchantId,'AMOUNT'=>$amount,'MERCHANT_ORDER_ID'=>$orderId,'SIGN'=>$sign],(string)($this->app->config['FREEKASSA_SECRET2']??''))) return new Response('wrong sign',403);
         if (!preg_match('/^[a-f0-9]{32}$/D',$orderId)) return new Response('YES');
         $order=$this->app->db->one("SELECT * FROM orders WHERE id=? AND provider='freekassa'",[$orderId]);
-        if (!$order) return new Response('YES');
+        if (!$order) {
+            $topup=$this->app->db->one("SELECT * FROM topups WHERE id=? AND provider='freekassa'",[$orderId]);
+            if (!$topup) return new Response('YES');
+            try {
+                $amountMinor=\App\Integration\Payments::minor(\App\Integration\Payments::normalizeAmount($amount));
+            } catch (\Throwable) { return new Response('wrong amount',400); }
+            if ((int)$topup['amount_kopeks']!==$amountMinor) return new Response('wrong amount',400);
+            if ($topup['status']!=='pending') return new Response('YES');
+            $verifyId=$intid!==''?$intid:$orderId;
+            $this->app->db->transaction(function()use($verifyId,$intid,$orderId){$this->app->outbox->enqueue('payment.verify','verify-fk:'.$orderId.':'.$intid,['payment_id'=>$verifyId]);});
+            return new Response('YES');
+        }
         try {
             $amountMinor=\App\Integration\Payments::minor(\App\Integration\Payments::normalizeAmount($amount));
         } catch (\Throwable) { return new Response('wrong amount',400); }
@@ -213,9 +329,29 @@ final class Application
         }
         return $fallback;
     }
+    private function promoError(string $key): string
+    {
+        return match ($key) {
+            'not_found' => 'Промокод не найден.',
+            'inactive' => 'Промокод неактивен.',
+            'used' => 'Промокод уже использован.',
+            'not_yet_valid' => 'Промокод ещё не действует.',
+            'expired' => 'Срок действия промокода истёк.',
+            'already_used_by_user' => 'Вы уже использовали этот промокод.',
+            'daily_limit' => 'Слишком много активаций за сутки.',
+            'not_first_purchase' => 'Промокод действует только для первой покупки.',
+            'active_discount_exists' => 'У вас уже есть активная скидка.',
+            'no_subscription_for_days' => 'Нет подписки для начисления дней.',
+            'trial_subscription_exists' => 'Триал недоступен: у вас уже есть подписка.',
+            'traffic_not_applicable' => 'Трафик не начислен: у подписки безлимит.',
+            default => 'Не удалось активировать промокод.',
+        };
+    }
     private function render(string $view,array $data=[],int $status=200): Response
     {
         $freekassaEmail=$this->app->config['PAYMENT_DRIVER']==='freekassa';
-        return new Response($this->twig->render($view.'.html.twig',array_merge(['user'=>$this->user,'path'=>$this->request->getPathInfo(),'demo'=>$this->app->config['PAYMENT_DRIVER']==='demo'||$this->app->config['PROVISION_DRIVER']==='demo','now'=>time(),'site_name'=>$this->app->config['SITE_NAME'],'support_url'=>$this->app->config['SUPPORT_URL'],'telegram_enabled'=>$this->app->config['TELEGRAM_BOT_TOKEN']!==''&&$this->app->config['TELEGRAM_BOT_USERNAME']!=='','purchases_enabled'=>$this->app->config['PURCHASES_ENABLED']==='1','receipt_required'=>$this->app->config['YOOKASSA_RECEIPT']==='1','freekassa_email_required'=>$freekassaEmail,'payment_driver'=>$this->app->config['PAYMENT_DRIVER']],$data)),$status);
+        $balance=$this->user?$this->app->wallet->balance($this->user['id'])['balance_kopeks']:0;
+        $branding=$this->app->branding;
+        return new Response($this->twig->render($view.'.html.twig',array_merge(['user'=>$this->user,'path'=>$this->request->getPathInfo(),'demo'=>$this->app->config['PAYMENT_DRIVER']==='demo'||$this->app->config['PROVISION_DRIVER']==='demo','now'=>time(),'site_name'=>$branding->name(),'support_url'=>$this->app->config['SUPPORT_URL'],'telegram_enabled'=>$this->app->config['TELEGRAM_BOT_TOKEN']!==''&&$this->app->config['TELEGRAM_BOT_USERNAME']!=='','purchases_enabled'=>$this->app->config['PURCHASES_ENABLED']==='1','receipt_required'=>$this->app->config['YOOKASSA_RECEIPT']==='1','freekassa_email_required'=>$freekassaEmail,'payment_driver'=>$this->app->config['PAYMENT_DRIVER'],'balance_kopeks'=>$balance,'logo'=>$branding->logo(),'favicon'=>$branding->favicon(),'css_vars'=>$branding->cssVars(),'footer_text'=>$branding->footerText()],$data)),$status);
     }
 }

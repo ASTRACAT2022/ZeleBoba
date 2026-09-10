@@ -16,7 +16,7 @@ final class WebTest extends TestCase
     private function request(string $path,string $method='GET',array $data=[]):\Symfony\Component\HttpFoundation\Response{return $this->web->handle(Request::create($path,$method,$data,['zb_session'=>$this->session]));}
     public function testAllCabinetViewsRender():void
     {
-        foreach(['/','/plans','/orders','/settings'] as $path)self::assertSame(200,$this->request($path)->getStatusCode(),$path);
+        foreach(['/','/plans','/orders','/settings','/balance'] as $path)self::assertSame(200,$this->request($path)->getStatusCode(),$path);
     }
     public function testAuthFormsAndRegistration():void
     {
@@ -39,6 +39,26 @@ final class WebTest extends TestCase
         self::assertSame(200,$this->request($location)->getStatusCode());self::assertSame(303,$this->request($location.'/demo-pay','POST',['_csrf'=>$this->csrf])->getStatusCode());
         while($this->c->outbox->runOne($this->c->worker->handle(...))){}
         self::assertSame('fulfilled',$this->c->db->one('SELECT status FROM orders')['status']);self::assertStringContainsString('Тестовая подписка',$this->request('/')->getContent());
+    }
+    public function testTopupAndBalancePurchaseCycle():void
+    {
+        $response=$this->request('/balance/topup','POST',['_csrf'=>$this->csrf,'amount'=>'500','idempotency_key'=>'topup-web-1']);self::assertSame(303,$response->getStatusCode());
+        $topup=$this->c->db->one('SELECT * FROM topups');self::assertSame('pending',$topup['status']);
+        self::assertSame(303,$this->request('/balance/topup/'.$topup['id'].'/demo-pay','POST',['_csrf'=>$this->csrf])->getStatusCode());
+        self::assertSame(50000,$this->c->wallet->balance($this->uid)['balance_kopeks']);
+        self::assertSame(200,$this->request('/balance')->getStatusCode());
+        self::assertStringContainsString('500 ₽',$this->request('/balance')->getContent());
+        $response=$this->request('/orders/balance','POST',['_csrf'=>$this->csrf,'plan_id'=>'basic']);self::assertSame(303,$response->getStatusCode());
+        while($this->c->outbox->runOne($this->c->worker->handle(...))){}
+        self::assertSame('fulfilled',$this->c->db->one('SELECT status FROM orders')['status']);
+        self::assertSame(30100,$this->c->wallet->balance($this->uid)['balance_kopeks']);
+        self::assertCount(2,$this->c->db->all('SELECT * FROM transactions'));
+    }
+    public function testBalancePurchaseFailsWithoutFunds():void
+    {
+        $response=$this->request('/orders/balance','POST',['_csrf'=>$this->csrf,'plan_id'=>'basic']);
+        self::assertSame(422,$response->getStatusCode());
+        self::assertCount(0,$this->c->db->all('SELECT * FROM orders'));
     }
     public function testAdminAuthorizationAndCreatePlan():void
     {

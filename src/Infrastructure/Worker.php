@@ -1,23 +1,77 @@
 <?php
 declare(strict_types=1);
 namespace App\Infrastructure;
-use App\Integration\{Payments,Provisioner};
+use App\Integration\{Payments,Provisioner,PaymentService};
+use App\Billing\TopupService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app') {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null) {}
     public function handle(string $topic,array $payload): void
     {
         match ($topic) {
-            'payment.create'=>$this->payments->create($payload['order_id']),
-            'payment.verify'=>$this->payments->refresh($payload['payment_id']),
+            'payment.create'=>$this->paymentService?$this->paymentService->createOrder($payload['order_id']):$this->payments->create($payload['order_id']),
+            'payment.verify'=>$this->paymentService?$this->paymentService->verify($payload['payment_id']):$this->payments->refresh($payload['payment_id']),
+            'topup.create'=>$this->topupCreate($payload['topup_id']),
+            'topup.after'=>$this->topupAfter($payload['user_id']),
+            'referral.topup'=>$this->referralTopup($payload['user_id'],(int)($payload['amount_kopeks']??0)),
             'subscription.provision'=>$this->provision($payload['subscription_id']),
             'subscription.extend'=>$this->extend($payload['subscription_id']),
             'subscription.renew'=>$this->renew($payload['subscription_id']),
+            'subscription.traffic'=>$this->traffic($payload['subscription_id'],(int)($payload['traffic_gb']??0)),
+            'subscription.devices'=>$this->devices($payload['subscription_id'],(int)($payload['devices']??0)),
+            'gift.create'=>$this->giftCreate($payload),
+            'broadcast.run'=>$this->broadcastRun($payload['broadcast_id']),
+            'broadcast.send'=>$this->broadcastSend($payload['broadcast_id'],$payload['chat_id'],$payload['text']),
             'telegram.send'=>$this->send($payload),
             'telegram.answer'=>$this->answer($payload),
             default=>throw new \RuntimeException('Unknown outbox topic')
         };
+    }
+    private function broadcastRun(string $id): void
+    {
+        if ($this->broadcasts) $this->broadcasts->run($id);
+    }
+    private function broadcastSend(string $id, string $chatId, string $text): void
+    {
+        try {
+            $this->send(['chat_id' => $chatId, 'text' => $text]);
+            if ($this->broadcasts) $this->broadcasts->markSent($id, true);
+        } catch (\Throwable) {
+            if ($this->broadcasts) $this->broadcasts->markSent($id, false);
+            throw new \RuntimeException('Broadcast send failed');
+        }
+    }
+    private function topupCreate(string $id): void
+    {
+        $topup=$this->db->one('SELECT * FROM topups WHERE id=?',[$id]);
+        if (!$topup || $topup['status']!=='pending' || $topup['checkout_url']) return;
+        if ($this->paymentService) { $this->paymentService->createTopup($id); return; }
+        $this->payments->createTopup($topup);
+    }
+    private function topupAfter(string $userId): void
+    {
+        if ($this->autoPurchase) $this->autoPurchase->afterTopup($userId);
+    }
+    private function referralTopup(string $userId, int $amountKopeks): void
+    {
+        if ($this->referrals) $this->referrals->processTopup($userId, $amountKopeks);
+    }
+    private function traffic(string $id,int $gb): void
+    {
+        $s=$this->db->one('SELECT s.*,o.traffic_bytes,o.provision_driver,o.squad_uuid FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.id=?',[$id]);
+        if (!$s || $s['status']!=='active' || $s['provision_driver']==='demo') return;
+        $this->provisioner->setTraffic($s,$gb);
+    }
+    private function devices(string $id,int $count): void
+    {
+        $s=$this->db->one('SELECT s.*,o.traffic_bytes,o.provision_driver,o.squad_uuid FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.id=?',[$id]);
+        if (!$s || $s['status']!=='active' || $s['provision_driver']==='demo') return;
+        $this->provisioner->setDevices($s,$count);
+    }
+    private function giftCreate(array $payload): void
+    {
+        $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)',[\App\Infrastructure\Database::id(),$payload['user_id'],'gift.created',$payload['plan_id'],time()]);
     }
     private function provision(string $id): void
     {

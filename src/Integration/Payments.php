@@ -8,9 +8,55 @@ final class Payments
 {
     private const FREEKASSA_API = 'https://api.fk.life/v1/';
     public function __construct(private Database $db, private BillingService $billing, private HttpClientInterface $http, private array $config) {}
-    public function create(string $id): void
+    /** Create a checkout for a balance topup. Mirrors order checkout but for the topups table. */
+    public function createTopup(array $topup): void
     {
-        $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$id]);
+        if ($topup['status']!=='pending' || $topup['checkout_url']) return;
+        $id=$topup['id'];
+        if ($topup['provider']==='demo') {
+            if (($this->config['APP_ENV']??'dev')==='prod') throw new BillingError('Демоплатёж запрещён.');
+            $paymentId='demo_'.$id; $url='/balance/topup/'.$id;
+        } elseif ($topup['provider']==='freekassa') {
+            if (time()-(int)$topup['created_at']>23*3600) throw new BillingError('Требуется ручная сверка платежа.');
+            if ((string)$topup['provider']!== (string)($this->config['FREEKASSA_SHOP_ID']??'')) throw new BillingError('Магазин заказа не соответствует настройкам.');
+            if (!$this->config['FREEKASSA_SHOP_ID'] || !$this->config['FREEKASSA_API_KEY']) throw new BillingError('FreeKassa не настроена.');
+            $user=$this->db->one('SELECT email,telegram_id FROM users WHERE id=?',[$topup['user_id']]);
+            $email=$user['email']??'';
+            if (!$email && !empty($user['telegram_id'])) $email=$user['telegram_id'].'@telegram.org';
+            if (!$email || !filter_var($email,FILTER_VALIDATE_EMAIL)) throw new BillingError('Некорректный email для FreeKassa.');
+            $ip=$topup['client_ip']??'';
+            if (!$ip || $ip==='127.0.0.1' || !filter_var($ip,FILTER_VALIDATE_IP)) $ip='8.8.8.8';
+            $params=[
+                'shopId'=>(int)$this->config['FREEKASSA_SHOP_ID'],
+                'nonce'=>self::nonce(),
+                'paymentId'=>$id,
+                'i'=>(int)($this->config['FREEKASSA_PAYMENT_ID']??44),
+                'email'=>$email,
+                'ip'=>$ip,
+                'amount'=>self::decimal((int)$topup['amount_kopeks']),
+                'currency'=>$topup['currency']??'RUB',
+            ];
+            $data=$this->freekassaRequest('orders/create',$params);
+            $location=$data['location']??null;
+            $fkOrderId=$data['orderId']??null;
+            if (!$location || !is_string($location) || !str_starts_with($location,'https://')) throw new BillingError('Провайдер не вернул ссылку оплаты.');
+            if ($fkOrderId===null) throw new BillingError('Провайдер не вернул номер заказа.');
+            $paymentId=(string)$fkOrderId;
+            $url=$location;
+        } else {
+            if (time()-(int)$topup['created_at']>23*3600) throw new BillingError('Требуется ручная сверка платежа.');
+            $body=['amount'=>['value'=>self::decimal((int)$topup['amount_kopeks']),'currency'=>$topup['currency']], 'capture'=>true,
+                'confirmation'=>['type'=>'redirect','return_url'=>rtrim($this->config['APP_URL']??'http://127.0.0.1:8080','/').'/balance'],
+                'description'=>'Пополнение баланса','metadata'=>['topup_id'=>$id,'type'=>'balance_topup']];
+            $data=$this->request('POST','payments',['headers'=>['Idempotence-Key'=>'topup-'.$id],'json'=>$body]);
+            if (($this->config['APP_ENV']??'dev')==='prod' && ($data['test']??true)!==false) throw new BillingError('Магазин создал тестовый платёж в боевом режиме.');
+            $paymentId=$data['id']; $url=$data['confirmation']['confirmation_url'] ?? null;
+            if (!$url || !str_starts_with($url,'https://')) throw new BillingError('Провайдер не вернул ссылку оплаты.');
+        }
+        $this->db->execute('UPDATE topups SET provider_payment_id=?,checkout_url=? WHERE id=? AND (provider_payment_id IS NULL OR provider_payment_id=?)',[$paymentId,$url,$id,$paymentId]);
+    }
+    public function create(string $id): void
+    {        $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$id]);
         if (!$order || $order['status']!=='pending' || $order['checkout_url']) return;
         if ($order['provider']==='demo') {
             if (($this->config['APP_ENV']??'dev')==='prod') throw new BillingError('Демоплатёж запрещён.');
@@ -74,6 +120,12 @@ final class Payments
     }
     public function refresh(string $paymentId): void
     {
+        // Topup payments carry topup_id in metadata
+        $topup=$this->db->one('SELECT * FROM topups WHERE provider_payment_id=?',[$paymentId]);
+        if ($topup) {
+            $this->refreshTopup($topup,$paymentId);
+            return;
+        }
         // FreeKassa paymentId is the FK intid (numeric) or merchant order id; try to detect
         if (preg_match('/^[0-9]{1,20}$/D',$paymentId)) {
             // Could be FK intid; try freekassa verification first if any freekassa order exists with this intid
@@ -100,6 +152,55 @@ final class Payments
         } elseif (($data['status']??'')==='canceled') {
             $this->db->execute("UPDATE orders SET status='canceled' WHERE provider='yookassa' AND provider_payment_id=? AND status='pending'",[$paymentId]);
         }
+    }
+    private function refreshTopup(array $topup, string $paymentId): void
+    {
+        if ($topup['provider']==='freekassa') {
+            $this->refreshFreekassaTopup($topup,$paymentId);
+            return;
+        }
+        if (!preg_match('/^[a-zA-Z0-9_-]{1,100}$/D',$paymentId)) throw new BillingError('Некорректный платёж.');
+        $data=$this->request('GET','payments/'.rawurlencode($paymentId));
+        if (($data['id']??null)!==$paymentId) throw new BillingError('Некорректный ответ провайдера.');
+        if (($data['status']??'')==='succeeded' && ($data['paid']??false)===true) {
+            if (($this->config['APP_ENV']??'dev')==='prod' && ($data['test']??true)!==false) throw new BillingError('Тестовый платёж запрещён в production.');
+            $this->topupSettle($topup,$paymentId,$data['amount']['value']??null,$data['amount']['currency']??null);
+        } elseif (($data['status']??'')==='canceled') {
+            $this->db->execute("UPDATE topups SET status='canceled' WHERE id=? AND status='pending'",[$topup['id']]);
+        }
+    }
+    private function refreshFreekassaTopup(array $topup, string $paymentId): void
+    {
+        if (!$this->config['FREEKASSA_SHOP_ID'] || !$this->config['FREEKASSA_API_KEY']) throw new BillingError('FreeKassa не настроена.');
+        $isNumeric=preg_match('/^[0-9]+$/D',$paymentId);
+        $params=['shopId'=>(int)$this->config['FREEKASSA_SHOP_ID'],'nonce'=>self::nonce()];
+        if ($isNumeric) $params['orderId']=(int)$paymentId; else $params['paymentId']=$paymentId;
+        $data=$this->freekassaRequest('orders',$params);
+        $orders=$data['orders']??[];
+        if (!is_array($orders) || count($orders)===0) return;
+        foreach ($orders as $o) {
+            $status=(int)($o['status']??-1);
+            $merchantId=(string)($o['merchant_order_id']??$o['paymentId']??'');
+            if ($merchantId==='') continue;
+            $local=$this->db->one('SELECT * FROM topups WHERE id=?',[$merchantId]);
+            if (!$local || $local['provider']!=='freekassa') continue;
+            if ($status===1) {
+                $amountMinor=self::minor(self::normalizeAmount((string)($o['amount']??'')));
+                $currency=(string)($o['currency']??'RUB');
+                if ((int)$local['amount_kopeks']!==$amountMinor || $local['currency']!==$currency) throw new BillingError('Сумма пополнения не совпадает.');
+                $fkId=(string)($o['fk_order_id']??$o['orderId']??$paymentId);
+                $this->topupSettle($local,$fkId,null,null);
+            } elseif (in_array($status,[8,9],true)) {
+                $this->db->execute("UPDATE topups SET status='canceled' WHERE id=? AND status='pending'",[$local['id']]);
+            }
+        }
+    }
+    private function topupSettle(array $topup, string $paymentId, ?string $amountValue, ?string $currency): void
+    {
+        $amount=(int)$topup['amount_kopeks'];
+        if ($amountValue!==null) $amount=self::minor($amountValue);
+        $cur=$currency??$topup['currency'];
+        $this->billing->settleTopup($topup['id'],$topup['provider'],$paymentId,$amount,$cur);
     }
     private function refreshFreekassa(string $paymentId): void
     {
