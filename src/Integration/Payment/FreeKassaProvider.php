@@ -37,7 +37,7 @@ final class FreeKassaProvider extends AbstractProvider
     private function createInvoice(array $entity, string $kind): array
     {
         if (time() - (int)$entity['created_at'] > 23 * 3600) throw new BillingError('Требуется ручная сверка платежа.');
-        if ((string)$entity['provider'] !== (string)($this->config['FREEKASSA_SHOP_ID'] ?? '')) throw new BillingError('Магазин заказа не соответствует настройкам.');
+        if ((string)$entity['provider'] !== 'freekassa') throw new BillingError('Магазин заказа не соответствует настройкам.');
         if (!$this->config['FREEKASSA_SHOP_ID'] || !$this->config['FREEKASSA_API_KEY']) throw new BillingError('FreeKassa не настроена.');
         $email = (string)($entity['receipt_email'] ?? '');
         if ($email === '' && $kind === 'topup') {
