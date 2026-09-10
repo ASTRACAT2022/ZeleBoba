@@ -30,12 +30,39 @@ final class ReportingService
             'conversion_percent' => $conversion,
         ];
     }
+    /** Earnings overview: today / 7 days / this month / this year. */
+    public function earningsOverview(): array
+    {
+        $dayStart = strtotime('today');
+        $weekStart = strtotime('-6 days', $dayStart);
+        $monthStart = strtotime('first day of this month');
+        $yearStart = strtotime('first day of January');
+        $periods = [
+            'today' => ['label' => 'Сегодня', 'since' => $dayStart],
+            'week' => ['label' => '7 дней', 'since' => $weekStart],
+            'month' => ['label' => 'Месяц', 'since' => $monthStart],
+            'year' => ['label' => 'Год', 'since' => $yearStart],
+        ];
+        $result = [];
+        foreach ($periods as $key => $p) {
+            $revenue = (int)($this->db->one('SELECT COALESCE(SUM(amount_minor),0) AS s FROM ledger_entries WHERE account=\'provider_clearing\' AND created_at>=?', [$p['since']])['s'] ?? 0);
+            $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND created_at>=?", [$p['since']])['c'] ?? 0);
+            $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND created_at>=?", [$p['since']])['c'] ?? 0);
+            $result[$key] = [
+                'label' => $p['label'],
+                'revenue_kopeks' => $revenue,
+                'orders' => $orders,
+                'topups' => $topups,
+            ];
+        }
+        return $result;
+    }
     /** Daily revenue series for a chart. */
     public function dailyRevenue(int $days = 14): array
     {
         $since = time() - $days * 86400;
         $rows = $this->db->all(
-            "SELECT date(created_at,'unixepoch') AS day, SUM(amount_minor) AS total FROM ledger_entries WHERE account='provider_clearing' AND created_at>? GROUP BY day ORDER BY day",
+            "SELECT to_timestamp(created_at)::date AS day, SUM(amount_minor) AS total FROM ledger_entries WHERE account='provider_clearing' AND created_at>? GROUP BY day ORDER BY day",
             [$since]
         );
         $result = [];

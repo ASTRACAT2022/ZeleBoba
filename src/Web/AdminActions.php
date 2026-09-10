@@ -121,7 +121,8 @@ trait AdminActions
             $byType=$this->app->reporting->revenueByType($days);
             $topCustomers=$this->app->reporting->topCustomers($days);
             $top=$this->app->reporting->topReferrers();
-            return $this->render('admin-reports',['stats'=>$stats,'daily'=>$daily,'by_provider'=>$byProvider,'by_plan'=>$byPlan,'by_type'=>$byType,'top_customers'=>$topCustomers,'top'=>$top,'days'=>$days]);
+            $earnings=$this->app->reporting->earningsOverview();
+            return $this->render('admin-reports',['stats'=>$stats,'daily'=>$daily,'by_provider'=>$byProvider,'by_plan'=>$byPlan,'by_type'=>$byType,'top_customers'=>$topCustomers,'top'=>$top,'days'=>$days,'earnings'=>$earnings]);
         }
         if($handler==='admin-monitoring')return $this->render('admin-monitoring',['events'=>$this->app->monitoring->recentEvents(),'errors'=>$this->app->monitoring->errors(),'anomalies'=>$this->app->monitoring->trafficAnomalies()]);
         if($handler==='admin-monitoring-clear'){
