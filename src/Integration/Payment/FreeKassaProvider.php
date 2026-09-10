@@ -2,10 +2,17 @@
 declare(strict_types=1);
 namespace App\Integration\Payment;
 use App\Billing\BillingError;
+use App\Infrastructure\Database;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class FreeKassaProvider extends AbstractProvider
 {
     private const API = 'https://api.fk.life/v1/';
+    private const NONCE_KEY = 'FREEKASSA_LAST_NONCE';
+    public function __construct(protected HttpClientInterface $http, protected array $config, private ?Database $db = null)
+    {
+        parent::__construct($http, $config);
+    }
     public function id(): string { return 'freekassa'; }
     public function name(): string { return 'FreeKassa'; }
     public function configured(): bool
@@ -28,8 +35,23 @@ final class FreeKassaProvider extends AbstractProvider
     }
     private function nonce(): int
     {
+        // FreeKassa rejects requests whose nonce is <= the last one it saw.
+        // Wall-clock based nonces (microtime) are NOT safe: if the host clock
+        // is ever slightly ahead (NTP correction, container with a faster
+        // clock, FreeKassa-side skew), the next call produces a nonce
+        // *backwards* relative to what FreeKassa already recorded ->
+        // "Request with same (or bigger) nonce already exist".
+        //
+        // The reliable fix is a PostgreSQL SEQUENCE: strictly monotonic,
+        // atomic across all worker processes, survives restarts. Seeded above
+        // wall-clock so it is always larger than any previously-used nonce.
+        if ($this->db && $this->db->postgres()) {
+            $row = $this->db->one("SELECT nextval('freekassa_nonce_seq') AS v");
+            return (int)($row['v'] ?? 0);
+        }
+        // Fallback (SQLite/dev): monotonic in-process counter seeded above wall-clock.
         static $last = 0;
-        $now = (int)(microtime(true) * 1000000);
+        $now = (int)(microtime(true) * 1000000) + 8500000000000000000;
         if ($now <= $last) $now = $last + 1;
         $last = $now;
         return $now;

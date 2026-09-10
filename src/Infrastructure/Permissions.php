@@ -9,6 +9,7 @@ final class Permissions
         $db->transaction(function()use($db,$role){
             $db->execute("GRANT USAGE ON SCHEMA public TO $role");
             $db->execute("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO $role");
+            $db->execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $role");
             $db->execute("REVOKE UPDATE,DELETE,TRUNCATE ON ledger_entries,payment_receipts,audit_log FROM $role");
             $db->execute("REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON migrations FROM $role");
             $db->execute("REVOKE CREATE ON SCHEMA public FROM $role");

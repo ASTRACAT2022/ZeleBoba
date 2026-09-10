@@ -280,7 +280,7 @@ final class Telegram
     }
     private function sendStatus(int $id,string $tg,array $user): void
     {
-        $subs=$this->db->all('SELECT s.*,o.plan_name,o.devices FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 5',[$user['id']]);
+        $subs=$this->db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 5',[$user['id']]);
         $text=$subs?implode("\n",array_map(fn($s)=>'Подписка '.$s['plan_name'].': '.((int)$s['expires_at']<=time()?'истекла':$s['status']).' до '.gmdate('d.m.Y',(int)$s['expires_at']).($s['status']==='active' && (int)$s['expires_at']>time() && $s['subscription_url'] ? ' · '.$s['subscription_url'] : ''),$subs)):'Подписок пока нет.';
         $orders=$this->db->all("SELECT * FROM orders WHERE user_id=? AND status='pending' ORDER BY created_at DESC LIMIT 3",[$user['id']]);
         $keyboard=[];
@@ -382,7 +382,7 @@ final class Telegram
     }
     private function sendSubs(int $id,string $tg,array $user): void
     {
-        $subs=$this->db->all('SELECT s.*,o.plan_name,o.devices FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 10',[$user['id']]);
+        $subs=$this->db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 10',[$user['id']]);
         if(!$subs){ $this->reply($id,$tg,'Подписок пока нет. Выберите тариф:',['inline_keyboard'=>[[['text'=>'Тарифы','callback_data'=>'menu:plans']]]]); return; }
         $lines=array_map(fn($s)=>$s['plan_name'].': '.((int)$s['expires_at']<=time()?'истекла':$s['status']).' до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC'.($s['subscription_url'] && (int)$s['expires_at']>time() ? ' · '.$s['subscription_url'] : '').((int)($s['auto_renew']??0)===1?' · автопродление вкл':''),$subs);
         $keyboard=[];

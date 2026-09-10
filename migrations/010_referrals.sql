@@ -55,8 +55,42 @@ CREATE TABLE users_new (
 );
 INSERT INTO users_new(id,email,password_hash,telegram_id,role,created_at,totp_secret,totp_last_step,disabled,balance_kopeks,has_made_first_topup,promo_offer_discount_percent,promo_offer_discount_source,promo_offer_discount_expires_at,has_had_paid_subscription)
  SELECT id,email,password_hash,telegram_id,role,created_at,totp_secret,totp_last_step,disabled,balance_kopeks,has_made_first_topup,promo_offer_discount_percent,promo_offer_discount_source,promo_offer_discount_expires_at,has_had_paid_subscription FROM users;
+-- PostgreSQL: drop FKs referencing users before dropping the table, then restore them.
+ALTER TABLE login_challenges DROP CONSTRAINT IF EXISTS login_challenges_user_id_fkey;
+ALTER TABLE mfa_enrollments DROP CONSTRAINT IF EXISTS mfa_enrollments_user_id_fkey;
+ALTER TABLE mfa_recovery DROP CONSTRAINT IF EXISTS mfa_recovery_user_id_fkey;
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_user_id_fkey;
+ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_user_id_fkey;
+ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_user_id_fkey;
+ALTER TABLE telegram_links DROP CONSTRAINT IF EXISTS telegram_links_user_id_fkey;
+-- users_new itself references users via referred_by_id; drop before dropping users.
+ALTER TABLE users_new DROP CONSTRAINT IF EXISTS users_new_referred_by_id_fkey;
+-- Tables created by migrations 008/009 also reference users; drop their FKs too.
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_user_id_fkey;
+ALTER TABLE topups DROP CONSTRAINT IF EXISTS topups_user_id_fkey;
+ALTER TABLE carts DROP CONSTRAINT IF EXISTS carts_user_id_fkey;
+ALTER TABLE promocodes DROP CONSTRAINT IF EXISTS promocodes_created_by_fkey;
+ALTER TABLE promocode_uses DROP CONSTRAINT IF EXISTS promocode_uses_user_id_fkey;
+ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_new_user_id_fkey;
 DROP TABLE users;
 ALTER TABLE users_new RENAME TO users;
+-- Restore the self-referential referred_by_id FK on the rebuilt users table.
+ALTER TABLE users ADD CONSTRAINT users_referred_by_id_fkey FOREIGN KEY (referred_by_id) REFERENCES users(id);
+-- Restore FKs from 008/009 tables now pointing at the rebuilt users table.
+ALTER TABLE transactions ADD CONSTRAINT transactions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE topups ADD CONSTRAINT topups_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE carts ADD CONSTRAINT carts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE promocodes ADD CONSTRAINT promocodes_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
+ALTER TABLE promocode_uses ADD CONSTRAINT promocode_uses_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+-- Restore FKs now pointing at the rebuilt users table.
+ALTER TABLE login_challenges ADD CONSTRAINT login_challenges_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE mfa_enrollments ADD CONSTRAINT mfa_enrollments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE mfa_recovery ADD CONSTRAINT mfa_recovery_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE orders ADD CONSTRAINT orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE telegram_links ADD CONSTRAINT telegram_links_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
 CREATE TABLE referral_earnings (
  id VARCHAR(32) PRIMARY KEY,

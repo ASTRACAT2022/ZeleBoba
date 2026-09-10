@@ -13,7 +13,7 @@ x-app: &app
   stop_grace_period: 45s
 services:
   db:
-    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    image: postgres:17
     environment:
       POSTGRES_DB: billing
       POSTGRES_USER: billing_owner
@@ -42,6 +42,11 @@ services:
     command: ["php", "bin/console", "worker:run"]
     healthcheck:
       test: ["CMD", "php", "bin/console", "app:health", "worker"]
+  bot:
+    <<: *app
+    command: ["php", "bin/console", "telegram:poll"]
+    healthcheck:
+      test: ["CMD", "php", "bin/console", "app:health", "telegram"]
   scheduler:
     <<: *app
     command: ["sh", "-c", "while true; do php bin/console billing:reconcile; sleep 60; done"]
@@ -53,6 +58,12 @@ services:
     volumes: ["./public:/app/public:ro", "./infra/nginx.conf:/etc/nginx/nginx.conf:ro"]
     depends_on: [app]
     restart: unless-stopped
+    networks:
+      - default
+      - proxy
+networks:
+  proxy:
+    external: true
 volumes:
   postgres:
   app-secrets:

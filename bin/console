@@ -60,4 +60,33 @@ $cli->add((new Command('remnawave:sync'))->setDescription('Sync local subscripti
     foreach($report['details'] as $line) $o->writeln('  '.$line);
     return $report['errors']>0?1:0;
 }));
+$cli->add((new Command('telegram:poll'))->setDescription('Long-poll Telegram updates via mirror (no webhook needed)')->addOption('once',null,InputOption::VALUE_NONE,'Fetch one batch and exit')->setCode(function(InputInterface $i,OutputInterface $o) use($c){
+    $running=true;
+    if(function_exists('pcntl_async_signals')){pcntl_async_signals(true);pcntl_signal(SIGTERM,function()use(&$running){$running=false;});pcntl_signal(SIGINT,function()use(&$running){$running=false;});}
+    $http=\Symfony\Component\HttpClient\HttpClient::create();
+    $offset=0;$heartbeat=0;$revision=-1;
+    do {
+        if($revision!==$c->settings->revision()){$c=new \App\Container(array_intersect_key($c->config,array_flip(['DATABASE_DSN','DATABASE_USER','DATABASE_PASSWORD'])));$revision=$c->settings->revision();}
+        $token=$c->config['TELEGRAM_BOT_TOKEN'];
+        if($token===''){ $o->writeln('TELEGRAM_BOT_TOKEN not configured'); return 1; }
+        $base=rtrim($c->config['TELEGRAM_API_BASE']??'https://astracattg.netlify.app','/');
+        try {
+            $resp=$http->request('GET',$base.'/bot'.$token.'/getUpdates',['query'=>['timeout'=>30,'offset'=>$offset,'allowed_updates'=>['message','callback_query','pre_checkout_query','chat_member']],'timeout'=>60,'max_duration'=>70])->toArray();
+        } catch(\Throwable $e) {
+            $o->writeln('getUpdates error: '.$e->getMessage());
+            if($i->getOption('once')) return 1;
+            sleep(3); continue;
+        }
+        if(!($resp['ok']??false)){ $o->writeln('getUpdates not ok: '.json_encode($resp)); if($i->getOption('once')) return 1; sleep(3); continue; }
+        foreach(($resp['result']??[]) as $update){
+            $id=(int)($update['update_id']??0);
+            if($id>=$offset) $offset=$id+1;
+            try { $c->telegram->receive($update); }
+            catch(\Throwable $e){ $o->writeln('handle error update_id='.$id.': '.$e->getMessage()); }
+        }
+        if(time()-$heartbeat>10){ \App\Infrastructure\Reconciler::heartbeat($c->db,'telegram'); $heartbeat=time(); }
+        if($i->getOption('once')) return 0;
+    }while($running);
+    return 0;
+}));
 exit($cli->run());
