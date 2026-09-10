@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace App;
 use App\Infrastructure\{Database,Outbox,Worker};
-use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService};
+use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService};
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService};
@@ -32,6 +32,7 @@ final class Container
     public readonly MonitoringService $monitoring;
     public readonly BackupService $backups;
     public readonly MaintenanceService $maintenance;
+    public readonly UserAdminService $userAdmin;
     public readonly Payments $payments;
     public readonly PaymentService $paymentService;
     public readonly ProviderRegistry $providers;
@@ -74,6 +75,7 @@ final class Container
         $this->monitoring=new MonitoringService($this->db);
         $this->backups=new BackupService($this->db,dirname(__DIR__).'/var/backups');
         $this->maintenance=new MaintenanceService($this->db);
+        $this->userAdmin=new UserAdminService($this->db,$this->wallet);
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
         $this->providers=new ProviderRegistry($http,$config);

@@ -64,6 +64,12 @@ final class BillingService
             $this->db->execute("UPDATE orders SET status='paid',provider_payment_id=?,paid_at=? WHERE id=?",[$paymentId,$now,$orderId]);
             // Renewal: extend the existing subscription instead of creating a new one.
             $renewSub=$this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
+            // Record the purchase transaction for analytics (wallet history).
+            $type = $renewSub ? 'subscription_renewal' : 'subscription_purchase';
+            $this->db->execute(
+                'INSERT INTO transactions(id,seq,user_id,type,amount_kopeks,description,payment_method,external_id,is_completed,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)',
+                [Database::id(), $this->nextTxSeq(), $order['user_id'], $type, -$amount, 'Оплата заказа: '.$order['plan_name'], $provider, $paymentId, $now, $now]
+            );
             if ($renewSub) {
                 $base=max($now,(int)$renewSub['expires_at']);
                 $newExpiry=$base+(int)$order['duration_days']*86400;
@@ -121,5 +127,9 @@ final class BillingService
     public function audit(string $actor,string $action,string $subject): void
     {
         $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)',[Database::id(),$actor,$action,$subject,time()]);
+    }
+    private function nextTxSeq(): int
+    {
+        return (int)($this->db->one('SELECT COALESCE(MAX(seq),0)+1 AS s FROM transactions')['s'] ?? 1);
     }
 }

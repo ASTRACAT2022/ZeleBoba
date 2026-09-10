@@ -52,7 +52,7 @@ final class WebTest extends TestCase
         while($this->c->outbox->runOne($this->c->worker->handle(...))){}
         self::assertSame('fulfilled',$this->c->db->one('SELECT status FROM orders')['status']);
         self::assertSame(30100,$this->c->wallet->balance($this->uid)['balance_kopeks']);
-        self::assertCount(2,$this->c->db->all('SELECT * FROM transactions'));
+        self::assertCount(3,$this->c->db->all('SELECT * FROM transactions'));
     }
     public function testBalancePurchaseFailsWithoutFunds():void
     {

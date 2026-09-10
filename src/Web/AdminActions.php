@@ -34,7 +34,25 @@ trait AdminActions
                 $db->execute('UPDATE plans SET name=?,price_minor=?,duration_days=?,devices=?,traffic_bytes=?,squad_uuid=?,active=? WHERE id=?',[$name,$price,$days,$devices,$traffic*1073741824,$squad,$input->get('active')==='1'?1:0,$id]);$this->app->billing->audit($uid,'plan.updated',$id);
             });return new RedirectResponse('/admin/plans',303);
         }
-        if($handler==='admin-users')return $this->render('admin-users',['users'=>$db->all('SELECT id,email,telegram_id,role,disabled,created_at FROM users ORDER BY created_at DESC LIMIT 100')]);
+        if($handler==='admin-users')return $this->render('admin-users',['users'=>$db->all('SELECT id,email,telegram_id,role,disabled,balance_kopeks,created_at FROM users ORDER BY created_at DESC LIMIT 100')]);
+        if($handler==='admin-user-search'){
+            $query=$this->request->query->get('q','');
+            return $this->render('admin-users',['users'=>$this->app->userAdmin->search($query),'query'=>$query]);
+        }
+        if($handler==='admin-user')return $this->render('admin-user',['profile'=>$this->app->userAdmin->profile($id),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name')]);
+        if($handler==='admin-user-balance'){
+            $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
+            $this->app->userAdmin->adjustBalance($id,($amount??0)*100,$input->get('reason',''),$uid);return new RedirectResponse('/admin/users/'.$id,303);
+        }
+        if($handler==='admin-user-days'){
+            $this->app->userAdmin->grantDays($id,$input->getInt('days',0),$input->get('plan_id','')?:null,$uid);return new RedirectResponse('/admin/users/'.$id,303);
+        }
+        if($handler==='admin-user-discount'){
+            $this->app->userAdmin->setDiscount($id,$input->getInt('percent',0),$input->getInt('hours',0),$uid);return new RedirectResponse('/admin/users/'.$id,303);
+        }
+        if($handler==='admin-user-discount-clear'){
+            $this->app->userAdmin->clearDiscount($id,$uid);return new RedirectResponse('/admin/users/'.$id,303);
+        }
         if($handler==='admin-promocodes')return $this->render('admin-promocodes',['promocodes'=>$this->app->promocodes->list(),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name')]);
         if($handler==='admin-promocode-create'){
             $this->app->promocodes->create($input->all(),$uid);return new RedirectResponse('/admin/promocodes',303);
@@ -87,10 +105,16 @@ trait AdminActions
             $this->app->campaigns->create($input->all(),$uid);return new RedirectResponse('/admin/campaigns',303);
         }
         if($handler==='admin-reports'){
-            $stats=$this->app->reporting->salesStats(30);
-            $daily=$this->app->reporting->dailyRevenue(14);
+            $days=$input->getInt('days',30);
+            if($days<1||$days>365)$days=30;
+            $stats=$this->app->reporting->salesStats($days);
+            $daily=$this->app->reporting->dailyRevenue(min($days,30));
+            $byProvider=$this->app->reporting->revenueByProvider($days);
+            $byPlan=$this->app->reporting->revenueByPlan($days);
+            $byType=$this->app->reporting->revenueByType($days);
+            $topCustomers=$this->app->reporting->topCustomers($days);
             $top=$this->app->reporting->topReferrers();
-            return $this->render('admin-reports',['stats'=>$stats,'daily'=>$daily,'top'=>$top]);
+            return $this->render('admin-reports',['stats'=>$stats,'daily'=>$daily,'by_provider'=>$byProvider,'by_plan'=>$byPlan,'by_type'=>$byType,'top_customers'=>$topCustomers,'top'=>$top,'days'=>$days]);
         }
         if($handler==='admin-monitoring')return $this->render('admin-monitoring',['events'=>$this->app->monitoring->recentEvents(),'errors'=>$this->app->monitoring->errors(),'anomalies'=>$this->app->monitoring->trafficAnomalies()]);
         if($handler==='admin-monitoring-clear'){
