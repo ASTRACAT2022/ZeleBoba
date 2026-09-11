@@ -121,8 +121,9 @@ final class PaymentService
     private function outboxEnqueueVerify(string $paymentId): void
     {
         // Reuse the outbox for authoritative verification (webhook is only a hint).
-        $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,available_at,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING', [
-            Database::id(), 'payment.verify', 'verify:'.$paymentId, json_encode(['payment_id' => $paymentId], JSON_THROW_ON_ERROR), time(), time(),
+        // payment.verify is the highest-priority job; hardcode 100 to match Outbox::PRIORITY.
+        $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING', [
+            Database::id(), 'payment.verify', 'verify:'.$paymentId, json_encode(['payment_id' => $paymentId], JSON_THROW_ON_ERROR), 100, time(), time(),
         ]);
     }
 }

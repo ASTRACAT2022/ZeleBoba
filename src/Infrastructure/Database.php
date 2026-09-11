@@ -49,9 +49,13 @@ final class Database
         $this->transaction(function () use ($directory) {
             if ($this->postgres()) $this->execute('SELECT pg_advisory_xact_lock(817421)');
             $this->execute('CREATE TABLE IF NOT EXISTS migrations (version VARCHAR(100) PRIMARY KEY, applied_at BIGINT NOT NULL)');
+            $pg = $this->postgres();
             foreach (glob($directory.'/*.sql') as $path) {
                 if ($this->one('SELECT version FROM migrations WHERE version = ?', [basename($path)])) continue;
-                $this->pdo->exec(file_get_contents($path));
+                $sql = file_get_contents($path);
+                // SQLite cannot DROP/ADD constraints: strip PostgreSQL-only blocks.
+                if (!$pg) $sql = preg_replace('/-- \[PG\]\R.*?-- \[\/PG\]\R/s', '', $sql);
+                $this->pdo->exec($sql);
                 $this->execute('INSERT INTO migrations VALUES (?, ?)', [basename($path), time()]);
             }
         });

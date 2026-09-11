@@ -16,21 +16,50 @@ final class BroadcastService
             'INSERT INTO broadcast_history(id,target_type,message_text,total_count,status,admin_id,admin_name,category,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
             [$id, $targetType, $text, 0, 'in_progress', $adminId, $adminName, $category, $now]
         );
-        $this->outbox->enqueue('broadcast.run', 'broadcast:'.$id, ['broadcast_id' => $id]);
+        $this->outbox->enqueue('broadcast.run', 'broadcast:'.$id.':1', ['broadcast_id' => $id]);
         $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $adminId, 'broadcast.created', $id, $now]);
         return $this->db->one('SELECT * FROM broadcast_history WHERE id=?', [$id]);
     }
-    /** Run a broadcast: pick recipients and enqueue per-user sends. */
+    /** How many per-user broadcast sends to enqueue per broadcast.run tick. */
+    private static int $chunk = 150;
+    /** Delay (s) before the next broadcast.run is processed, so a chunk drains before the next is scheduled. */
+    private static int $chunkDelay = 45;
+
+    /** Run a broadcast: pick recipients and enqueue per-user sends in throttled chunks. */
     public function run(string $broadcastId): void
     {
         $b = $this->db->one('SELECT * FROM broadcast_history WHERE id=?', [$broadcastId]);
-        if (!$b || $b['status'] !== 'in_progress') return;
-        $recipients = $this->recipients($b['target_type']);
-        $this->db->execute('UPDATE broadcast_history SET total_count=? WHERE id=?', [count($recipients), $broadcastId]);
-        foreach ($recipients as $tgId) {
-            $this->outbox->enqueue('broadcast.send', 'bsend:'.$broadcastId.':'.$tgId, ['broadcast_id' => $broadcastId, 'chat_id' => $tgId, 'text' => $b['message_text']]);
+        if (!$b || !in_array($b['status'], ['in_progress', 'running'], true)) return;
+        if ($b['status'] === 'in_progress') {
+            $recipients = $this->recipients($b['target_type']);
+            $this->db->execute('UPDATE broadcast_history SET total_count=? WHERE id=?', [count($recipients), $broadcastId]);
+            $this->db->execute("UPDATE broadcast_history SET status='running' WHERE id=?", [$broadcastId]);
+        } else {
+            $recipients = $this->recipients($b['target_type']);
         }
-        $this->db->execute("UPDATE broadcast_history SET status='running' WHERE id=?", [$broadcastId]);
+        $remaining = array_values(array_filter(
+            $recipients,
+            fn($tgId) => !$this->db->one('SELECT 1 FROM outbox WHERE dedup_key=?', ['bsend:'.$broadcastId.':'.$tgId])
+        ));
+        $enqueued = 0;
+        foreach ($remaining as $tgId) {
+            if ($enqueued >= self::$chunk) break;
+            $this->outbox->enqueue('broadcast.send', 'bsend:'.$broadcastId.':'.$tgId, ['broadcast_id' => $broadcastId, 'chat_id' => $tgId, 'text' => $b['message_text']]);
+            $enqueued++;
+        }
+        if ($enqueued === 0) return;
+        // More recipients remain: schedule the next chunk after a pause instead of flooding
+        // the queue. Dedup keeps every recipient queued exactly once across ticks; each
+        // continuation tick gets its own dedup key (broadcast:<id>:<n>) because the first
+        // tick key is consumed (done) once the worker processes it.
+        if (count($remaining) > $enqueued) {
+            $this->outbox->enqueue('broadcast.run', 'broadcast:'.$broadcastId.':'.(string)$this->nextBatchKey($broadcastId), ['broadcast_id' => $broadcastId], self::$chunkDelay);
+        }
+    }
+    private function nextBatchKey(string $broadcastId): int
+    {
+        $row = $this->db->one("SELECT count(*) c FROM outbox WHERE topic='broadcast.run' AND dedup_key LIKE ?", ['broadcast:'.$broadcastId.':%']);
+        return (int)($row['c'] ?? 0) + 1;
     }
     private function recipients(string $target): array
     {

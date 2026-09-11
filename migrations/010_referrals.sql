@@ -56,6 +56,7 @@ CREATE TABLE users_new (
 INSERT INTO users_new(id,email,password_hash,telegram_id,role,created_at,totp_secret,totp_last_step,disabled,balance_kopeks,has_made_first_topup,promo_offer_discount_percent,promo_offer_discount_source,promo_offer_discount_expires_at,has_had_paid_subscription)
  SELECT id,email,password_hash,telegram_id,role,created_at,totp_secret,totp_last_step,disabled,balance_kopeks,has_made_first_topup,promo_offer_discount_percent,promo_offer_discount_source,promo_offer_discount_expires_at,has_had_paid_subscription FROM users;
 -- PostgreSQL: drop FKs referencing users before dropping the table, then restore them.
+-- [PG]
 ALTER TABLE login_challenges DROP CONSTRAINT IF EXISTS login_challenges_user_id_fkey;
 ALTER TABLE mfa_enrollments DROP CONSTRAINT IF EXISTS mfa_enrollments_user_id_fkey;
 ALTER TABLE mfa_recovery DROP CONSTRAINT IF EXISTS mfa_recovery_user_id_fkey;
@@ -72,8 +73,10 @@ ALTER TABLE carts DROP CONSTRAINT IF EXISTS carts_user_id_fkey;
 ALTER TABLE promocodes DROP CONSTRAINT IF EXISTS promocodes_created_by_fkey;
 ALTER TABLE promocode_uses DROP CONSTRAINT IF EXISTS promocode_uses_user_id_fkey;
 ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_new_user_id_fkey;
+-- [/PG]
 DROP TABLE users;
 ALTER TABLE users_new RENAME TO users;
+-- [PG]
 -- Restore the self-referential referred_by_id FK on the rebuilt users table.
 ALTER TABLE users ADD CONSTRAINT users_referred_by_id_fkey FOREIGN KEY (referred_by_id) REFERENCES users(id);
 -- Restore FKs from 008/009 tables now pointing at the rebuilt users table.
@@ -91,6 +94,7 @@ ALTER TABLE orders ADD CONSTRAINT orders_user_id_fkey FOREIGN KEY (user_id) REFE
 ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 ALTER TABLE telegram_links ADD CONSTRAINT telegram_links_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+-- [/PG]
 
 CREATE TABLE referral_earnings (
  id VARCHAR(32) PRIMARY KEY,

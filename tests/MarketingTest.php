@@ -101,4 +101,39 @@ final class MarketingTest extends TestCase
         self::assertSame(10000,$this->wallet->balance($this->uid)['balance_kopeks']);
         self::assertNull($svc->register($this->uid,'unknown'));
     }
+    public function testPriorityDrainsPersonalTelegramBeforeBroadcast():void
+    {
+        // Personal telegram.send must be processed before a mass broadcast, even when older.
+        $older=time()-300;
+        $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at) VALUES(?,?,?,?,?,?,?)',['aaaa','broadcast.send','bsend:b1:1','{}',10,$older,$older]);
+        $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at) VALUES(?,?,?,?,?,?,?)',['bbbb','telegram.send','reply:1','{}',60,time(),time()]);
+        $seen=[];
+        self::assertTrue($this->outbox->runOne(function($topic,$p)use(&$seen){$seen[]=$topic;}));
+        self::assertSame(['telegram.send'],$seen);
+        $this->db->execute("UPDATE outbox SET status='processing',locked_until=? WHERE id=?",[time()+60,'bbbb']);
+        self::assertTrue($this->outbox->runOne(function($topic,$p)use(&$seen){$seen[]=$topic;}));
+        self::assertSame(['telegram.send','broadcast.send'],$seen);
+    }
+    public function testBroadcastChunkingSchedulesContinuationTicks():void
+    {
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['111',$this->uid]);
+        $this->db->execute('INSERT INTO users(id,telegram_id,created_at) VALUES(?,?,?)',['u2','222',time()]);
+        $this->db->execute('INSERT INTO users(id,telegram_id,created_at) VALUES(?,?,?)',['u3','333',time()]);
+        $svc=new BroadcastService($this->db,$this->outbox);
+        $b=$svc->create('all','Всем привет!',$this->uid,'admin');
+        // Initial create tick only queues the chunk (2), leaving 1 recipient for a continuation tick.
+        $ref=new \ReflectionClass($svc);$chunk=$ref->getProperty('chunk');$chunk->setValue(null, 2);
+        $svc->run($b['id']);
+        self::assertSame(3,(int)$this->db->one('SELECT total_count FROM broadcast_history WHERE id=?',[$b['id']])['total_count']);
+        self::assertSame(2,(int)$this->db->one("SELECT count(*) c FROM outbox WHERE topic='broadcast.send' AND status='pending'")['c']);
+        // create() queued tick :1 and run() scheduled continuation :2 — that is still one upcoming re-run.
+        self::assertSame(2,(int)$this->db->one("SELECT count(*) c FROM outbox WHERE topic='broadcast.run'")['c']);
+        // Next tick enqueues the remaining recipient; no further tick is scheduled once all are queued.
+        $svc->run($b['id']);
+        self::assertSame(3,(int)$this->db->one("SELECT count(*) c FROM outbox WHERE topic='broadcast.send'")['c']);
+        self::assertSame(2,(int)$this->db->one("SELECT count(*) c FROM outbox WHERE topic='broadcast.run'")['c'],'no extra tick');
+        // Re-running must not duplicate already-queued recipients.
+        $svc->run($b['id']);
+        self::assertSame(3,(int)$this->db->one("SELECT count(*) c FROM outbox WHERE topic='broadcast.send'")['c']);
+    }
 }
