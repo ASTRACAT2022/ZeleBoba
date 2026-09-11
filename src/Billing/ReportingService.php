@@ -61,12 +61,18 @@ final class ReportingService
     public function dailyRevenue(int $days = 14): array
     {
         $since = time() - $days * 86400;
+        // Keep this query portable: the application also supports SQLite for
+        // local installations, where PostgreSQL's to_timestamp()/::date do
+        // not exist.
         $rows = $this->db->all(
-            "SELECT to_timestamp(created_at)::date AS day, SUM(amount_minor) AS total FROM ledger_entries WHERE account='provider_clearing' AND created_at>? GROUP BY day ORDER BY day",
+            "SELECT created_at, amount_minor FROM ledger_entries WHERE account='provider_clearing' AND created_at>? ORDER BY created_at",
             [$since]
         );
         $result = [];
-        foreach ($rows as $row) $result[$row['day']] = (int)$row['total'];
+        foreach ($rows as $row) {
+            $day = gmdate('Y-m-d', (int)$row['created_at']);
+            $result[$day] = ($result[$day] ?? 0) + (int)$row['amount_minor'];
+        }
         return $result;
     }
     /** Revenue split by payment provider. */

@@ -43,7 +43,11 @@ final class Application
             if (in_array($handler,['security','mfa-begin','mfa-enroll','mfa-verify'],true))return $this->security($handler);
             if(str_starts_with($handler,'admin') || in_array($handler,['retry','plan'],true)){
                 if($this->user['role']!=='admin')return $this->render('error',['message'=>'Недостаточно прав.'],403);
-                if((int)$this->user['mfa_enabled'] && (int)$this->user['admin_verified_until']<time())return new RedirectResponse('/security',303);
+                // Every admin endpoint requires an enrolled and recently
+                // verified second factor. Previously an admin without MFA
+                // could access the whole admin area without being redirected
+                // to the enrollment flow.
+                if(!(int)$this->user['mfa_enabled'] || (int)$this->user['admin_verified_until']<time())return new RedirectResponse('/security',303);
             }
             if(str_starts_with($handler,'admin-'))return $this->administration($handler,$match['id']??'',$match['sid']??'');
             return $this->dispatch($handler,$match['id']??'');
