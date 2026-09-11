@@ -6,6 +6,7 @@ use App\Infrastructure\{Database,Outbox,Worker};
 use App\Billing\BillingService;
 use App\Identity\{Auth,TelegramLogin};
 use App\Integration\{Telegram,Payments,DemoProvisioner};
+use App\Container;
 use Symfony\Component\HttpClient\{MockHttpClient,Response\MockResponse};
 final class TelegramBotTest extends TestCase
 {
@@ -107,5 +108,44 @@ final class TelegramBotTest extends TestCase
     {
         $this->bot->receive(['update_id'=>108,'message'=>['from'=>['id'=>555],'chat'=>['id'=>999,'type'=>'group'],'text'=>'/buy basic']]);
         self::assertCount(0,$this->db->all('SELECT * FROM orders'));
+    }
+    public function testGateBlocksUntilChannelSubscribed(): void
+    {
+        $config=['APP_ENV'=>'test','APP_URL'=>'https://cabinet.example','DATABASE_DSN'=>'sqlite::memory:','DATABASE_USER'=>'','DATABASE_PASSWORD'=>'','PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo','TELEGRAM_BOT_TOKEN'=>'TOKEN','YOOKASSA_SHOP_ID'=>'','YOOKASSA_SECRET'=>'','REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>''];
+        $c=new Container($config);
+        $c->db->migrate(__DIR__.'/../migrations');
+        $c->channels->add('@AstracatUO','https://t.me/AstracatUO','ASTRACAT UO','admin');
+        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['ok'=>true,'result'=>['status'=>'left']])));
+        $bot=new Telegram($c->db,$c->outbox,$c->billing,'https://cabinet.example',new TelegramLogin($c->db,new Auth($c->db)),'https://astracattg.netlify.app',$http);
+        $bot->setApp($c);
+        // /start is blocked: gate message, no welcome
+        $bot->receive(['update_id'=>201,'message'=>['from'=>['id'=>666],'chat'=>['id'=>666,'type'=>'private'],'text'=>'/start']]);
+        $payload=$this->gatePayload($c);
+        self::assertStringContainsString('подпишитесь',$payload['text']);
+        self::assertStringContainsString('ASTRACAT UO',$payload['text']);
+        self::assertSame('https://t.me/AstracatUO',$payload['reply_markup']['inline_keyboard'][0][0]['url']);
+        // callback chk: still left -> no access, no order
+        $bot->receive(['update_id'=>202,'callback_query'=>['id'=>'q2','data'=>'chk:@AstracatUO','from'=>['id'=>666],'message'=>['chat'=>['id'=>666,'type'=>'private']]]]);
+        self::assertCount(0,$c->db->all('SELECT * FROM orders'));
+        // after tapping "subscribed" with member status, /status works
+        $http2=new MockHttpClient(fn()=>new MockResponse(json_encode(['ok'=>true,'result'=>['status'=>'member']])));
+        $bot2=new Telegram($c->db,$c->outbox,$c->billing,'https://cabinet.example',new TelegramLogin($c->db,new Auth($c->db)),'https://astracattg.netlify.app',$http2);
+        $bot2->setApp($c);
+        $bot2->receive(['update_id'=>203,'callback_query'=>['id'=>'q3','data'=>'chk:@AstracatUO','from'=>['id'=>666],'message'=>['chat'=>['id'=>666,'type'=>'private']]]]);
+        $payload2=$this->gatePayload($c,'reply:203');
+        self::assertStringContainsString('Доступ открыт',$payload2['text']);
+        $bot2->receive(['update_id'=>204,'message'=>['from'=>['id'=>666],'chat'=>['id'=>666,'type'=>'private'],'text'=>'/status']]);
+        $uid=$c->db->one('SELECT id FROM users WHERE telegram_id=\'666\'')['id'];
+        self::assertSame([],$c->channels->missingChannels($uid));
+    }
+    private function gatePayload(Container $c, string $dedup = ''): array
+    {
+        $row = $dedup !== ''
+            ? $c->db->one('SELECT payload FROM outbox WHERE dedup_key=?',[$dedup])
+            : $c->db->one('SELECT payload FROM outbox WHERE topic=\'telegram.send\' ORDER BY rowid DESC LIMIT 1');
+        if(!$row) return [];
+        $json=$row['payload'];
+        if(str_starts_with($json,'enc:')) $json=$c->settings->vault->open('outbox:telegram.send',substr($json,4));
+        return json_decode($json,true)??[];
     }
 }

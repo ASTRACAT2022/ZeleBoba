@@ -3,12 +3,38 @@ declare(strict_types=1);
 namespace App\Integration;
 use App\Infrastructure\{Database,Outbox};
 use App\Billing\{BillingService,BillingError};
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Telegram
 {
     private ?\App\Container $app = null;
-    public function __construct(private Database $db,private Outbox $outbox,private BillingService $billing,private string $appUrl, private ?\App\Identity\TelegramLogin $login=null, private string $apiBase='https://astracattg.netlify.app') {}
+    private ?HttpClientInterface $http = null;
+    public function __construct(private Database $db,private Outbox $outbox,private BillingService $billing,private string $appUrl, private ?\App\Identity\TelegramLogin $login=null, private string $apiBase='https://astracattg.netlify.app', ?HttpClientInterface $http=null) { $this->http=$http; }
     public function setApp(\App\Container $app): void { $this->app = $app; }
     public function apiBase(): string { return rtrim($this->apiBase,'/')===''?'https://astracattg.netlify.app':rtrim($this->apiBase,'/'); }
+
+    private function httpClient(): HttpClientInterface
+    {
+        return $this->http ??= HttpClient::create();
+    }
+
+    /** Ask the Telegram API (via mirror) whether $tgId is a member of the channel. */
+    private function checkMembership(string $tgId, string $channelId): bool
+    {
+        $token = $this->app?->config['TELEGRAM_BOT_TOKEN'] ?? '';
+        $target = $channelId; // getChatMember accepts @username or numeric chat_id
+        if ($token === '') return false;
+        try {
+            $resp = $this->httpClient()->request('GET', $this->apiBase().'/bot'.$token.'/getChatMember', [
+                'query' => ['chat_id' => $target, 'user_id' => $tgId],
+                'timeout' => 12, 'max_duration' => 15,
+            ])->toArray();
+            if (!($resp['ok'] ?? false)) return false;
+            $status = (string)($resp['result']['status'] ?? '');
+            return in_array($status, ['member', 'administrator', 'creator'], true);
+        } catch (\Throwable) {
+            return false;
+        }
+    }
     public function receive(array $update): void
     {
         $id=$update['update_id']??null; $message=$update['message']??null;
@@ -23,6 +49,8 @@ final class Telegram
         $tg=(string)$message['from']['id']; $text=trim($message['text']??'');
         // Persist inbox receipt and response together. Purchases use the update id as a separate idempotency key.
         if ($this->db->one('SELECT update_id FROM telegram_updates WHERE update_id=?',[$id])) return;
+        // Mandatory channel gate: block the whole bot until the user follows required channels.
+        if (!$this->gatePass($id,$tg)) return;
         if($this->login && str_starts_with($text,'/start login_')){
             $token=substr($text,13);
             if($this->login->pending($token)){
@@ -182,6 +210,36 @@ final class Telegram
         $user=$this->db->one('SELECT * FROM users WHERE telegram_id=?',[$tg]);
         if(!$user || (int)$user['disabled']===1) return null;
         return $user;
+    }
+    /** Membership gate: returns true when the user passes all active required channels. */
+    private function gatePass(int $updateId, string $tg): bool
+    {
+        if (!$this->app || !$this->app->channels) return true;
+        $user = $this->ensureUser($tg);
+        if (!$user) return false;
+        $missing = $this->app->channels->missingChannels($user['id']);
+        if (!$missing) return true;
+        $keyboard = [];
+        foreach ($missing as $ch) {
+            $url = $ch['channel_link'] ?? ('https://t.me/'.ltrim((string)$ch['channel_id'], '@'));
+            $keyboard[] = [['text' => '📢 Подписаться: '.($ch['title'] ?? 'канал'), 'url' => $url]];
+        }
+        $keyboard[] = [['text' => '✅ Я подписался', 'callback_data' => 'chk:'.($missing[0]['channel_id'] ?? '')]];
+        $names = implode(', ', array_map(fn($ch) => $ch['title'] ?? $ch['channel_id'], $missing));
+        $this->db->transaction(function () use ($updateId, $tg, $names, $keyboard) {
+            if (!$this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$updateId,time()])) return;
+            $this->outbox->enqueue('telegram.send','gate:'.$updateId,['chat_id'=>$tg,'text'=>"Чтобы пользоваться ботом, подпишитесь на наш канал: ".$names."\nПосле подписки нажмите «✅ Я подписался».",'reply_markup'=>['inline_keyboard'=>$keyboard]]);
+        });
+        return false;
+    }
+    /** Re-check membership after the user tapped "Я подписался". */
+    private function handleCheckCallback(int|string $updateId, string $tg, string $channelId): void
+    {
+        $subscribed = $this->checkMembership($tg, $channelId);
+        $user = $this->ensureUser($tg);
+        if ($this->app && $subscribed && $user) $this->app->channels->updateMembership($user['id'], $channelId, true);
+        $text = $subscribed ? "✅ Спасибо! Доступ открыт." : "Подписка ещё не найдена. Убедитесь, что вы вступили в канал, и нажмите кнопку ещё раз.";
+        $this->reply($updateId, $tg, $text, $subscribed ? $this->mainMenu() : null);
     }
     private function supportUrl(): string
     {
@@ -418,6 +476,10 @@ final class Telegram
         if(is_string($queryId) && $queryId!=='') $this->db->transaction(fn()=> $this->outbox->enqueue('telegram.answer','answer:'.$updateId,['callback_query_id'=>$queryId]));
         // Dedup callbacks by update_id
         if($this->db->one('SELECT update_id FROM telegram_updates WHERE update_id=?',[$updateId])) return;
+        if(str_starts_with($data,'chk:')){
+            $this->handleCheckCallback($updateId, $tg, substr($data,4));
+            return;
+        }
         if($this->login && str_starts_with($data,'login:')){
             $ok=$this->login->approve(substr($data,6),$tg);
             $this->reply($updateId,$tg,$ok?'Вход подтверждён. Вернитесь в браузер и нажмите «Войти в кабинет».':'Запрос уже обработан или истёк. Начните вход заново.',null);
@@ -425,6 +487,7 @@ final class Telegram
         }
         $user=$this->ensureUser($tg);
         if(!$user) return;
+        if(!$this->gatePass($updateId,$tg)) return;
         if($data==='menu:main'){ $this->reply($updateId,$tg,'Меню. Кабинет: '.$this->appUrl,$this->mainMenu()); return; }
         if($data==='menu:plans'){ $this->sendPlans($updateId,$tg); return; }
         if($data==='menu:subs'){ $this->sendSubs($updateId,$tg,$user); return; }

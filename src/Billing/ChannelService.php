@@ -8,7 +8,7 @@ final class ChannelService
     /** Add a required channel. */
     public function add(string $channelId, string $link, string $title, string $actor): array
     {
-        if (!preg_match('/^-?[0-9]{5,20}$/D', $channelId)) throw new BillingError('Некорректный ID канала.');
+        if (!preg_match('/^-?[0-9]{5,20}$/D', $channelId) && !preg_match('/^@[A-Za-z0-9_]{4,32}$/D', $channelId)) throw new BillingError('Некорректный ID канала (число или @username).');
         if ($link !== '' && !str_starts_with($link, 'https://t.me/')) throw new BillingError('Ссылка: https://t.me/...');
         $id = Database::id();
         $this->db->execute('INSERT INTO required_channels(id,channel_id,channel_link,title,is_active,sort_order,created_at) VALUES(?,?,?,?,1,0,?)', [$id, $channelId, $link !== '' ? $link : null, $title !== '' ? $title : null, time()]);
