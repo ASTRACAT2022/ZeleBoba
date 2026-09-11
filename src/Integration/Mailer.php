@@ -91,7 +91,7 @@ final class Mailer
         $this->smtpSend($fp, 'DATA');
         $this->smtpCmd($fp, 354);
         $headers = [
-            'From: ' . $this->config['SMTP_FROM_NAME'] !== '' ? $this->config['SMTP_FROM_NAME'] . ' <' . $from . '>' : $from,
+            'From: ' . ((string)($this->config['SMTP_FROM_NAME'] ?? '') !== '' ? $this->config['SMTP_FROM_NAME'] . ' <' . $from . '>' : $from),
             'To: <' . $toEmail . '>',
             'Subject: ' . $this->encodeHeader($subject),
             'MIME-Version: 1.0',
@@ -129,6 +129,10 @@ final class Mailer
     private function encodeHeader(string $s): string
     {
         if (preg_match('/^[\x20-\x7E]*$/D', $s)) return $s;
-        return '=?UTF-8?B?' . base64_encode($s) . '?=';
+        // RFC 2047: each encoded-word must be <= 75 chars, so split long subjects
+        // into multiple encoded-words (separated by a space; clients join them).
+        $b64 = base64_encode($s);
+        $chunks = str_split($b64, 44); // 44 base64 chars -> word of 56 chars incl. delimiters
+        return implode(' ', array_map(fn($c) => '=?UTF-8?B?' . $c . '?=', $chunks));
     }
 }
