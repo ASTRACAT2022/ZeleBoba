@@ -88,6 +88,16 @@ final class RemnawaveProvisioner implements Provisioner
         if (!$id) return;
         $this->request('DELETE','/api/users/'.$id);
     }
+    /** Remove a panel user by known panel id (works for legacy Django usernames). */
+    public function removeById(int $panelId): void
+    {
+        if ($panelId <= 0) return;
+        try {
+            $this->request('DELETE','/api/users/'.$panelId);
+        } catch (\Throwable $e) {
+            if (method_exists($e,'getCode') && $e->getCode()!==404) throw $e;
+        }
+    }
     private function request(string $method,string $path,?array $body=null): \Symfony\Contracts\HttpClient\ResponseInterface
     {
         $options=['auth_bearer'=>$this->token,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0];

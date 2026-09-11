@@ -7,7 +7,7 @@ use App\Billing\BillingError;
 use Symfony\Component\HttpFoundation\{Response,RedirectResponse};
 trait AdminActions
 {
-    private function administration(string $handler,string $id):Response
+    private function administration(string $handler,string $id,string $sid=''):Response
     {
         $input=$this->request->request;$db=$this->app->db;$uid=$this->user['id'];
         if($handler==='admin-config-save'){
@@ -39,7 +39,7 @@ trait AdminActions
             $query=$this->request->query->get('q','');
             return $this->render('admin-users',['users'=>$this->app->userAdmin->search($query),'query'=>$query]);
         }
-        if($handler==='admin-user')return $this->render('admin-user',['profile'=>$this->app->userAdmin->profile($id),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name')]);
+        if($handler==='admin-user')return $this->render('admin-user',['profile'=>$this->app->userAdmin->profile($id),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name'),'sub_removed'=>$this->request->query->has('sub_removed')]);
         if($handler==='admin-user-balance'){
             $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
             $this->app->userAdmin->adjustBalance($id,($amount??0)*100,$input->get('reason',''),$uid);return new RedirectResponse('/admin/users/'.$id,303);
@@ -52,6 +52,9 @@ trait AdminActions
         }
         if($handler==='admin-user-discount-clear'){
             $this->app->userAdmin->clearDiscount($id,$uid);return new RedirectResponse('/admin/users/'.$id,303);
+        }
+        if($handler==='admin-user-subscription-remove'){
+            $this->app->userAdmin->removeSubscription($id,$sid,$uid);return new RedirectResponse('/admin/users/'.$id.'?sub_removed=1',303);
         }
         if($handler==='admin-promocodes')return $this->render('admin-promocodes',['promocodes'=>$this->app->promocodes->list(),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name')]);
         if($handler==='admin-promocode-create'){

@@ -77,10 +77,11 @@ final class Container
         $this->monitoring=new MonitoringService($this->db);
         $this->backups=new BackupService($this->db,dirname(__DIR__).'/var/backups');
         $this->maintenance=new MaintenanceService($this->db);
-        $this->userAdmin=new UserAdminService($this->db,$this->wallet);
         $this->compensations=new CompensationService($this->db,$this->outbox,$this->wallet);
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
+        $remnawave=new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']);
+        $this->userAdmin=new UserAdminService($this->db,$this->wallet,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null);
         $this->providers=new ProviderRegistry($http,$config);
         foreach ([new YooKassaProvider($http,$config),new FreeKassaProvider($http,$config,$this->db),new CryptoBotProvider($http,$config),new TelegramStarsProvider($http,$config),new LavaProvider($http,$config),new WataProvider($http,$config),new HeleketProvider($http,$config),new PlategaProvider($http,$config),new TributeProvider($http,$config),new MulenPayProvider($http,$config),new Pal24Provider($http,$config),new CloudPaymentsProvider($http,$config),new KassaAiProvider($http,$config),new RioPayProvider($http,$config),new SeverPayProvider($http,$config),new PayPearProvider($http,$config),new RollyPayProvider($http,$config),new OverpayProvider($http,$config),new AuraPayProvider($http,$config),new EtoplatezhiProvider($http,$config),new AntilopayProvider($http,$config),new JupiterProvider($http,$config),new DonutProvider($http,$config),new CisPayProvider($http,$config),new TabPayProvider($http,$config),new ParityPayProvider($http,$config)] as $provider) $this->providers->register($provider);
         $this->paymentService=new PaymentService($this->db,$this->billing,$http,$config,$this->providers);

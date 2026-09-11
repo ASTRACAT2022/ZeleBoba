@@ -2,9 +2,10 @@
 declare(strict_types=1);
 namespace App\Billing;
 use App\Infrastructure\Database;
+use App\Integration\Provisioner;
 final class UserAdminService
 {
-    public function __construct(private Database $db, private Wallet $wallet) {}
+    public function __construct(private Database $db, private Wallet $wallet, private ?Provisioner $provisioner = null) {}
     /** Full user profile for the admin: account, balance, subscriptions, orders, promocodes, referrals. */
     public function profile(string $userId): array
     {
@@ -88,6 +89,32 @@ final class UserAdminService
     {
         $this->db->execute('UPDATE users SET promo_offer_discount_percent=0,promo_offer_discount_source=NULL,promo_offer_discount_expires_at=NULL WHERE id=?', [$userId]);
         $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.discount_cleared', $userId, time()]);
+    }
+    /** Remove a subscription: deletes the panel user (Remnawave) and the local row. */
+    public function removeSubscription(string $userId, string $subscriptionId, string $actor): void
+    {
+        $this->db->transaction(function () use ($userId, $subscriptionId, $actor) {
+            $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
+            if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
+            // 1) Delete the VPN user from Remnawave (legacy subs use panel id, new ones use zb_<id>).
+            if ($this->provisioner) {
+                $panelId = (int)($sub['remnawave_id'] ?? 0);
+                if ($panelId > 0) {
+                    if (method_exists($this->provisioner, 'removeById')) {
+                        $this->provisioner->removeById($panelId);
+                    } else {
+                        $this->provisioner->remove('zb_' . $sub['id']);
+                    }
+                } else {
+                    $this->provisioner->remove('zb_' . $sub['id']);
+                }
+            }
+            // 2) Drop pending ops for this subscription.
+            $this->db->execute("DELETE FROM outbox WHERE topic IN ('subscription.provision','subscription.extend') AND payload LIKE ?", ['%'.$subscriptionId.'%']);
+            // 3) Delete local row (no FK constraints on subscriptions).
+            $this->db->execute('DELETE FROM subscriptions WHERE id=?', [$subscriptionId]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_removed', $userId, time()]);
+        });
     }
     /** Search users by email, telegram id, referral code. */
     public function search(string $query, int $limit = 50): array
