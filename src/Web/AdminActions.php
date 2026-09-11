@@ -28,7 +28,7 @@ trait AdminActions
         if($handler==='admin-plans')return $this->render('admin-plans',['plans'=>$db->all('SELECT * FROM plans ORDER BY active DESC,price_minor')]);
         if($handler==='admin-plan-save'){
             $name=trim($input->get('name',''));$price=filter_var($input->get('price_minor'),FILTER_VALIDATE_INT);$days=$input->getInt('duration_days');$devices=$input->getInt('devices');$traffic=filter_var($input->get('traffic_gb'),FILTER_VALIDATE_INT);$squad=trim($input->get('squad_uuid',''));
-            if(!$name||mb_strlen($name)>100||$price<100||$price>100000000||$days<1||$days>3650||$devices<1||$devices>20||$traffic===false||$traffic<0||$traffic>100000||($squad!==''&&!preg_match('/^[0-9a-f-]{36}$/iD',$squad)))throw new BillingError('Проверьте параметры тарифа. Цена указывается в копейках.');
+            if(!$name||mb_strlen($name)>100||$price<100||$price>100000000||$days<1||$days>3650||$devices<0||$devices>20||$traffic===false||$traffic<0||$traffic>100000||($squad!==''&&!preg_match('/^[0-9a-f-]{36}$/iD',$squad)))throw new BillingError('Проверьте параметры тарифа. Цена указывается в копейках.');
             $db->transaction(function()use($db,$input,$name,$price,$days,$devices,$traffic,$squad,$id,$uid){
                 if(!$db->one('SELECT id FROM plans WHERE id=?'.$db->lock(),[$id]))throw new BillingError('Тариф не найден.');
                 $db->execute('UPDATE plans SET name=?,price_minor=?,duration_days=?,devices=?,traffic_bytes=?,squad_uuid=?,active=? WHERE id=?',[$name,$price,$days,$devices,$traffic*1073741824,$squad,$input->get('active')==='1'?1:0,$id]);$this->app->billing->audit($uid,'plan.updated',$id);

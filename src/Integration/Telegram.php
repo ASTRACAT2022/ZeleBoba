@@ -223,7 +223,7 @@ final class Telegram
         foreach($plans as $p){
             $price=Payments::decimal((int)$p['price_minor']).' ₽';
             $traffic=(int)$p['traffic_bytes']===0?'безлимит':(round((int)$p['traffic_bytes']/1073741824).' ГБ');
-            $lines[]=$p['name'].' · '.$price.' / '.$p['duration_days'].' дн. · '.$traffic.' · до '.$p['devices'].' устр.';
+            $lines[]=$p['name'].' · '.$price.' / '.$p['duration_days'].' дн. · '.$traffic.' · '.((int)$p['devices']===0?'безлимит устр.':'до '.$p['devices'].' устр.');
             $keyboard[]= [['text'=>'Купить '.$p['name'].' · '.$price,'callback_data'=>'buy:'.$p['id']]];
         }
         $keyboard[]= [['text'=>'Мои подписки','callback_data'=>'menu:subs'],['text'=>'Меню','callback_data'=>'menu:main']];
@@ -437,7 +437,7 @@ final class Telegram
             if(!$plan){ $this->reply($updateId,$tg,'Тариф недоступен.',$this->mainMenu()); return; }
             $price=Payments::decimal((int)$plan['price_minor']).' ₽';
             $traffic=(int)$plan['traffic_bytes']===0?'безлимит':(round((int)$plan['traffic_bytes']/1073741824).' ГБ');
-            $text=$plan['name'].' · '.$price.' / '.$plan['duration_days'].' дн. · '.$traffic.' · до '.$plan['devices'].' устр.';
+            $text=$plan['name'].' · '.$price.' / '.$plan['duration_days'].' дн. · '.$traffic.' · '.((int)$plan['devices']===0?'безлимит устр.':'до '.$plan['devices'].' устр.');
             $this->reply($updateId,$tg,$text,['inline_keyboard'=>[[['text'=>'Купить · '.$price,'callback_data'=>'buy:'.$plan['id']]], [['text'=>'Назад','callback_data'=>'menu:plans']]]]);
             return;
         }
