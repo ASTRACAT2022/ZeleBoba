@@ -72,6 +72,24 @@ final class RemnawaveProvisioner implements Provisioner
         $data=$response->toArray()['response']??null;
         return $data===null||$data===[] ? null : $data;
     }
+    public function fetchById(int $id): ?array
+    {
+        $response=$this->request('GET','/api/users/'.$id);
+        if ($response->getStatusCode()===404) return null;
+        $data=$response->toArray()['response']??null;
+        return $data===null||$data===[] ? null : $data;
+    }
+    /** PATCH a panel user by panel id (legacy subscriptions keep old usernames). */
+    public function updateById(int $id, int $trafficBytes, int $devices, int $expiresAt): void
+    {
+        $this->request('PATCH','/api/users',[
+            'id'=>$id,
+            'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',$expiresAt),
+            'trafficLimitBytes'=>$trafficBytes,
+            'hwidDeviceLimit'=>$devices,
+            'status'=>'ACTIVE',
+        ]);
+    }
     public function disable(string $username): void
     {
         $user=$this->fetch($username);

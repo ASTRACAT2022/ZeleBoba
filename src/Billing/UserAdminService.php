@@ -90,6 +90,106 @@ final class UserAdminService
         $this->db->execute('UPDATE users SET promo_offer_discount_percent=0,promo_offer_discount_source=NULL,promo_offer_discount_expires_at=NULL WHERE id=?', [$userId]);
         $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.discount_cleared', $userId, time()]);
     }
+    /** Full subscription view with live panel data (traffic used, devices, status). */
+    public function subscription(string $subscriptionId): array
+    {
+        $sub = $this->db->one(
+            "SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,u.email,u.telegram_id FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id LEFT JOIN users u ON u.id=s.user_id WHERE s.id=?",
+            [$subscriptionId]
+        );
+        if (!$sub) throw new BillingError('Подписка не найдена.');
+        $panel = null;
+        if ($this->provisioner) {
+            try {
+                if ((int)($sub['remnawave_id'] ?? 0) > 0) {
+                    $panel = $this->provisioner->fetchById((int)$sub['remnawave_id']);
+                } else {
+                    $panel = $this->provisioner->fetch('zb_'.$sub['id']);
+                }
+            } catch (\Throwable $e) {}
+        }
+        $panelTrafficUsed = 0;
+        if ($panel) {
+            $panelTrafficUsed = (int)($panel['userTraffic']['usedTrafficBytes'] ?? 0) / 1073741824;
+        }
+        return [
+            'sub' => $sub,
+            'panel' => $panel,
+            'panel_traffic_used_gb' => (float)$panelTrafficUsed,
+            'plans' => $this->db->all('SELECT id,name,duration_days,traffic_bytes,devices FROM plans ORDER BY display_order'),
+        ];
+    }
+    /** Update subscription traffic limit (GB) locally + push to Remnawave. */
+    public function updateSubscriptionTraffic(string $userId, string $subscriptionId, int $trafficGb, string $actor): void
+    {
+        if ($trafficGb < 0 || $trafficGb > 100000) throw new BillingError('Трафик 0–100000 ГБ.');
+        $this->db->transaction(function () use ($userId, $subscriptionId, $trafficGb, $actor) {
+            $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
+            if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
+            $this->db->execute('UPDATE subscriptions SET traffic_limit_gb=? WHERE id=?', [$trafficGb, $subscriptionId]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_traffic_changed', $userId, time()]);
+        });
+        $this->applyPanelChanges($subscriptionId);
+    }
+    /** Update subscription device limit locally + push to Remnawave (0 = unlimited). */
+    public function updateSubscriptionDevices(string $userId, string $subscriptionId, int $devices, string $actor): void
+    {
+        if ($devices < 0 || $devices > 20) throw new BillingError('Устройства 0–20 (0 = безлимит).');
+        $this->db->transaction(function () use ($userId, $subscriptionId, $devices, $actor) {
+            $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
+            if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
+            $this->db->execute('UPDATE subscriptions SET device_limit=? WHERE id=?', [$devices, $subscriptionId]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_devices_changed', $userId, time()]);
+        });
+        $this->applyPanelChanges($subscriptionId);
+    }
+    /** Extend subscription by N days (from now or from current expiry), sync panel expiry. */
+    public function extendSubscription(string $userId, string $subscriptionId, int $days, string $actor): void
+    {
+        if ($days < 1 || $days > 3650) throw new BillingError('Дни: 1–3650.');
+        $this->db->transaction(function () use ($userId, $subscriptionId, $days, $actor) {
+            $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
+            if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
+            $base = max(time(), (int)$sub['expires_at']);
+            $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$base + $days * 86400, time(), $subscriptionId]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_extended', $userId, time()]);
+        });
+        $this->applyPanelChanges($subscriptionId);
+    }
+    /** Reset used traffic on panel (bytesUsed back to 0). */
+    public function resetSubscriptionTraffic(string $userId, string $subscriptionId, string $actor): void
+    {
+        $this->db->transaction(function () use ($userId, $subscriptionId, $actor) {
+            $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
+            if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
+            $this->db->execute('UPDATE subscriptions SET traffic_used_gb=0,updated_at=? WHERE id=?', [time(), $subscriptionId]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_traffic_reset', $userId, time()]);
+        });
+        $this->applyPanelChanges($subscriptionId);
+    }
+    /** Push current local values (traffic/devices/expiry) to Remnawave panel. */
+    private function applyPanelChanges(string $subscriptionId): void
+    {
+        if (!$this->provisioner) return;
+        $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$subscriptionId]);
+        if (!$sub || $sub['status']!=='active') return;
+        $sub['traffic_bytes'] = (int)$sub['traffic_limit_gb'] * 1073741824;
+        $sub['devices'] = (int)$sub['device_limit'];
+        try {
+            $panel = null;
+            if ((int)($sub['remnawave_id'] ?? 0) > 0) {
+                $panel = $this->provisioner->fetchById((int)$sub['remnawave_id']);
+                if ($panel && ($panel['id'] ?? null)) {
+                    $this->provisioner->updateById((int)$panel['id'], (int)$sub['traffic_bytes'], (int)$sub['devices'], (int)$sub['expires_at']);
+                    return;
+                }
+            }
+            $panel = $this->provisioner->fetch('zb_'.$sub['id']);
+            if ($panel && ($panel['id'] ?? null)) {
+                $this->provisioner->extend($sub); // PATCHes traffic + devices + expireAt by username
+            }
+        } catch (\Throwable $e) {}
+    }
     /** Remove a subscription: deletes the panel user (Remnawave) and the local row. */
     public function removeSubscription(string $userId, string $subscriptionId, string $actor): void
     {

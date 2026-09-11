@@ -56,6 +56,19 @@ trait AdminActions
         if($handler==='admin-user-subscription-remove'){
             $this->app->userAdmin->removeSubscription($id,$sid,$uid);return new RedirectResponse('/admin/users/'.$id.'?sub_removed=1',303);
         }
+        if($handler==='admin-subscription')return $this->render('admin-subscription',['data'=>$this->app->userAdmin->subscription($sid),'saved'=>$this->request->query->has('saved')]);
+        if($handler==='admin-subscription-traffic'){
+            $this->app->userAdmin->updateSubscriptionTraffic($id,$sid,$input->getInt('traffic_gb',-1),$uid);return new RedirectResponse('/admin/subscriptions/'.$sid.'?saved=1',303);
+        }
+        if($handler==='admin-subscription-devices'){
+            $this->app->userAdmin->updateSubscriptionDevices($id,$sid,$input->getInt('devices',-1),$uid);return new RedirectResponse('/admin/subscriptions/'.$sid.'?saved=1',303);
+        }
+        if($handler==='admin-subscription-extend'){
+            $this->app->userAdmin->extendSubscription($id,$sid,$input->getInt('days',0),$uid);return new RedirectResponse('/admin/subscriptions/'.$sid.'?saved=1',303);
+        }
+        if($handler==='admin-subscription-reset-traffic'){
+            $this->app->userAdmin->resetSubscriptionTraffic($id,$sid,$uid);return new RedirectResponse('/admin/subscriptions/'.$sid.'?saved=1',303);
+        }
         if($handler==='admin-promocodes')return $this->render('admin-promocodes',['promocodes'=>$this->app->promocodes->list(),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name')]);
         if($handler==='admin-promocode-create'){
             $this->app->promocodes->create($input->all(),$uid);return new RedirectResponse('/admin/promocodes',303);
