@@ -66,6 +66,12 @@ trait AdminActions
         if($handler==='admin-subscription-extend'){
             $this->app->userAdmin->extendSubscription($id,$sid,$input->getInt('days',0),$uid);return new RedirectResponse('/admin/subscriptions/'.$sid.'?saved=1',303);
         }
+        if($handler==='admin-subscription-expiry'){
+            $expiry=$input->get('expires_at','');
+            $ts=strtotime($expiry.' 23:59:59 UTC');
+            if($ts===false)throw new BillingError('Укажите дату окончания правильно.');
+            $this->app->userAdmin->setSubscriptionExpiry($id,$sid,$ts,$uid);return new RedirectResponse('/admin/subscriptions/'.$sid.'?saved=1',303);
+        }
         if($handler==='admin-subscription-reset-traffic'){
             $this->app->userAdmin->resetSubscriptionTraffic($id,$sid,$uid);return new RedirectResponse('/admin/subscriptions/'.$sid.'?saved=1',303);
         }

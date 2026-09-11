@@ -156,6 +156,20 @@ final class UserAdminService
         });
         $this->applyPanelChanges($subscriptionId);
     }
+    /** Set an exact expiration datetime (UTC timestamp) for one subscription. */
+    public function setSubscriptionExpiry(string $userId, string $subscriptionId, int $expiresAt, string $actor): void
+    {
+        $min = time() - 3600; // allow slightly-past; anything older is a mistake
+        if ($expiresAt < $min) throw new BillingError('Дата окончания не может быть в прошлом.');
+        if ($expiresAt > time() + 3650 * 86400) throw new BillingError('Дата окончания слишком далеко (макс. 10 лет).');
+        $this->db->transaction(function () use ($userId, $subscriptionId, $expiresAt, $actor) {
+            $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
+            if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
+            $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$expiresAt, time(), $subscriptionId]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_expiry_set', $userId, time()]);
+        });
+        $this->applyPanelChanges($subscriptionId);
+    }
     /** Reset used traffic on panel (bytesUsed back to 0). */
     public function resetSubscriptionTraffic(string $userId, string $subscriptionId, string $actor): void
     {
