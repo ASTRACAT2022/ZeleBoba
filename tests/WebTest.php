@@ -25,6 +25,7 @@ final class WebTest extends TestCase
         self::assertStringContainsString('<script src="/theme.js"></script>',$response->getContent());
         self::assertStringContainsString("script-src 'self'",$response->headers->get('Content-Security-Policy'));
         self::assertFileExists(__DIR__.'/../public/theme.js');
+        self::assertStringContainsString('html[data-theme="dark"] .button.light{background:#d8f784;color:#173423}',file_get_contents(__DIR__.'/../public/app.css'));
     }
     public function testAuthFormsAndRegistration():void
     {

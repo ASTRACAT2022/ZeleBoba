@@ -4,6 +4,7 @@ namespace App\Web;
 use App\Container;
 use App\Billing\BillingError;
 use App\Infrastructure\Database;
+use App\Infrastructure\Telemetry;
 use Symfony\Component\HttpFoundation\{Request,Response,JsonResponse,RedirectResponse,Cookie};
 use Symfony\Component\Routing\{Route,RouteCollection,RequestContext};
 use Symfony\Component\Routing\Matcher\UrlMatcher;
@@ -24,13 +25,20 @@ final class Application
     public function handle(Request $r): Response
     {
         $this->styleNonce=bin2hex(random_bytes(16));
-        $response=$this->handleRequest($r);
-        $response->headers->set('Content-Security-Policy',"default-src 'self'; style-src 'self' 'nonce-".$this->styleNonce."'; script-src 'self'; img-src 'self' data: https:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
-        $response->headers->set('X-Content-Type-Options','nosniff');
-        $response->headers->set('Referrer-Policy','no-referrer');
-        $response->headers->set('Cache-Control','no-store');
-        if ($this->app->config['APP_ENV']==='prod') $response->headers->set('Strict-Transport-Security','max-age=31536000');
-        return $response;
+        $span=Telemetry::start('billing.http.request',['http.request.method'=>$r->getMethod()]);
+        try {
+            $response=$this->handleRequest($r);
+            $response->headers->set('Content-Security-Policy',"default-src 'self'; style-src 'self' 'nonce-".$this->styleNonce."'; script-src 'self'; img-src 'self' data: https:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+            $response->headers->set('X-Content-Type-Options','nosniff');
+            $response->headers->set('Referrer-Policy','no-referrer');
+            $response->headers->set('Cache-Control','no-store');
+            if ($this->app->config['APP_ENV']==='prod') $response->headers->set('Strict-Transport-Security','max-age=31536000');
+            Telemetry::complete($span,['http.response.status_code'=>$response->getStatusCode()]);
+            return $response;
+        } catch (\Throwable $e) {
+            Telemetry::fail($span,$e);
+            throw $e;
+        }
     }
     private function handleRequest(Request $r): Response
     {

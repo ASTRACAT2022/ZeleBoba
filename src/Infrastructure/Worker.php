@@ -9,26 +9,33 @@ final class Worker
     public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo') {}
     public function handle(string $topic,array $payload): void
     {
-        match ($topic) {
-            'payment.create'=>$this->paymentService?$this->paymentService->createOrder($payload['order_id']):$this->payments->create($payload['order_id']),
-            'payment.verify'=>$this->paymentService?$this->paymentService->verify($payload['payment_id'],$payload['provider']??null):$this->payments->refresh($payload['payment_id']),
-            'topup.create'=>$this->topupCreate($payload['topup_id']),
-            'topup.after'=>$this->topupAfter($payload['user_id']),
-            'referral.topup'=>isset($payload['topup_id'])?$this->referrals?->processSettledTopup($payload['topup_id']):$this->referralTopup($payload['user_id'],(int)($payload['amount_kopeks']??0)),
-            'subscription.provision'=>$this->provision($payload['subscription_id']),
-            'subscription.extend'=>$this->extend($payload['subscription_id']),
-            'subscription.renew'=>$this->renew($payload['subscription_id']),
-            'subscription.traffic'=>$this->traffic($payload['subscription_id'],(int)($payload['traffic_gb']??0)),
-            'subscription.devices'=>$this->devices($payload['subscription_id'],(int)($payload['devices']??0)),
-            'gift.create'=>$this->giftCreate($payload),
-            'broadcast.run'=>$this->broadcastRun($payload['broadcast_id']),
-            'broadcast.send'=>$this->broadcastSend($payload['broadcast_id'],$payload['chat_id'],$payload['text']),
-            'compensation.run'=>$this->compensationRun($payload['compensation_id']),
-            'compensation.grant'=>$this->compensationGrant($payload['compensation_id'],$payload['user_id']),
-            'telegram.send'=>$this->send($payload),
-            'telegram.answer'=>$this->answer($payload),
-            default=>throw new \RuntimeException('Unknown outbox topic')
-        };
+        $span=Telemetry::start('billing.outbox.process',['messaging.operation'=>'process','messaging.destination.name'=>$topic]);
+        try {
+            match ($topic) {
+                'payment.create'=>$this->paymentService?$this->paymentService->createOrder($payload['order_id']):$this->payments->create($payload['order_id']),
+                'payment.verify'=>$this->paymentService?$this->paymentService->verify($payload['payment_id'],$payload['provider']??null):$this->payments->refresh($payload['payment_id']),
+                'topup.create'=>$this->topupCreate($payload['topup_id']),
+                'topup.after'=>$this->topupAfter($payload['user_id']),
+                'referral.topup'=>isset($payload['topup_id'])?$this->referrals?->processSettledTopup($payload['topup_id']):$this->referralTopup($payload['user_id'],(int)($payload['amount_kopeks']??0)),
+                'subscription.provision'=>$this->provision($payload['subscription_id']),
+                'subscription.extend'=>$this->extend($payload['subscription_id']),
+                'subscription.renew'=>$this->renew($payload['subscription_id']),
+                'subscription.traffic'=>$this->traffic($payload['subscription_id'],(int)($payload['traffic_gb']??0)),
+                'subscription.devices'=>$this->devices($payload['subscription_id'],(int)($payload['devices']??0)),
+                'gift.create'=>$this->giftCreate($payload),
+                'broadcast.run'=>$this->broadcastRun($payload['broadcast_id']),
+                'broadcast.send'=>$this->broadcastSend($payload['broadcast_id'],$payload['chat_id'],$payload['text']),
+                'compensation.run'=>$this->compensationRun($payload['compensation_id']),
+                'compensation.grant'=>$this->compensationGrant($payload['compensation_id'],$payload['user_id']),
+                'telegram.send'=>$this->send($payload),
+                'telegram.answer'=>$this->answer($payload),
+                default=>throw new \RuntimeException('Unknown outbox topic')
+            };
+            Telemetry::complete($span);
+        } catch (\Throwable $e) {
+            Telemetry::fail($span,$e);
+            throw $e;
+        }
     }
     private function broadcastRun(string $id): void
     {

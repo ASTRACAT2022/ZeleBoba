@@ -4,15 +4,18 @@
   "type": "project",
   "require": {
     "php": "^8.4",
-    "ext-pdo": "*",
     "ext-mbstring": "*",
+    "ext-pdo": "*",
+    "ext-sodium": "*",
+    "nyholm/psr7": "^1.8",
+    "open-telemetry/exporter-otlp": "^1.0",
+    "open-telemetry/sdk": "^1.0",
+    "symfony/console": "7.4.*",
+    "symfony/dotenv": "7.4.*",
+    "symfony/http-client": "7.4.*",
     "symfony/http-foundation": "7.4.*",
     "symfony/routing": "7.4.*",
-    "symfony/console": "7.4.*",
-    "symfony/http-client": "7.4.*",
-    "symfony/dotenv": "7.4.*",
-    "twig/twig": "^3.20",
-    "ext-sodium": "*"
+    "twig/twig": "^3.20"
   },
   "require-dev": {
     "phpunit/phpunit": "^11.5"

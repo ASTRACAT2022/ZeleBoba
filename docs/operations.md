@@ -18,6 +18,28 @@
 
 Compose включает PHP-FPM, Nginx, worker, scheduler и PostgreSQL 17. Scheduler работает в одной логической очереди под lease; сверки читаются страницами по 100 записей. Все внешние HTTP-запросы имеют timeout, ограничение общей длительности и запрещённые redirects. Worker умеет завершать текущее задание по SIGTERM.
 
+## OpenTelemetry
+
+Трассировка включается без изменения кода. Передайте всем контейнерам приложения,
+worker и scheduler одинаковые переменные окружения:
+
+```text
+OTEL_PHP_AUTOLOAD_ENABLED=true
+OTEL_SERVICE_NAME=zeleboba-billing
+OTEL_TRACES_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=none
+OTEL_LOGS_EXPORTER=none
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+Приложение экспортирует span'ы `billing.http.request` и
+`billing.outbox.process`. В атрибуты не попадают email, платежные ID, токены,
+URL подписок и содержимое очереди. Если collector недоступен или переменные не
+заданы, обработка платежей и очереди продолжает работать без телеметрии.
+
 ## Права и сеть
 
 Runtime-роль `billing` получает SELECT/INSERT/UPDATE/DELETE только в нужной схеме, с дополнительным запретом UPDATE/DELETE/TRUNCATE ledger, payment_receipts, audit_log и записи migrations. Роль `billing_owner` используется только при миграции и backup. Пароль владельца не передаётся app/worker/scheduler.
