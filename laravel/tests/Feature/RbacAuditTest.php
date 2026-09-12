@@ -14,7 +14,7 @@ final class RbacAuditTest extends TestCase
         parent::setUp();
 
         foreach (['laravel_audit_log', 'customer_timeline', 'user_roles', 'admin_roles', 'sessions', 'users'] as $table) {
-            Schema::dropIfExists($table);
+            $this->dropLegacy($table);
         }
 
         Schema::create('users', function (Blueprint $table): void {

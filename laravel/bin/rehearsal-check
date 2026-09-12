@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Rehearsal-only helper for the Laravel cutover.
+#
+# Subcommands:
+#   up        Build the rehearsal image, bring the stack up, install deps,
+#             generate APP_KEY, run additive Laravel migrations only.
+#   down      Stop the stack (keep volumes).
+#   reset     Stop the stack and DELETE rehearsal volumes (destructive).
+#   status    Print container status.
+#   shell     Open a bash shell on the app container.
+#   check     Run cutover:check without --production and report findings.
+#   test      Run the test suite.
+#   pint      Run Pint in test mode.
+#   stan      Run Larastan (if installed).
+#
+# This file is local rehearsal tooling. It never edits production files
+# and never touches the legacy zeleboba_* services.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+COMPOSE="docker compose -f compose.rehearsal.yaml"
+
+case "${1:-help}" in
+  up)
+    if [ ! -f .env ]; then
+      echo "Creating .env from .env.rehearsal.example"
+      cp .env.rehearsal.example .env
+    fi
+    echo "[1/6] docker compose build"
+    $COMPOSE build app
+    echo "[2/6] docker compose up -d postgres redis"
+    $COMPOSE up -d postgres redis
+    echo "[3/6] waiting for postgres and redis"
+    $COMPOSE exec -T postgres pg_isready -U zeleboba_rehearsal -d zeleboba_rehearsal
+    $COMPOSE exec -T redis redis-cli ping
+    echo "[4/6] composer install (with dev deps)"
+    $COMPOSE run --rm app composer install --prefer-dist --no-interaction
+    echo "[5/6] php artisan key:generate"
+    $COMPOSE run --rm app php artisan key:generate --force
+    echo "[6/6] php artisan migrate (additive, no destructive ops)"
+    $COMPOSE run --rm app php artisan migrate --force
+    $COMPOSE up -d app horizon scheduler web mailpit
+    echo
+    echo "Rehearsal stack is up."
+    echo "  web       http://127.0.0.1:8091"
+    echo "  mailpit   http://127.0.0.1:8025"
+    ;;
+
+  down)
+    $COMPOSE down
+    ;;
+
+  reset)
+    $COMPOSE down -v
+    echo "Rehearsal volumes removed."
+    ;;
+
+  status)
+    $COMPOSE ps
+    ;;
+
+  shell)
+    $COMPOSE exec app bash
+    ;;
+
+  check)
+    echo "Running cutover:check WITHOUT --production (rehearsal mode)"
+    $COMPOSE exec -T app php artisan cutover:check || true
+    echo
+    echo "Note: cutover:check --production is intentionally NOT run."
+    echo "Production gate requires evidence files that are only written"
+    echo "after a real rehearsal. See docs/PRODUCTION_READINESS.md."
+    ;;
+
+  test)
+    $COMPOSE exec -T app php artisan test
+    ;;
+
+  pint)
+    $COMPOSE exec -T app vendor/bin/pint --test
+    ;;
+
+  stan)
+    if [ ! -f phpstan.neon ]; then
+      echo "phpstan.neon not configured yet. See docs/PRODUCTION_READINESS.md P1."
+      exit 1
+    fi
+    $COMPOSE exec -T app vendor/bin/phpstan analyse --no-progress
+    ;;
+
+  help|*)
+    cat <<EOF
+Usage: ./bin/rehearsal-check <command>
+
+Commands:
+  up        Bring up the rehearsal stack (postgres, redis, app, horizon, scheduler, web, mailpit)
+  down      Stop the stack (keep volumes)
+  reset     Stop and DELETE rehearsal volumes (destructive)
+  status    Print container status
+  shell     Open a bash shell on the app container
+  check     Run cutover:check without --production
+  test      Run php artisan test
+  pint      Run vendor/bin/pint --test
+  stan      Run phpstan (if phpstan.neon exists)
+
+This file is local rehearsal tooling only. It does not touch production.
+EOF
+    ;;
+esac

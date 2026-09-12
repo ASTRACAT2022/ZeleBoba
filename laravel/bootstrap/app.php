@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Middleware\RequireLegacyAdmin;
+use App\Http\Middleware\RequireLegacySession;
+use App\Http\Middleware\RequirePermission;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -12,11 +15,12 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'legacy.session' => \App\Http\Middleware\RequireLegacySession::class,
-            'legacy.admin' => \App\Http\Middleware\RequireLegacyAdmin::class,
-            'permission' => \App\Http\Middleware\RequirePermission::class,
+            'legacy.session' => RequireLegacySession::class,
+            'legacy.admin' => RequireLegacyAdmin::class,
+            'permission' => RequirePermission::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
-    })->create();
+    })
+    ->create();
