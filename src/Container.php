@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace App;
 use App\Infrastructure\{Database,Outbox,Worker};
-use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService};
+use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline};
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService,Mailer};
@@ -34,6 +34,7 @@ final class Container
     public readonly MaintenanceService $maintenance;
     public readonly UserAdminService $userAdmin;
     public readonly CompensationService $compensations;
+    public readonly CustomerTimeline $timeline;
     public readonly Payments $payments;
     public readonly PaymentService $paymentService;
     public readonly Mailer $mailer;
@@ -56,7 +57,8 @@ final class Container
         if (!in_array($config['PAYMENT_DRIVER'],['demo','yookassa','freekassa'],true) || !in_array($config['PROVISION_DRIVER'],['demo','remnawave'],true)) throw new \RuntimeException('Unknown integration driver');
         if ($config['APP_ENV']==='prod' && (!$this->db->postgres() || !str_starts_with($config['APP_URL'],'https://'))) throw new \RuntimeException('Production requires PostgreSQL and HTTPS');
         $this->outbox=new Outbox($this->db,$this->settings->vault);
-        $this->billing=new BillingService($this->db,$this->outbox,$config['PAYMENT_DRIVER'],$config);
+        $this->timeline=new CustomerTimeline($this->db);
+        $this->billing=new BillingService($this->db,$this->outbox,$config['PAYMENT_DRIVER'],$config,$this->timeline);
         $this->wallet=new Wallet($this->db);
         $this->carts=new CartService($this->db);
         $this->topups=new TopupService($this->db,$this->outbox,$this->wallet,$config['PAYMENT_DRIVER'],$config);
@@ -81,14 +83,14 @@ final class Container
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
         $remnawave=new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']);
-        $this->userAdmin=new UserAdminService($this->db,$this->wallet,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->outbox);
+        $this->userAdmin=new UserAdminService($this->db,$this->wallet,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->outbox,$this->timeline);
         $this->providers=new ProviderRegistry($http,$config);
         foreach ([new YooKassaProvider($http,$config),new FreeKassaProvider($http,$config,$this->db),new CryptoBotProvider($http,$config),new TelegramStarsProvider($http,$config),new LavaProvider($http,$config),new WataProvider($http,$config),new HeleketProvider($http,$config),new PlategaProvider($http,$config),new TributeProvider($http,$config),new MulenPayProvider($http,$config),new Pal24Provider($http,$config),new CloudPaymentsProvider($http,$config),new KassaAiProvider($http,$config),new RioPayProvider($http,$config),new SeverPayProvider($http,$config),new PayPearProvider($http,$config),new RollyPayProvider($http,$config),new OverpayProvider($http,$config),new AuraPayProvider($http,$config),new EtoplatezhiProvider($http,$config),new AntilopayProvider($http,$config),new JupiterProvider($http,$config),new DonutProvider($http,$config),new CisPayProvider($http,$config),new TabPayProvider($http,$config),new ParityPayProvider($http,$config)] as $provider) $this->providers->register($provider);
         $this->paymentService=new PaymentService($this->db,$this->billing,$http,$config,$this->providers);
         $this->mailer=new Mailer($this->db,$config);
         $tgBase=rtrim($config['TELEGRAM_API_BASE']??'https://astracattg.netlify.app','/');
         if ($tgBase==='') $tgBase='https://astracattg.netlify.app';
-        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations,$config['PROVISION_DRIVER']);
+        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations,$config['PROVISION_DRIVER'],$this->timeline);
         $this->auth=new Auth($this->db);$this->mfa=new Mfa($this->db,$this->settings->vault);
         $this->telegramLogin=new TelegramLogin($this->db,$this->auth);
         $this->telegram=new Telegram($this->db,$this->outbox,$this->billing,$config['APP_URL'],$this->telegramLogin,$tgBase,$http);

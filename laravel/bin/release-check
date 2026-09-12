@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ ! -f .env ]; then
+  echo 'Missing .env. Copy .env.production.example and supply deployment secrets.' >&2
+  exit 1
+fi
+
+docker compose -f compose.production.yaml config >/dev/null
+docker compose -f compose.production.yaml build app horizon scheduler
+docker compose -f compose.production.yaml run --rm app php artisan migrate --force
+docker compose -f compose.production.yaml run --rm app php artisan cutover:check --production
+
+echo 'Release checks passed. Start the stack with: docker compose -f compose.production.yaml up -d'

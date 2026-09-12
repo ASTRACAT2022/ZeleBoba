@@ -3,6 +3,7 @@ select{display:block;width:100%;border:1px solid #ccd7d0;border-radius:6px;backg
 .earnings-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.earnings-card{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:20px 22px;display:flex;flex-direction:column;gap:6px}.earnings-card:first-child{background:#174d3e;border-color:#174d3e}.earnings-card:first-child .earnings-label,.earnings-card:first-child .earnings-meta{color:#cadbd2}.earnings-card:first-child .earnings-amount{color:#fff}.earnings-label{font-size:12px;font-weight:600;letter-spacing:1.2px;color:var(--muted);text-transform:uppercase}.earnings-amount{font-size:30px;font-weight:650;letter-spacing:-1px;font-variant-numeric:tabular-nums}.earnings-meta{font-size:12px;color:var(--muted)}@media(max-width:1100px){.earnings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .inline-layout-1{display:inline}
+.customer-timeline{list-style:none;margin:0;padding:2px 0}.customer-timeline li{display:grid;grid-template-columns:58px 1fr;gap:14px;padding:10px 0 10px 19px;border-left:2px solid #b9d8c8;position:relative}.customer-timeline li:before{content:'';width:9px;height:9px;border-radius:50%;background:var(--green);position:absolute;left:-5.5px;top:17px}.customer-timeline li:last-child{border-left-color:transparent}.customer-timeline time{color:var(--muted);font-variant-numeric:tabular-nums;font-size:14px}
 .inline-layout-2{width:auto;display:inline}
 .inline-layout-3{display:flex;gap:10px}
 .inline-layout-4{height:44px;padding:4px}

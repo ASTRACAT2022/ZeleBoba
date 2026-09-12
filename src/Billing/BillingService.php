@@ -5,7 +5,7 @@ use App\Infrastructure\{Database,Outbox};
 final class BillingService
 {
     private ?\App\Billing\TopupService $topups = null;
-    public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null) {}
+    public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null, private ?CustomerTimeline $timeline=null) {}
     public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null, ?string $renewSubscriptionId=null, ?string $landingSlug=null): array
     {
         if ($this->config!==null) {
@@ -42,6 +42,7 @@ final class BillingService
             $this->db->execute('UPDATE orders SET return_url=? WHERE id=?',[rtrim($this->config['APP_URL']??'http://127.0.0.1:8080','/').'/orders/'.$id,$id]);
             $this->outbox->enqueue('payment.create','checkout:'.$id,['order_id'=>$id]);
             $this->audit($userId,'order.created',$id);
+            $this->timeline?->record($userId, 'payment.created', ['amount_kopeks'=>(int)$plan['price_minor'], 'order_id'=>$id]);
             if ($renewSubscriptionId!==null) {
                 $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$renewSubscriptionId]);
                 if (!$sub || $sub['user_id']!==$userId) throw new BillingError('Подписка для продления не найдена.');
@@ -71,6 +72,7 @@ final class BillingService
                 $this->db->execute('INSERT INTO ledger_entries VALUES(?,?,?,?,?,?)',[Database::id(),$orderId,$account,$value,$currency,$now]);
             }
             $this->db->execute("UPDATE orders SET status='paid',provider_payment_id=?,paid_at=? WHERE id=?",[$paymentId,$now,$orderId]);
+            $this->timeline?->record($order['user_id'], 'payment.paid', ['amount_kopeks'=>$amount, 'order_id'=>$orderId], $now);
             $this->db->execute('UPDATE users SET has_had_paid_subscription=1 WHERE id=?',[$order['user_id']]);
             // Renewal: extend the existing subscription instead of creating a new one.
             $renewSub=$this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
@@ -86,6 +88,7 @@ final class BillingService
                 $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',renew_order_id=NULL,renew_at=?,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?",[$newExpiry,(int)$renewSub['auto_renew']===1?$newExpiry-max(1,min(14,(int)($this->config['AUTORENEW_DAYS_BEFORE']??3)))*86400:null,$renewSub['id']]);
                 $this->outbox->enqueue('subscription.extend','extend:'.$renewSub['id'].':'.$orderId,['subscription_id'=>$renewSub['id']]);
                 $this->audit('provider:'.$provider,'subscription.renewed',$renewSub['id']);
+                $this->timeline?->record($order['user_id'], 'subscription.renewed', ['subscription_id'=>$renewSub['id'], 'expires_at'=>$newExpiry], $now);
             } else {
                 $sub=Database::id();
                 // Each purchase is an independent subscription unless it is a renewal order.
