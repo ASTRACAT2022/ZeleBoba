@@ -69,12 +69,16 @@ final class Worker
     }
     private function subscription(string $id): ?array
     {
-        return $this->db->one("SELECT s.*,
-            CASE WHEN s.traffic_limit_gb=0 THEN 0 ELSE (s.traffic_limit_gb+s.purchased_traffic_gb)*1073741824 END AS traffic_bytes,
+        $s=$this->db->one("SELECT s.*,
             s.device_limit AS devices,COALESCE(o.provision_driver,?) AS provision_driver,
             COALESCE(o.squad_uuid,p.squad_uuid,'') AS squad_uuid
             FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id
             LEFT JOIN plans p ON p.id=s.plan_id WHERE s.id=?",[$this->defaultProvisionDriver,$id]);
+        if (!$s) return null;
+        // Traffic bytes computed in PHP to avoid integer overflow on large plans
+        // (GB*1073741824 exceeds PostgreSQL int4 for >2GB plans).
+        $s['traffic_bytes']=(int)$s['traffic_limit_gb']===0?0:((int)$s['traffic_limit_gb']+(int)$s['purchased_traffic_gb'])*1073741824;
+        return $s;
     }
     private function traffic(string $id,int $gb): void
     {
