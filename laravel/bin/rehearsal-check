@@ -28,18 +28,24 @@ case "${1:-help}" in
       echo "Creating .env from .env.rehearsal.example"
       cp .env.rehearsal.example .env
     fi
-    echo "[1/6] docker compose build"
+    echo "[1/7] docker compose build"
     $COMPOSE build app
-    echo "[2/6] docker compose up -d postgres redis"
+    echo "[2/7] docker compose up -d postgres redis"
     $COMPOSE up -d postgres redis
-    echo "[3/6] waiting for postgres and redis"
+    echo "[3/7] waiting for postgres and redis"
     $COMPOSE exec -T postgres pg_isready -U zeleboba_rehearsal -d zeleboba_rehearsal
     $COMPOSE exec -T redis redis-cli ping
-    echo "[4/6] composer install (with dev deps)"
-    $COMPOSE run --rm app composer install --prefer-dist --no-interaction
-    echo "[5/6] php artisan key:generate"
+    echo "[4/7] creating the 'billing' role required by 015_freekassa_nonce.sql"
+    # migrations/015_freekassa_nonce.sql grants USAGE on the freekassa_nonce_seq
+    # to a "billing" role. Production creates that role via the secrets store;
+    # in rehearsal we provision it locally so init scripts run to completion.
+    $COMPOSE exec -T postgres psql -U zeleboba_rehearsal -d zeleboba_rehearsal \
+        -c 'CREATE ROLE billing' 2>&1 | grep -v '^CREATE$' || true
+    echo "[5/7] composer install (with dev deps)"
+    $COMPOSE run --rm app composer install --dev --prefer-dist --no-interaction
+    echo "[6/7] php artisan key:generate"
     $COMPOSE run --rm app php artisan key:generate --force
-    echo "[6/6] php artisan migrate (additive, no destructive ops)"
+    echo "[7/7] php artisan migrate (additive, no destructive ops)"
     $COMPOSE run --rm app php artisan migrate --force
     $COMPOSE up -d app horizon scheduler web mailpit
     echo

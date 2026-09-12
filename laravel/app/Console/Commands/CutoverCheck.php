@@ -78,7 +78,7 @@ final class CutoverCheck extends Command
                 $this->error($error);
             }
 
-return self::FAILURE;
+            return self::FAILURE;
         }
         $this->info('Cutover preflight passed.');
 
