@@ -9,29 +9,25 @@ final class TrialService
     public function available(string $userId): bool
     {
         $user = $this->db->one('SELECT * FROM users WHERE id=?', [$userId]);
-        if (!$user) return false;
+        if (!$user || (int)$user['disabled']===1) return false;
         if ((int)$user['has_had_paid_subscription'] === 1) return false;
-        $any = $this->db->one("SELECT id FROM subscriptions WHERE user_id=? AND status IN ('active','trial','limited') LIMIT 1", [$userId]);
+        $any = $this->db->one("SELECT id FROM subscriptions WHERE user_id=? AND (is_trial=1 OR status IN ('active','trial','limited','provisioning')) LIMIT 1", [$userId]);
         if ($any) return false;
         return true;
     }
     /** Start a trial for a plan. Returns the subscription row. */
     public function start(string $userId, string $planId): array
     {
-        if (!$this->available($userId)) throw new BillingError('Триал недоступен: у вас уже есть подписка.');
         return $this->db->transaction(function () use ($userId, $planId) {
+            $this->db->one('SELECT id FROM users WHERE id=?'.$this->db->lock(),[$userId]);
+            if (!$this->available($userId)) throw new BillingError('Триал недоступен: у вас уже была подписка.');
+
             $plan = $this->db->one('SELECT * FROM plans WHERE id=? AND active=1 AND is_trial_available=1' . $this->db->lock(), [$planId]);
             if (!$plan) throw new BillingError('Триал на этом тарифе недоступен.');
-            $existing = $this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status='trial' AND is_trial=1 ORDER BY created_at DESC LIMIT 1", [$userId]);
             $days = (int)($plan['trial_duration_days'] ?? $this->config['TRIAL_DURATION_DAYS'] ?? 3);
             if ($days < 1) $days = 3;
             $price = (int)($plan['trial_price_kopeks'] ?? 0);
             $now = time();
-            if ($existing) {
-                $this->db->execute("UPDATE subscriptions SET status='active',expires_at=?,traffic_limit_gb=?,device_limit=?,plan_id=?,updated_at=? WHERE id=?", [$now + $days * 86400, (int)$plan['traffic_bytes'] / 1073741824, (int)$plan['devices'], $plan['id'], $now, $existing['id']]);
-                $this->outbox->enqueue('subscription.provision', 'provision:'.$existing['id'], ['subscription_id' => $existing['id']]);
-                return $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$existing['id']]);
-            }
             if ($price > 0) {
                 $this->wallet->debit($userId, $price, 'trial_conversion', 'Активация триальной подписки');
             }
@@ -54,6 +50,7 @@ final class TrialService
             if ((int)$sub['is_trial'] !== 1 || !in_array($sub['status'], ['active', 'trial', 'limited'], true)) throw new BillingError('Подписка не является активным триалом.');
             $plan = $this->db->one('SELECT * FROM plans WHERE id=? AND active=1', [$planId]);
             if (!$plan) throw new BillingError('Тариф недоступен.');
+            if ($priceKopeks !== (int)$plan['price_minor']) throw new BillingError('Цена тарифа изменилась. Обновите страницу.');
             $this->wallet->debit($userId, $priceKopeks, 'subscription_purchase', 'Покупка подписки: '.$plan['name'], $paymentMethod);
             $now = time();
             $base = max($now, (int)$sub['expires_at']);

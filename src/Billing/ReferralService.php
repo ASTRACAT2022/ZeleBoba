@@ -33,21 +33,30 @@ final class ReferralService
         });
         return $referrer['id'];
     }
+    public function processSettledTopup(string $topupId): void
+    {
+        $this->db->transaction(function() use ($topupId) {
+            $topup=$this->db->one('SELECT * FROM topups WHERE id=?'.$this->db->lock(),[$topupId]);
+            if (!$topup || $topup['status']!=='paid' || (int)$topup['referral_processed']===1) return;
+            $this->processTopup($topup['user_id'],(int)$topup['amount_kopeks'],(int)$topup['referral_first']===1);
+            $this->db->execute('UPDATE topups SET referral_processed=1 WHERE id=?',[$topupId]);
+        });
+    }
     /** Process a topup of a referred user: award commission to the referrer chain. */
-    public function processTopup(string $userId, int $amountKopeks): void
+    public function processTopup(string $userId, int $amountKopeks, ?bool $firstPayment=null): void
     {
         $user = $this->db->one('SELECT * FROM users WHERE id=?', [$userId]);
         if (!$user || $user['referred_by_id'] === null) return;
         $referrer = $this->db->one('SELECT * FROM users WHERE id=?', [$user['referred_by_id']]);
         if (!$referrer) return;
-        $percent = $this->commissionPercent($referrer, (int)$user['has_made_first_topup'] === 0);
+        $percent = $this->commissionPercent($referrer, $firstPayment ?? (int)$user['has_made_first_topup'] === 0);
         $commission = (int)($amountKopeks * $percent / 100);
         $minTopup = (int)($this->config['REFERRAL_MINIMUM_TOPUP_KOPEKS'] ?? 10000);
         $firstBonus = (int)($this->config['REFERRAL_FIRST_TOPUP_BONUS_KOPEKS'] ?? 10000);
         $inviterBonus = (int)($this->config['REFERRAL_INVITER_BONUS_KOPEKS'] ?? 10000);
-        $this->db->transaction(function () use ($user, $referrer, $amountKopeks, $percent, $commission, $minTopup, $firstBonus, $inviterBonus) {
-            $isFirst = false;
-            if ((int)$user['has_made_first_topup'] === 0 && $amountKopeks >= $minTopup) {
+        $this->db->transaction(function () use ($user, $referrer, $amountKopeks, $percent, $commission, $minTopup, $firstBonus, $inviterBonus, $firstPayment) {
+            $isFirst = $firstPayment===true && $amountKopeks >= $minTopup;
+            if ($firstPayment===null && (int)$user['has_made_first_topup'] === 0 && $amountKopeks >= $minTopup) {
                 $claimed = $this->db->execute('UPDATE users SET has_made_first_topup=1 WHERE id=? AND has_made_first_topup=0', [$user['id']]);
                 $isFirst = $claimed > 0;
             }
@@ -108,17 +117,20 @@ final class ReferralService
         if (mb_strlen($details) < 5 || mb_strlen($details) > 500) throw new BillingError('Укажите реквизиты для вывода (5–500 символов).');
         $cooldown = (int)($this->config['REFERRAL_WITHDRAWAL_COOLDOWN_DAYS'] ?? 30) * 86400;
         return $this->db->transaction(function () use ($userId, $amountKopeks, $details, $cooldown) {
+            $this->db->one('SELECT id FROM users WHERE id=?'.$this->db->lock(),[$userId]);
             $last = $this->db->one("SELECT created_at FROM withdrawal_requests WHERE user_id=? AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1", [$userId]);
             if ($last && time() - (int)$last['created_at'] < $cooldown) throw new BillingError('Заявка на вывод уже подана. Попробуйте позже.');
             $user = $this->db->one('SELECT * FROM users WHERE id=?' . $this->db->lock(), [$userId]);
             if (!$user) throw new BillingError('Аккаунт не найден.');
             $earnings = (int)($this->db->one('SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM referral_earnings WHERE user_id=?', [$userId])['s'] ?? 0);
-            $withdrawn = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM withdrawal_requests WHERE user_id=? AND status IN ('approved','paid')", [$userId])['s'] ?? 0);
+            $withdrawn = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM withdrawal_requests WHERE user_id=? AND status IN ('pending','approved','paid')", [$userId])['s'] ?? 0);
             $available = $earnings - $withdrawn;
             if ($amountKopeks > $available) throw new BillingError('Недостаточно реферального баланса. Доступно: '.($available / 100).' ₽.');
+            $this->wallet->debit($userId,$amountKopeks,'referral_withdrawal','Резерв средств на вывод');
             $id = Database::id();
             $now = time();
             $this->db->execute('INSERT INTO withdrawal_requests(id,user_id,amount_kopeks,status,payment_details,risk_score,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', [$id, $userId, $amountKopeks, 'pending', $details, $this->riskScore($userId), $now, $now]);
+            $this->db->execute('UPDATE withdrawal_requests SET wallet_reserved=1 WHERE id=?',[$id]);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $userId, 'withdrawal.requested', $id, $now]);
             return $this->db->one('SELECT * FROM withdrawal_requests WHERE id=?', [$id]);
         });
@@ -151,7 +163,14 @@ final class ReferralService
         $this->db->transaction(function () use ($id, $status, $comment, $adminId) {
             $row = $this->db->one('SELECT * FROM withdrawal_requests WHERE id=?' . $this->db->lock(), [$id]);
             if (!$row) throw new BillingError('Заявка не найдена.');
-            if ($row['status'] !== 'pending') throw new BillingError('Заявка уже обработана.');
+            if ($row['status']===$status) return;
+            if (!in_array($row['status'],['pending','approved'],true) || ($row['status']==='approved' && $status==='approved')) throw new BillingError('Заявка уже обработана.');
+            // Older requests were not reserved; charge them before approval/payment.
+            if ($status!=='rejected' && !(int)$row['wallet_reserved']) {
+                $this->wallet->debit($row['user_id'],(int)$row['amount_kopeks'],'referral_withdrawal','Резерв средств на вывод');
+                $this->db->execute('UPDATE withdrawal_requests SET wallet_reserved=1 WHERE id=?',[$id]);
+            }
+            if ($status==='rejected' && (int)$row['wallet_reserved']) $this->wallet->credit($row['user_id'],(int)$row['amount_kopeks'],'refund','Возврат резерва отклонённой заявки');
             $this->db->execute('UPDATE withdrawal_requests SET status=?,processed_by=?,processed_at=?,admin_comment=?,updated_at=? WHERE id=?', [$status, $adminId, time(), $comment, time(), $id]);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $adminId, 'withdrawal.'.$status, $id, time()]);
         });

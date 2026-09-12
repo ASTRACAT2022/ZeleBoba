@@ -65,7 +65,7 @@ final class CompensationService
         if ($sub) {
             $base = max(time(), (int)$sub['expires_at']);
             $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$base + $days * 86400, time(), $sub['id']]);
-            $this->outbox->enqueue('subscription.extend', 'extend:'.$sub['id'], ['subscription_id' => $sub['id']]);
+            $this->outbox->enqueue('subscription.extend', 'extend:'.$sub['id'].':'.Database::id(), ['subscription_id' => $sub['id']]);
         } else {
             $id = Database::id();
             $now = time();
@@ -83,7 +83,7 @@ final class CompensationService
         if (!$sub) return;
         if ((int)$sub['traffic_limit_gb'] === 0) return;
         $this->db->execute('UPDATE subscriptions SET purchased_traffic_gb = purchased_traffic_gb + ? WHERE id=?', [$gb, $sub['id']]);
-        $this->outbox->enqueue('subscription.traffic', 'traffic:'.$sub['id'].':'.$gb, ['subscription_id' => $sub['id'], 'traffic_gb' => $gb]);
+        $this->outbox->enqueue('subscription.traffic', 'traffic:'.$sub['id'].':'.Database::id(), ['subscription_id' => $sub['id'], 'traffic_gb' => $gb]);
         $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), 'system', 'compensation.traffic', $userId, time()]);
     }
     private function recipients(string $segment): array

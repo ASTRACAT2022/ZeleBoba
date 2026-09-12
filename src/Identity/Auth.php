@@ -34,14 +34,21 @@ final class Auth
     public function applyPasswordReset(string $token,string $password): bool
     {
         if (strlen($password)<12 || strlen($password)>128) throw new BillingError('Пароль должен быть от 12 до 128 символов.');
-        $uid=$this->validResetToken($token);
-        if (!$uid) return false;
-        $this->db->transaction(function()use($token,$password,$uid){
+        if (!preg_match('/^[a-f0-9]{64}$/D',$token)) return false;
+        return $this->db->transaction(function()use($token,$password){
+            $uid=$this->validResetToken($token);
+            if (!$uid) return false;
+            // Serialize resets for the account, including different outstanding tokens.
+            $user=$this->db->one('SELECT id FROM users WHERE id=? AND disabled=0'.$this->db->lock(),[$uid]);
+            if (!$user || $this->validResetToken($token)!==$uid) return false;
             $this->db->execute('UPDATE users SET password_hash=? WHERE id=?',[password_hash($password,PASSWORD_ARGON2ID),$uid]);
-            $this->db->execute('UPDATE password_resets SET consumed_at=? WHERE token_hash=?',[time(),hash('sha256',$token)]);
+            $this->db->execute('UPDATE password_resets SET consumed_at=? WHERE user_id=? AND consumed_at IS NULL',[time(),$uid]);
+            $this->db->execute('DELETE FROM sessions WHERE user_id=?',[$uid]);
+            $this->db->execute("UPDATE login_challenges SET state='consumed' WHERE user_id=?",[$uid]);
+            return true;
         });
-        return true;
     }
+
     public function login(string $email,string $password): string
     {
         $user=$this->db->one('SELECT * FROM users WHERE email=?',[mb_strtolower(trim($email))]);

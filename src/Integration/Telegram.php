@@ -4,6 +4,7 @@ namespace App\Integration;
 use App\Infrastructure\{Database,Outbox};
 use App\Billing\{BillingService,BillingError};
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Component\HttpClient\HttpClient;
 final class Telegram
 {
     private ?\App\Container $app = null;

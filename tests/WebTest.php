@@ -18,6 +18,14 @@ final class WebTest extends TestCase
     {
         foreach(['/','/plans','/orders','/settings','/balance'] as $path)self::assertSame(200,$this->request($path)->getStatusCode(),$path);
     }
+    public function testThemeToggleUsesExternalScriptUnderCsp(): void
+    {
+        $response=$this->request('/');
+        self::assertStringContainsString('data-theme-toggle',$response->getContent());
+        self::assertStringContainsString('<script src="/theme.js"></script>',$response->getContent());
+        self::assertStringContainsString("script-src 'self'",$response->headers->get('Content-Security-Policy'));
+        self::assertFileExists(__DIR__.'/../public/theme.js');
+    }
     public function testAuthFormsAndRegistration():void
     {
         $r=$this->web->handle(Request::create('/register'));self::assertSame(200,$r->getStatusCode());$guest=$r->headers->getCookies()[0]->getValue();
@@ -48,15 +56,15 @@ final class WebTest extends TestCase
         self::assertSame(50000,$this->c->wallet->balance($this->uid)['balance_kopeks']);
         self::assertSame(200,$this->request('/balance')->getStatusCode());
         self::assertStringContainsString('500 ₽',$this->request('/balance')->getContent());
-        $response=$this->request('/orders/balance','POST',['_csrf'=>$this->csrf,'plan_id'=>'basic']);self::assertSame(303,$response->getStatusCode());
+        $response=$this->request('/orders/balance','POST',['_csrf'=>$this->csrf,'plan_id'=>'basic','idempotency_key'=>'web-balance-key']);self::assertSame(303,$response->getStatusCode());
         while($this->c->outbox->runOne($this->c->worker->handle(...))){}
         self::assertSame('fulfilled',$this->c->db->one('SELECT status FROM orders')['status']);
         self::assertSame(30100,$this->c->wallet->balance($this->uid)['balance_kopeks']);
-        self::assertCount(3,$this->c->db->all('SELECT * FROM transactions'));
+        self::assertCount(2,$this->c->db->all('SELECT * FROM transactions'));
     }
     public function testBalancePurchaseFailsWithoutFunds():void
     {
-        $response=$this->request('/orders/balance','POST',['_csrf'=>$this->csrf,'plan_id'=>'basic']);
+        $response=$this->request('/orders/balance','POST',['_csrf'=>$this->csrf,'plan_id'=>'basic','idempotency_key'=>'web-balance-key']);
         self::assertSame(422,$response->getStatusCode());
         self::assertCount(0,$this->c->db->all('SELECT * FROM orders'));
     }

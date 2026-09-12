@@ -64,6 +64,7 @@ final class GiftService
             $query = $parts['query'] ?? '';
             parse_str($query, $qs);
             $start = $qs['start'] ?? '';
+            if (!is_string($start)) return null;
             if ($start !== '') {
                 $upper = strtoupper($start);
                 if (str_starts_with($upper, 'GIFT_') || str_starts_with($upper, 'GIFT-')) return substr($start, 5);
@@ -87,9 +88,10 @@ final class GiftService
     public function claim(string $claimantId, string $claimInput): array
     {
         $token = $this->parseClaimInput($claimInput);
-        if ($token === null) throw new BillingError('Подарок не найден.');
+        if ($token === null || !preg_match('/^(?:[a-zA-Z0-9_-]{59}|[a-zA-Z0-9_-]{64})$/D',$token)) throw new BillingError('Подарок не найден.');
         return $this->db->transaction(function () use ($claimantId, $token) {
-            $purchase = $this->db->one('SELECT * FROM guest_purchases WHERE is_gift=1 AND (token=? OR token LIKE ?)' . $this->db->lock(), [$token, $token.'%']);
+            // Compare literally: '_' belongs to the token alphabet, not a SQL wildcard.
+            $purchase = $this->db->one('SELECT * FROM guest_purchases WHERE is_gift=1 AND substr(token,1,?)=?' . $this->db->lock(), [strlen($token), $token]);
             if (!$purchase) throw new BillingError('Подарок не найден.');
             if ($purchase['buyer_user_id'] !== null && $purchase['buyer_user_id'] === $claimantId) throw new BillingError('Нельзя активировать собственный подарок.');
             if ($purchase['user_id'] !== null && $purchase['user_id'] !== $claimantId) throw new BillingError('Подарок уже активирован другим пользователем.');

@@ -31,8 +31,9 @@ final class CryptoBotProvider extends AbstractProvider
         $amount = self::decimal((int)$topup['amount_kopeks']);
         $asset = (string)($this->config['CRYPTOBOT_DEFAULT_ASSET'] ?? 'USDT');
         $result = $this->api('createInvoice', [
-            'currency_type' => 'crypto',
-            'asset' => $asset,
+            'currency_type' => 'fiat',
+            'fiat' => 'RUB',
+            'accepted_assets' => $asset,
             'amount' => $amount,
             'description' => 'Пополнение баланса',
             'payload' => 'topup:'.$topup['id'],
@@ -47,8 +48,9 @@ final class CryptoBotProvider extends AbstractProvider
         $amount = self::decimal((int)$order['price_minor']);
         $asset = (string)($this->config['CRYPTOBOT_DEFAULT_ASSET'] ?? 'USDT');
         $result = $this->api('createInvoice', [
-            'currency_type' => 'crypto',
-            'asset' => $asset,
+            'currency_type' => 'fiat',
+            'fiat' => 'RUB',
+            'accepted_assets' => $asset,
             'amount' => $amount,
             'description' => 'Подписка: '.$order['plan_name'],
             'payload' => 'order:'.$order['id'],
@@ -64,6 +66,7 @@ final class CryptoBotProvider extends AbstractProvider
         $invoices = $result['items'] ?? [];
         foreach ($invoices as $inv) {
             if ((string)($inv['invoice_id'] ?? '') !== $paymentId) continue;
+            if (($inv['currency_type']??'')!=='fiat' || ($inv['fiat']??'')!=='RUB') throw new BillingError('Счёт CryptoBot должен быть выставлен в RUB.');
             $status = (string)($inv['status'] ?? '');
             $amount = self::minor(self::normalizeAmount((string)($inv['amount'] ?? '0')));
             $payload = (string)($inv['payload'] ?? '');
@@ -79,7 +82,8 @@ final class CryptoBotProvider extends AbstractProvider
     }
     public function handleWebhook(Request $request): ?array
     {
-        $secret = (string)($this->config['CRYPTOBOT_WEBHOOK_SECRET'] ?? '');
+        $token = (string)($this->config['CRYPTOBOT_API_TOKEN'] ?? '');
+        $secret = $token!==''?hash('sha256',$token,true):'';
         if ($secret === '') return null;
         $signature = (string)$request->headers->get('crypto-pay-api-signature', '');
         $body = $request->getContent();

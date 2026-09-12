@@ -21,11 +21,11 @@ final class PromoCodeService
         $validUntil = $input['valid_until'] !== '' && $input['valid_until'] !== null ? (int)$input['valid_until'] : null;
         $firstOnly = (int)($input['first_purchase_only'] ?? 0);
         $planId = (string)($input['plan_id'] ?? '');
-        if ($balance < 0 || $balance > 100000000) throw new BillingError('Бонус: от 0 до 1 000 000 ₽.');
+        if ($balance < 0 || $balance > 99000000) throw new BillingError('Бонус: от 0 до 1 000 000 ₽.');
         if ($days < 0 || $days > 3650) throw new BillingError('Дни: от 0 до 3650.');
         if ($traffic < 0 || $traffic > 100000) throw new BillingError('Трафик: от 0 до 100 000 ГБ.');
         if ($maxUses < 1 || $maxUses > 1000000) throw new BillingError('Лимит использований: от 1 до 1 000 000.');
-        if ($type === 'discount' && ($balance < 1 || $balance > 100)) throw new BillingError('Для скидки укажите процент 1–100.');
+        if ($type === 'discount' && ($balance < 1 || $balance > 99)) throw new BillingError('Для скидки укажите процент 1–99.');
         if ($type === 'trial_subscription' && $days < 1) throw new BillingError('Для триала укажите дни.');
         if ($planId !== '' && !$this->db->one('SELECT id FROM plans WHERE id=?', [$planId])) throw new BillingError('Тариф не найден.');
         return $this->db->transaction(function () use ($code,$type,$balance,$days,$traffic,$maxUses,$validFrom,$validUntil,$firstOnly,$planId,$actor) {
@@ -96,7 +96,7 @@ final class PromoCodeService
             if ($targetSub === null) $targetSub = $this->pickTargetSubscription($user, $promo);
             if ((int)$targetSub['traffic_limit_gb'] === 0) throw new BillingError('traffic_not_applicable');
             $this->db->execute('UPDATE subscriptions SET purchased_traffic_gb = purchased_traffic_gb + ? WHERE id=?', [(int)$promo['traffic_gb'], $targetSub['id']]);
-            $this->outbox->enqueue('subscription.traffic', 'traffic:'.$targetSub['id'].':'.(int)$promo['traffic_gb'], ['subscription_id' => $targetSub['id'], 'traffic_gb' => (int)$promo['traffic_gb']]);
+            $this->outbox->enqueue('subscription.traffic', 'traffic:'.$targetSub['id'].':'.$promo['id'], ['subscription_id' => $targetSub['id'], 'traffic_gb' => (int)$promo['traffic_gb']]);
             $effects[] = '📦 Трафик пополнен на '.(int)$promo['traffic_gb'].' ГБ';
         }
         if (in_array($type, ['balance','balance_and_days'], true) && (int)$promo['balance_bonus_kopeks'] > 0) {
@@ -135,7 +135,7 @@ final class PromoCodeService
     {
         $base = max(time(), (int)$sub['expires_at']);
         $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active' WHERE id=?", [$base + $days * 86400, $sub['id']]);
-        $this->outbox->enqueue('subscription.extend', 'extend:'.$sub['id'], ['subscription_id' => $sub['id']]);
+        $this->outbox->enqueue('subscription.extend', 'extend:'.$sub['id'].':'.Database::id(), ['subscription_id' => $sub['id']]);
     }
     public function list(int $limit = 100): array
     {

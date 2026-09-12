@@ -17,18 +17,37 @@ final class Reconciler
         if(!$taken)return 0;
         try{
             $after='';$bucket=intdiv(time(),300);
+            // Only retry providers that can be verified with the credentials
+            // currently installed. Retrying demo or incomplete integrations
+            // creates permanent dead jobs, while limiting this query to two
+            // providers leaves every other successful checkout unfulfilled
+            // after a lost webhook.
+            // Some operational tools construct a minimal Container solely for
+            // renewal scheduling. Keep that supported while full application
+            // containers use the dynamic registry.
+            $providers=isset($this->app->providers)
+                ? array_keys($this->app->providers->enabled())
+                : ['yookassa','freekassa'];
             do{
-                $rows=$db->all("SELECT id,provider,provider_payment_id,freekassa_intid FROM orders WHERE id>? AND status='pending' AND provider IN ('yookassa','freekassa') AND provider_payment_id IS NOT NULL ORDER BY id LIMIT 100",[$after]);
-                $db->transaction(function()use($rows,$bucket){foreach($rows as $row){$pid=$row['provider']==='freekassa'&&!empty($row['freekassa_intid'])?$row['freekassa_intid']:$row['provider_payment_id'];$this->app->outbox->enqueue('payment.verify','reconcile:'.$row['id'].':'.$bucket,['payment_id'=>$pid]);}});
+                $placeholders=implode(',',array_fill(0,count($providers),'?'));
+                $rows=$providers===[]?[]:$db->all("SELECT id,provider,provider_payment_id,freekassa_intid FROM orders WHERE id>? AND status='pending' AND provider IN ($placeholders) AND provider_payment_id IS NOT NULL ORDER BY id LIMIT 100",array_merge([$after],$providers));
+                $db->transaction(function()use($rows,$bucket){foreach($rows as $row){$pid=$row['provider']==='freekassa'&&!empty($row['freekassa_intid'])?$row['freekassa_intid']:$row['provider_payment_id'];$this->app->outbox->enqueue('payment.verify','reconcile:'.$row['id'].':'.$bucket,['payment_id'=>$pid,'provider'=>$row['provider']]);}});
                 if($rows)$after=end($rows)['id'];
                 $db->execute("UPDATE advisory_leases SET expires_at=? WHERE name='reconcile' AND token=?",[time()+120,$token]);
             }while(count($rows)===100);
+            $after='';
+            do {
+                $placeholders=implode(',',array_fill(0,count($providers),'?'));
+                $rows=$providers===[]?[]:$db->all("SELECT id,provider,provider_payment_id FROM topups WHERE id>? AND status='pending' AND provider IN ($placeholders) AND provider_payment_id IS NOT NULL ORDER BY id LIMIT 100",array_merge([$after],$providers));
+                foreach ($rows as $row) $this->app->outbox->enqueue('payment.verify','reconcile-topup:'.$row['id'].':'.$bucket,['payment_id'=>$row['provider_payment_id'],'provider'=>$row['provider']]);
+                if ($rows) $after=end($rows)['id'];
+            } while(count($rows)===100);
             // Auto-renew: enqueue renew jobs for subscriptions near expiry
             $autoEnabled=$db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
             if (!$autoEnabled || $autoEnabled['value']==='1') {
                 $maxFails=(int)($db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_MAX_FAILS'")['value']??3);
-                $rows=$db->all("SELECT id FROM subscriptions WHERE auto_renew=1 AND status='active' AND expires_at>? AND renew_at IS NOT NULL AND renew_at<=? AND (renew_order_id IS NULL OR renew_order_id='') AND renew_fail_count<? LIMIT 100",[time(),time(),$maxFails]);
-                $db->transaction(function()use($rows){foreach($rows as $r)$this->app->outbox->enqueue('subscription.renew','renew:'.$r['id'],['subscription_id'=>$r['id']]);});
+                $rows=$db->all("SELECT id,expires_at,renew_fail_count FROM subscriptions WHERE auto_renew=1 AND status='active' AND expires_at>? AND renew_at IS NOT NULL AND renew_at<=? AND (renew_order_id IS NULL OR renew_order_id='') AND renew_fail_count<? LIMIT 100",[time(),time(),$maxFails]);
+                $db->transaction(function()use($rows){foreach($rows as $r)$this->app->outbox->enqueue('subscription.renew','renew:'.$r['id'].':'.$r['expires_at'].':'.$r['renew_fail_count'],['subscription_id'=>$r['id']]);});
                 // Handle failed renewal orders: if renew_order is canceled/expired, schedule retry
                 $failed=$db->all("SELECT s.id,s.renew_order_id,s.renew_fail_count FROM subscriptions s JOIN orders o ON o.id=s.renew_order_id WHERE s.auto_renew=1 AND s.status='active' AND o.status='canceled' LIMIT 100");
                 foreach($failed as $f){

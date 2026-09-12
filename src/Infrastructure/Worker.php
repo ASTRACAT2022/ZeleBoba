@@ -6,15 +6,15 @@ use App\Billing\TopupService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo') {}
     public function handle(string $topic,array $payload): void
     {
         match ($topic) {
             'payment.create'=>$this->paymentService?$this->paymentService->createOrder($payload['order_id']):$this->payments->create($payload['order_id']),
-            'payment.verify'=>$this->paymentService?$this->paymentService->verify($payload['payment_id']):$this->payments->refresh($payload['payment_id']),
+            'payment.verify'=>$this->paymentService?$this->paymentService->verify($payload['payment_id'],$payload['provider']??null):$this->payments->refresh($payload['payment_id']),
             'topup.create'=>$this->topupCreate($payload['topup_id']),
             'topup.after'=>$this->topupAfter($payload['user_id']),
-            'referral.topup'=>$this->referralTopup($payload['user_id'],(int)($payload['amount_kopeks']??0)),
+            'referral.topup'=>isset($payload['topup_id'])?$this->referrals?->processSettledTopup($payload['topup_id']):$this->referralTopup($payload['user_id'],(int)($payload['amount_kopeks']??0)),
             'subscription.provision'=>$this->provision($payload['subscription_id']),
             'subscription.extend'=>$this->extend($payload['subscription_id']),
             'subscription.renew'=>$this->renew($payload['subscription_id']),
@@ -67,17 +67,26 @@ final class Worker
     {
         if ($this->referrals) $this->referrals->processTopup($userId, $amountKopeks);
     }
+    private function subscription(string $id): ?array
+    {
+        return $this->db->one("SELECT s.*,
+            CASE WHEN s.traffic_limit_gb=0 THEN 0 ELSE (s.traffic_limit_gb+s.purchased_traffic_gb)*1073741824 END AS traffic_bytes,
+            s.device_limit AS devices,COALESCE(o.provision_driver,?) AS provision_driver,
+            COALESCE(o.squad_uuid,p.squad_uuid,'') AS squad_uuid
+            FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id
+            LEFT JOIN plans p ON p.id=s.plan_id WHERE s.id=?",[$this->defaultProvisionDriver,$id]);
+    }
     private function traffic(string $id,int $gb): void
     {
-        $s=$this->db->one('SELECT s.*,o.traffic_bytes,o.provision_driver,o.squad_uuid FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.id=?',[$id]);
+        $s=$this->subscription($id);
         if (!$s || $s['status']!=='active' || $s['provision_driver']==='demo') return;
-        $this->provisioner->setTraffic($s,$gb);
+        $this->provisioner->setTraffic($s,0);
     }
     private function devices(string $id,int $count): void
     {
-        $s=$this->db->one('SELECT s.*,o.traffic_bytes,o.provision_driver,o.squad_uuid FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.id=?',[$id]);
+        $s=$this->subscription($id);
         if (!$s || $s['status']!=='active' || $s['provision_driver']==='demo') return;
-        $this->provisioner->setDevices($s,$count);
+        $this->provisioner->setDevices($s,0);
     }
     private function giftCreate(array $payload): void
     {
@@ -85,12 +94,12 @@ final class Worker
     }
     private function provision(string $id): void
     {
-        $s=$this->db->one('SELECT s.*,o.traffic_bytes,o.devices,o.provision_driver,o.squad_uuid FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.id=?',[$id]);
-        if (!$s || $s['status']!=='provisioning') return;
+        $s=$this->subscription($id);
+        if (!$s || !in_array($s['status'],['provisioning','active','trial'],true) || $s['remote_id']!==null || (int)$s['expires_at']<=time()) return;
         if($s['provision_driver']==='demo' && !$this->allowDemo) throw new \RuntimeException('Demo provisioning forbidden');
         $remote=$s['provision_driver']==='demo'?(new \App\Integration\DemoProvisioner())->provision($s):$this->provisioner->provision($s);
         $this->db->transaction(function () use ($s,$remote,$id) {
-            $changed=$this->db->execute("UPDATE subscriptions SET status='active',remote_id=?,subscription_url=? WHERE id=? AND status='provisioning'",[$remote['id'],$remote['url'],$id]);
+            $changed=$this->db->execute("UPDATE subscriptions SET status='active',remote_id=?,subscription_url=? WHERE id=? AND status IN ('provisioning','active','trial') AND remote_id IS NULL",[$remote['id'],$remote['url'],$id]);
             if (!$changed) return;
             $this->db->execute("UPDATE orders SET status='fulfilled' WHERE id=?",[$s['order_id']]);
             $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
@@ -99,15 +108,16 @@ final class Worker
     }
     private function extend(string $id): void
     {
-        $s=$this->db->one('SELECT s.*,o.traffic_bytes,o.devices,o.provision_driver,o.squad_uuid FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.id=?',[$id]);
+        $s=$this->subscription($id);
         if (!$s || $s['status']!=='active') return;
         if($s['provision_driver']==='demo'){
             // Demo: nothing to extend remotely
             return;
         }
+        if ($s['remote_id']===null) { $this->provision($id); return; }
         $this->provisioner->extend($s);
         $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
-        if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','renewed:'.$id,['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
+        if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','renewed:'.$id.':'.$s['expires_at'],['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
     }
     private function renew(string $id): void
     {
@@ -129,7 +139,7 @@ final class Worker
         $email=$user['email']?:($user['telegram_id']?$user['telegram_id'].'@telegram.org':null);
         if (!$email || !filter_var($email,FILTER_VALIDATE_EMAIL)) return;
         $orderId=\App\Infrastructure\Database::id();
-        $key='renew:'.$id.':'.(int)$s['expires_at'];
+        $key='renew:'.$id.':'.(int)$s['expires_at'].':'.(int)$s['renew_fail_count'];
         // Idempotency: if renewal order already exists for this expiry, skip
         if ($this->db->one('SELECT id FROM orders WHERE idempotency_key=?',[$key])) return;
         $provider=$this->db->one('SELECT provider FROM orders WHERE id=?',[$s['order_id']])['provider']??'demo';
@@ -140,9 +150,13 @@ final class Worker
         $purchases=$this->db->one("SELECT value FROM app_settings WHERE name='PURCHASES_ENABLED'");
         if ($purchases && $purchases['value']!=='1') return;
         $this->db->transaction(function() use ($s,$plan,$user,$email,$orderId,$key,$provider,$provisionDriver,$squadUuid,$providerAccount,$id) {
+            $fresh=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$id]);
+            if (!$fresh || (int)$fresh['auto_renew']!==1 || $fresh['renew_order_id']!==null || (int)$fresh['expires_at']!==(int)$s['expires_at']) return;
             $this->db->execute("INSERT INTO orders(id,user_id,plan_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?,?)",[$orderId,$s['user_id'],$plan['id'],$key,$plan['price_minor'],$plan['currency'],$plan['name'],$plan['duration_days'],$plan['traffic_bytes'],$plan['devices'],$provider,time()]);
             $this->db->execute('UPDATE orders SET provision_driver=?,squad_uuid=?,provider_account=?,receipt_email=?,client_ip=? WHERE id=?',[$provisionDriver,$squadUuid,$providerAccount,$email,'8.8.8.8',$orderId]);
-            $this->db->execute('UPDATE orders SET return_url=? WHERE id=?',['https://cabinet.example/orders/'.$orderId,$orderId]);
+            $this->db->execute('UPDATE orders SET return_url=? WHERE id=?',[preg_replace('~/orders/[^/]+$~','/orders/'.$orderId,(string)($this->db->one('SELECT return_url FROM orders WHERE id=?',[$s['order_id']])['return_url']??'')),$orderId]);
+            $original=$this->db->one('SELECT receipt_enabled,vat_code,tax_system FROM orders WHERE id=?',[$s['order_id']]);
+            if ($original) $this->db->execute('UPDATE orders SET receipt_enabled=?,vat_code=?,tax_system=? WHERE id=?',[$original['receipt_enabled'],$original['vat_code'],$original['tax_system'],$orderId]);
             $this->db->execute('UPDATE subscriptions SET renew_order_id=?,renew_at=NULL WHERE id=?',[$orderId,$id]);
             $this->outbox->enqueue('payment.create','checkout:'.$orderId,['order_id'=>$orderId]);
         });

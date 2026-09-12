@@ -30,6 +30,39 @@ final class PostgresConcurrencyTest extends TestCase
             $race(function()use($connect,$token){$db=$connect();$login=new \App\Identity\TelegramLogin($db,new \App\Identity\Auth($db));try{$login->consume($token,'magic');}catch(\App\Billing\BillingError){}});
             $db=$connect();self::assertCount(1,$db->all('SELECT * FROM sessions'));
             self::assertCount(1,$db->all("SELECT * FROM login_challenges WHERE state='consumed'"));
+
+            // Concurrent free-trial requests must produce only one entitlement.
+            $db->execute("INSERT INTO users(id,email,created_at) VALUES('trial-user','trial@example.test',0)");
+            $db->execute("UPDATE plans SET is_trial_available=1,trial_duration_days=3 WHERE id='basic'");
+            unset($db);
+            $race(function()use($connect){
+                $db=$connect();
+                $service=new \App\Billing\TrialService($db,new Outbox($db),new \App\Billing\Wallet($db));
+                try { $service->start('trial-user','basic'); } catch (\App\Billing\BillingError) {}
+            });
+            $db=$connect();
+            self::assertCount(1,$db->all("SELECT id FROM subscriptions WHERE user_id='trial-user'"));
+            $wallet=new \App\Billing\Wallet($db);
+            $wallet->credit('trial-user',50000,'manual_adjust','fixture');
+            unset($db,$wallet);
+            $race(function()use($connect){
+                $db=$connect();
+                (new BillingService($db,new Outbox($db),'demo'))->purchaseFromBalance('trial-user','basic','concurrent-balance-key');
+            });
+            $db=$connect();
+            self::assertSame(30100,(int)$db->one("SELECT balance_kopeks FROM users WHERE id='trial-user'")['balance_kopeks']);
+            self::assertCount(1,$db->all("SELECT id FROM orders WHERE idempotency_key='concurrent-balance-key'"));
+            $auth=new \App\Identity\Auth($db);
+            $reset=$auth->createPasswordReset('trial@example.test');
+            $auth->issue('trial-user');
+            unset($db,$auth);
+            $race(function()use($connect,$reset){
+                $db=$connect();
+                (new \App\Identity\Auth($db))->applyPasswordReset($reset,'correct-reset-password');
+            });
+            $db=$connect();
+            self::assertCount(0,$db->all("SELECT id FROM sessions WHERE user_id='trial-user'"));
+            self::assertSame('trial-user',(new \App\Identity\Auth($db))->login('trial@example.test','correct-reset-password'));
         } finally { $db=$connect();$db->execute('DROP SCHEMA '.$schema.' CASCADE'); }
     }
 }

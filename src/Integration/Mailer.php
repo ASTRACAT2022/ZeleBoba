@@ -22,6 +22,8 @@ final class Mailer
     /** Queue an email; returns queue item id. */
     public function queue(string $toEmail, string $subject, string $bodyHtml, ?string $userId = null): string
     {
+        $toEmail=trim($toEmail);
+        if (!filter_var($toEmail,FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/',$toEmail)) throw new \InvalidArgumentException('Invalid email recipient');
         $id = Database::id();
         $this->db->execute(
             'INSERT INTO email_queue_items(id,user_id,to_email,subject,body,status,attempts,created_at) VALUES(?,?,?,?,?,?,?,?)',
@@ -61,6 +63,8 @@ final class Mailer
         $pass = $this->config['SMTP_PASSWORD'];
         $from = $this->config['SMTP_FROM'] !== '' ? $this->config['SMTP_FROM'] : $user;
 
+        if (!filter_var($toEmail,FILTER_VALIDATE_EMAIL) || !filter_var($from,FILTER_VALIDATE_EMAIL)) throw new \InvalidArgumentException('Invalid email address');
+        if (preg_match('/[\r\n]/',(string)($this->config['SMTP_FROM_NAME']??''))) throw new \InvalidArgumentException('Invalid sender name');
         $errno = 0; $errstr = '';
         $fp = @stream_socket_client("tcp://{$host}:{$port}", $errno, $errstr, 15);
         if (!$fp) throw new \RuntimeException("SMTP connect failed: {$errstr} ({$errno})");
@@ -91,7 +95,7 @@ final class Mailer
         $this->smtpSend($fp, 'DATA');
         $this->smtpCmd($fp, 354);
         $headers = [
-            'From: ' . ((string)($this->config['SMTP_FROM_NAME'] ?? '') !== '' ? $this->config['SMTP_FROM_NAME'] . ' <' . $from . '>' : $from),
+            'From: ' . ((string)($this->config['SMTP_FROM_NAME'] ?? '') !== '' ? $this->encodeHeader($this->config['SMTP_FROM_NAME']) . ' <' . $from . '>' : $from),
             'To: <' . $toEmail . '>',
             'Subject: ' . $this->encodeHeader($subject),
             'MIME-Version: 1.0',

@@ -102,7 +102,7 @@ final class WalletTest extends TestCase
         self::assertSame('paid',$this->db->one('SELECT status FROM orders')['status']);
         self::assertCount(1,$this->db->all('SELECT * FROM subscriptions'));
         self::assertSame(30100,$this->wallet->balance($this->uid)['balance_kopeks']);
-        self::assertCount(3,$this->db->all('SELECT * FROM transactions'));
+        self::assertCount(2,$this->db->all('SELECT * FROM transactions'));
     }
     public function testTopupWorkerCreatesCheckout():void
     {

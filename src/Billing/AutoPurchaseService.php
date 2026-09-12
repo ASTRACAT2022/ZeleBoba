@@ -4,12 +4,20 @@ namespace App\Billing;
 use App\Infrastructure\{Database,Outbox};
 final class AutoPurchaseService
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Wallet $wallet, private CartService $carts, private BillingService $billing) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Wallet $wallet, private CartService $carts, private BillingService $billing, private ?GiftService $gifts=null) {}
     /**
      * After a successful topup, if the user saved a cart with topup intent,
      * charge the balance and complete the purchase. Idempotent.
      */
     public function afterTopup(string $userId): void
+    {
+        $this->db->transaction(function() use ($userId) {
+            $this->db->one('SELECT id FROM users WHERE id=?'.$this->db->lock(),[$userId]);
+            $this->db->one('SELECT user_id FROM carts WHERE user_id=?'.$this->db->lock(),[$userId]);
+            $this->processCart($userId);
+        });
+    }
+    private function processCart(string $userId): void
     {
         $cart = $this->carts->get($userId);
         if (!$cart || empty($cart['_intent'])) return;
@@ -40,27 +48,13 @@ final class AutoPurchaseService
         $key = (string)($cart['idempotency_key'] ?? 'cart:' . $userId . ':' . $planId);
         $plan = $this->db->one('SELECT * FROM plans WHERE id=? AND active=1', [$planId]);
         if (!$plan) throw new BillingError('Тариф больше недоступен.');
-        $this->db->transaction(function () use ($userId, $plan, $key) {
-            $this->wallet->debit($userId, (int)$plan['price_minor'], 'subscription_purchase', 'Покупка подписки: ' . $plan['name']);
-            $order = $this->billing->order($userId, $plan['id'], $key, null, null);
-            $this->billing->settleFromBalance($order['id'], (int)$plan['price_minor'], 'RUB');
-        });
+        $this->billing->purchaseFromBalance($userId,$planId,$key);
         $this->carts->delete($userId);
     }
     private function purchaseGift(string $userId, array $cart): void
     {
-        $planId = (string)($cart['plan_id'] ?? '');
-        $plan = $this->db->one('SELECT * FROM plans WHERE id=? AND active=1', [$planId]);
-        if (!$plan) throw new BillingError('Тариф для подарка больше недоступен.');
-        $this->db->transaction(function () use ($userId, $plan, $cart) {
-            $this->wallet->debit($userId, (int)$plan['price_minor'], 'gift_purchase', 'Покупка подарочной подписки: ' . $plan['name']);
-            $this->outbox->enqueue('gift.create', 'gift:' . $userId . ':' . $plan['id'] . ':' . time(), [
-                'user_id' => $userId,
-                'plan_id' => $plan['id'],
-                'price_minor' => (int)$plan['price_minor'],
-                'currency' => 'RUB',
-            ]);
-        });
+        if (!$this->gifts) throw new BillingError('Подарки не настроены.');
+        $this->gifts->purchaseFromBalance($userId,(string)($cart['plan_id']??''),(string)($cart['idempotency_key']??Database::id()),$cart['recipient_type']??null,$cart['recipient_value']??null,$cart['message']??null);
         $this->carts->delete($userId);
     }
     private function purchaseTraffic(string $userId, array $cart): void
@@ -74,7 +68,7 @@ final class AutoPurchaseService
             if (!$sub) throw new BillingError('Подписка не найдена.');
             $this->wallet->debit($userId, $price, 'traffic_topup', 'Докупка трафика: ' . $gb . ' ГБ');
             $this->db->execute('UPDATE subscriptions SET purchased_traffic_gb = purchased_traffic_gb + ? WHERE id=?', [$gb, $subscriptionId]);
-            $this->outbox->enqueue('subscription.traffic', 'traffic:' . $subscriptionId . ':' . $gb, ['subscription_id' => $subscriptionId, 'traffic_gb' => $gb]);
+            $this->outbox->enqueue('subscription.traffic', 'traffic:' . $subscriptionId . ':' . Database::id(), ['subscription_id' => $subscriptionId, 'traffic_gb' => $gb]);
         });
         $this->carts->delete($userId);
     }
@@ -89,7 +83,7 @@ final class AutoPurchaseService
             if (!$sub) throw new BillingError('Подписка не найдена.');
             $this->wallet->debit($userId, $price, 'device_addon', 'Докупка устройств: +' . $count);
             $this->db->execute('UPDATE subscriptions SET device_limit = device_limit + ? WHERE id=?', [$count, $subscriptionId]);
-            $this->outbox->enqueue('subscription.devices', 'devices:' . $subscriptionId . ':' . $count, ['subscription_id' => $subscriptionId, 'devices' => $count]);
+            $this->outbox->enqueue('subscription.devices', 'devices:' . $subscriptionId . ':' . Database::id(), ['subscription_id' => $subscriptionId, 'devices' => $count]);
         });
         $this->carts->delete($userId);
     }

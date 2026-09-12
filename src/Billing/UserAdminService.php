@@ -5,7 +5,7 @@ use App\Infrastructure\Database;
 use App\Integration\Provisioner;
 final class UserAdminService
 {
-    public function __construct(private Database $db, private Wallet $wallet, private ?Provisioner $provisioner = null) {}
+    public function __construct(private Database $db, private Wallet $wallet, private ?Provisioner $provisioner = null, private ?\App\Infrastructure\Outbox $outbox = null) {}
     /** Full user profile for the admin: account, balance, subscriptions, orders, promocodes, referrals. */
     public function profile(string $userId): array
     {
@@ -63,6 +63,7 @@ final class UserAdminService
             if ($sub) {
                 $base = max(time(), (int)$sub['expires_at']);
                 $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$base + $days * 86400, time(), $sub['id']]);
+                $this->outbox?->enqueue('subscription.extend','admin-extend:'.Database::id(),['subscription_id'=>$sub['id']]);
                 $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.days_granted', $userId, time()]);
                 return $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$sub['id']]);
             }
@@ -73,6 +74,7 @@ final class UserAdminService
                 "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,plan_id,traffic_limit_gb,device_limit,is_trial,start_date,updated_at) VALUES(?,NULL,?,'active',?,?,?,?,?,0,?,?)",
                 [$id, $userId, $now + $days * 86400, $now, $plan['id'] ?? null, $plan ? (int)$plan['traffic_bytes'] / 1073741824 : 0, $plan ? (int)$plan['devices'] : 1, $now, $now]
             );
+            $this->outbox?->enqueue('subscription.provision','provision:'.$id,['subscription_id'=>$id]);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.days_granted', $userId, time()]);
             return $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$id]);
         });
@@ -80,7 +82,7 @@ final class UserAdminService
     /** Set a promo discount for a user. */
     public function setDiscount(string $userId, int $percent, int $hours, string $actor): void
     {
-        if ($percent < 1 || $percent > 100) throw new BillingError('Скидка: 1–100%.');
+        if ($percent < 1 || $percent > 99) throw new BillingError('Скидка: 1–99%.');
         if ($hours < 0 || $hours > 8760) throw new BillingError('Часы: 0–8760.');
         $this->db->execute('UPDATE users SET promo_offer_discount_percent=?,promo_offer_discount_source=?,promo_offer_discount_expires_at=? WHERE id=?', [$percent, 'admin:'.$actor, $hours > 0 ? time() + $hours * 3600 : null, $userId]);
         $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.discount_set', $userId, time()]);

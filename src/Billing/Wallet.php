@@ -13,32 +13,36 @@ final class Wallet
     /** Credit user balance inside the caller's transaction. Returns new balance. */
     public function credit(string $userId, int $amountKopeks, string $type, string $description, ?string $paymentMethod = null, ?string $externalId = null, bool $completed = true): array
     {
-        if ($amountKopeks <= 0) throw new BillingError('Сумма должна быть положительной.');
-        if (!in_array($type, self::TYPES, true)) throw new BillingError('Некорректный тип операции.');
-        $now = time();
-        $this->db->execute('UPDATE users SET balance_kopeks = balance_kopeks + ? WHERE id = ?', [$amountKopeks, $userId]);
-        $tx = Database::id();
-        $this->db->execute(
-            'INSERT INTO transactions(id,seq,user_id,type,amount_kopeks,description,payment_method,external_id,is_completed,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-            [$tx, $this->nextSeq(), $userId, $type, $amountKopeks, $description, $paymentMethod, $externalId, (int)$completed, $now, $completed ? $now : null]
-        );
-        return $this->balance($userId);
+        return $this->db->transaction(function() use ($userId,$amountKopeks,$type,$description,$paymentMethod,$externalId,$completed) {
+            if ($amountKopeks <= 0) throw new BillingError('Сумма должна быть положительной.');
+            if (!in_array($type, self::TYPES, true)) throw new BillingError('Некорректный тип операции.');
+            $now = time();
+            $this->db->execute('UPDATE users SET balance_kopeks = balance_kopeks + ? WHERE id = ?', [$amountKopeks, $userId]);
+            $tx = Database::id();
+            $this->db->execute(
+                'INSERT INTO transactions(id,seq,user_id,type,amount_kopeks,description,payment_method,external_id,is_completed,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                [$tx, $this->nextSeq(), $userId, $type, $amountKopeks, $description, $paymentMethod, $externalId, (int)$completed, $now, $completed ? $now : null]
+            );
+            return $this->balance($userId);
+        });
     }
     /** Debit user balance inside the caller's transaction. Returns new balance. */
     public function debit(string $userId, int $amountKopeks, string $type, string $description, ?string $paymentMethod = null, ?string $externalId = null): array
     {
-        if ($amountKopeks <= 0) throw new BillingError('Сумма должна быть положительной.');
-        if (!in_array($type, self::TYPES, true)) throw new BillingError('Некорректный тип операции.');
-        $user = $this->db->one('SELECT balance_kopeks FROM users WHERE id = ?' . $this->db->lock(), [$userId]);
-        if (!$user) throw new BillingError('Аккаунт не найден.');
-        if ((int)$user['balance_kopeks'] < $amountKopeks) throw new BillingError('Недостаточно средств на балансе.');
-        $now = time();
-        $this->db->execute('UPDATE users SET balance_kopeks = balance_kopeks - ? WHERE id = ?', [$amountKopeks, $userId]);
-        $this->db->execute(
-            'INSERT INTO transactions(id,seq,user_id,type,amount_kopeks,description,payment_method,external_id,is_completed,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-            [Database::id(), $this->nextSeq(), $userId, $type, -$amountKopeks, $description, $paymentMethod, $externalId, 1, $now, $now]
-        );
-        return $this->balance($userId);
+        return $this->db->transaction(function() use ($userId,$amountKopeks,$type,$description,$paymentMethod,$externalId) {
+            if ($amountKopeks <= 0) throw new BillingError('Сумма должна быть положительной.');
+            if (!in_array($type, self::TYPES, true)) throw new BillingError('Некорректный тип операции.');
+            $user = $this->db->one('SELECT balance_kopeks FROM users WHERE id = ?' . $this->db->lock(), [$userId]);
+            if (!$user) throw new BillingError('Аккаунт не найден.');
+            if ((int)$user['balance_kopeks'] < $amountKopeks) throw new BillingError('Недостаточно средств на балансе.');
+            $now = time();
+            $this->db->execute('UPDATE users SET balance_kopeks = balance_kopeks - ? WHERE id = ?', [$amountKopeks, $userId]);
+            $this->db->execute(
+                'INSERT INTO transactions(id,seq,user_id,type,amount_kopeks,description,payment_method,external_id,is_completed,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                [Database::id(), $this->nextSeq(), $userId, $type, -$amountKopeks, $description, $paymentMethod, $externalId, 1, $now, $now]
+            );
+            return $this->balance($userId);
+        });
     }
     public function balance(string $userId): array
     {

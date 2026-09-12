@@ -42,6 +42,7 @@ trait AdminActions
         if($handler==='admin-user')return $this->render('admin-user',['profile'=>$this->app->userAdmin->profile($id),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name'),'sub_removed'=>$this->request->query->has('sub_removed')]);
         if($handler==='admin-user-balance'){
             $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
+                if ($amount===false || $amount < -1000000 || $amount > 1000000) throw new BillingError('Некорректная сумма.');
             $this->app->userAdmin->adjustBalance($id,($amount??0)*100,$input->get('reason',''),$uid);return new RedirectResponse('/admin/users/'.$id,303);
         }
         if($handler==='admin-user-days'){
@@ -124,8 +125,8 @@ trait AdminActions
         if($handler==='admin-polls')return $this->render('admin-polls',['polls'=>$this->app->polls->list()]);
         if($handler==='admin-poll-create'){
             $questions=[];
-            foreach ($input->get('q_text',[]) as $i=>$text) {
-                $questions[]=['text'=>$text,'options'=>array_values(array_filter($input->get('q_options_'.$i,[])))];
+            foreach ($input->all('q_text') as $i=>$text) {
+                $questions[]=['text'=>$text,'options'=>array_values(array_filter($input->all('q_options_'.$i)))];
             }
             $this->app->polls->create(['title'=>$input->get('title',''),'description'=>$input->get('description',''),'reward_amount_kopeks'=>$input->get('reward_amount_kopeks','0'),'questions'=>$questions],$uid);return new RedirectResponse('/admin/polls',303);
         }
@@ -134,7 +135,7 @@ trait AdminActions
             $this->app->campaigns->create($input->all(),$uid);return new RedirectResponse('/admin/campaigns',303);
         }
         if($handler==='admin-reports'){
-            $days=$input->getInt('days',30);
+            $days=$this->request->query->getInt('days',30);
             if($days<1||$days>365)$days=30;
             $stats=$this->app->reporting->salesStats($days);
             $daily=$this->app->reporting->dailyRevenue(min($days,30));
@@ -159,7 +160,7 @@ trait AdminActions
         }
         if($handler==='admin-roles')return $this->render('admin-roles',['roles'=>$this->app->rbac->listRoles(),'permissions'=>\App\Billing\RbacService::PERMISSIONS,'users'=>$db->all('SELECT id,email,telegram_id FROM users ORDER BY created_at DESC LIMIT 100')]);
         if($handler==='admin-role-create'){
-            $perms=array_values(array_filter($input->get('permissions',[])));
+            $perms=array_values(array_filter($input->all('permissions')));
             $this->app->rbac->createRole($input->get('name',''),$input->get('description',''),$input->getInt('level',0),$perms,$uid);return new RedirectResponse('/admin/roles',303);
         }
         if($handler==='admin-role-assign'){

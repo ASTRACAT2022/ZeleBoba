@@ -25,6 +25,6 @@ abstract class AbstractProvider implements ProviderInterface
     protected function json(string $method, string $url, array $options = []): array
     {
         $options = array_merge(['timeout'=>10,'max_duration'=>20,'max_redirects'=>0], $options);
-        return $this->http->request($method, $url, $options)->toArray(false);
+        return $this->http->request($method, $url, $options)->toArray();
     }
 }
