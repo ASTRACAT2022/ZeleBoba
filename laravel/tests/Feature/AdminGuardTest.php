@@ -13,7 +13,7 @@ final class AdminGuardTest extends TestCase
     {
         parent::setUp();
         foreach (['user_roles', 'admin_roles', 'sessions', 'users'] as $table) {
-            Schema::dropIfExists($table);
+            $this->dropLegacy($table);
         }
         Schema::create('users', function (Blueprint $table): void {
             $table->string('id')->primary();

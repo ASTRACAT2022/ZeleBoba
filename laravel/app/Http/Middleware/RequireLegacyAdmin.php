@@ -2,8 +2,8 @@
 
 namespace App\Http\Middleware;
 
-use Closure;
 use App\Services\AuthorizationService;
+use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,7 +17,7 @@ final class RequireLegacyAdmin
     public function handle(Request $request, Closure $next): Response
     {
         $raw = $request->cookie('zb_session');
-        if (!is_string($raw) || !preg_match('/^[a-f0-9]{64}$/D', $raw)) {
+        if (! is_string($raw) || ! preg_match('/^[a-f0-9]{64}$/D', $raw)) {
             abort(401);
         }
 
@@ -32,7 +32,7 @@ final class RequireLegacyAdmin
         // Authentication (including MFA step-up) is separate from
         // authorization. The following permission middleware determines which
         // staff role may perform an individual action.
-        if (!$user || (int) $user->admin_verified_until < time()) {
+        if (! $user || (int) $user->admin_verified_until < time()) {
             abort(403);
         }
 

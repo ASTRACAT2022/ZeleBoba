@@ -16,7 +16,7 @@ final class LegacyAuthService
     public function register(string $email, string $password): string
     {
         $email = mb_strtolower(trim($email));
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 254 || strlen($password) < 12 || strlen($password) > 128) {
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 254 || strlen($password) < 12 || strlen($password) > 128) {
             throw ValidationException::withMessages(['email' => 'Введите корректную почту и пароль от 12 до 128 символов.']);
         }
 
@@ -40,11 +40,13 @@ final class LegacyAuthService
         $user = DB::table('users')->where('email', mb_strtolower(trim($email)))->first();
         $hash = (string) ($user->password_hash ?? '');
         $valid = $user && password_verify($password, $hash);
-        if (!$valid && $user && str_starts_with($hash, 'pbkdf2_sha256$')) {
+        if (! $valid && $user && str_starts_with($hash, 'pbkdf2_sha256$')) {
             $valid = self::verifyDjangoPbkdf2($password, $hash);
-            if ($valid) DB::table('users')->where('id', $user->id)->update(['password_hash' => password_hash($password, PASSWORD_ARGON2ID)]);
+            if ($valid) {
+                DB::table('users')->where('id', $user->id)->update(['password_hash' => password_hash($password, PASSWORD_ARGON2ID)]);
+            }
         }
-        if (!$user || (int) $user->disabled === 1 || !$valid) {
+        if (! $user || (int) $user->disabled === 1 || ! $valid) {
             throw ValidationException::withMessages(['email' => 'Неверная почта или пароль.']);
         }
 
@@ -54,11 +56,18 @@ final class LegacyAuthService
     private static function verifyDjangoPbkdf2(string $password, string $hash): bool
     {
         $parts = explode('$', $hash);
-        if (count($parts) !== 4 || $parts[0] !== 'pbkdf2_sha256') return false;
+        if (count($parts) !== 4 || $parts[0] !== 'pbkdf2_sha256') {
+            return false;
+        }
         $iterations = (int) $parts[1];
-        if ($iterations < 1 || $iterations > 5_000_000 || $parts[2] === '' || $parts[3] === '') return false;
+        if ($iterations < 1 || $iterations > 5_000_000 || $parts[2] === '' || $parts[3] === '') {
+            return false;
+        }
         $expected = base64_decode($parts[3], true);
-        if ($expected === false) return false;
+        if ($expected === false) {
+            return false;
+        }
+
         return hash_equals($expected, hash_pbkdf2('sha256', $password, $parts[2], $iterations, strlen($expected), true));
     }
 

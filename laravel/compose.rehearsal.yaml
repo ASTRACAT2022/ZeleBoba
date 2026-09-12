@@ -1,0 +1,169 @@
+# Rehearsal-only compose for the Laravel cutover.
+#
+# Goal: bring up an isolated, disposable copy of the Laravel stack that:
+#   - talks to a separate Postgres volume (NOT the production zeleboba_postgres),
+#   - talks to a separate Redis instance,
+#   - binds Nginx on 127.0.0.1 only,
+#   - never touches the legacy Symfony stack,
+#   - exposes no port to the public interface.
+#
+# This file intentionally shadows compose.production.yaml so production
+# rehearsal does not require production credentials or a real upstream.
+#
+# To use:
+#   cp .env.rehearsal.example .env.rehearsal
+#   ./bin/rehearsal-check up
+#   ./bin/rehearsal-check down
+#
+# DO NOT use this for production traffic.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zeleboba/laravel-rehearsal:dev
+    container_name: zeleboba-laravel-rehearsal-app
+    env_file: .env
+    working_dir: /app
+    # Run as root in rehearsal so composer can write /var/www/.composer/cache.
+    # The production image runs as www-data and only writes to storage/.
+    user: "0:0"
+    volumes:
+      - .:/app
+      - zeleboba-laravel-rehearsal-vendor:/app/vendor
+      - zeleboba-laravel-rehearsal-storage:/app/storage
+      - zeleboba-laravel-rehearsal-bootstrap:/app/bootstrap/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "artisan", "about", "--only=environment"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { memory: 512M }
+    networks: [zeleboba-laravel-rehearsal-net]
+
+  horizon:
+    image: zeleboba/laravel-rehearsal:dev
+    container_name: zeleboba-laravel-rehearsal-horizon
+    env_file: .env
+    working_dir: /app
+    user: "0:0"
+    command: ["php", "artisan", "horizon"]
+    volumes:
+      - .:/app
+      - zeleboba-laravel-rehearsal-vendor:/app/vendor
+      - zeleboba-laravel-rehearsal-storage:/app/storage
+      - zeleboba-laravel-rehearsal-bootstrap:/app/bootstrap/cache
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { memory: 512M }
+    networks: [zeleboba-laravel-rehearsal-net]
+
+  scheduler:
+    image: zeleboba/laravel-rehearsal:dev
+    container_name: zeleboba-laravel-rehearsal-scheduler
+    env_file: .env
+    working_dir: /app
+    user: "0:0"
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - .:/app
+      - zeleboba-laravel-rehearsal-vendor:/app/vendor
+      - zeleboba-laravel-rehearsal-storage:/app/storage
+      - zeleboba-laravel-rehearsal-bootstrap:/app/bootstrap/cache
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { memory: 256M }
+    networks: [zeleboba-laravel-rehearsal-net]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: zeleboba-laravel-rehearsal-postgres
+    environment:
+      POSTGRES_DB: zeleboba_rehearsal
+      POSTGRES_USER: zeleboba_rehearsal
+      POSTGRES_PASSWORD: rehearsal_pwd
+    volumes:
+      - zeleboba-laravel-rehearsal-postgres:/var/lib/postgresql/data
+      - ../migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeleboba_rehearsal -d zeleboba_rehearsal"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [zeleboba-laravel-rehearsal-net]
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: zeleboba-laravel-rehearsal-redis
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - zeleboba-laravel-rehearsal-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [zeleboba-laravel-rehearsal-net]
+
+  web:
+    image: nginx:1.28-bookworm
+    container_name: zeleboba-laravel-rehearsal-web
+    ports:
+      - "127.0.0.1:8091:80"
+    volumes:
+      - ./public:/app/public:ro
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1/health/live || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks: [zeleboba-laravel-rehearsal-net]
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: zeleboba-laravel-rehearsal-mailpit
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+    networks: [zeleboba-laravel-rehearsal-net]
+
+volumes:
+  zeleboba-laravel-rehearsal-vendor:
+  zeleboba-laravel-rehearsal-storage:
+  zeleboba-laravel-rehearsal-bootstrap:
+  zeleboba-laravel-rehearsal-postgres:
+  zeleboba-laravel-rehearsal-redis:
+
+networks:
+  zeleboba-laravel-rehearsal-net:
+    driver: bridge
+    name: zeleboba_laravel_rehearsal_net

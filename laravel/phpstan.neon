@@ -1,0 +1,16 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - app/
+
+    # Rehearsal-only configuration. The production readiness gate requires
+    # this file to exist and be exercised before a production cutover.
+    # See docs/PRODUCTION_READINESS.md (P1 — Static analysis).
+    level: 5
+
+    # The Laravel cutover sits on top of a legacy database that we do not
+    # own. Tables created by ../migrations/*.sql are not represented as
+    # Eloquent models, so Larastan cannot reason about them. Keep their
+    # absence in scope for analysis; Larastan will simply not check them.
