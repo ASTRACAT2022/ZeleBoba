@@ -5,7 +5,7 @@ use App\Infrastructure\Database;
 use App\Integration\Provisioner;
 final class UserAdminService
 {
-    public function __construct(private Database $db, private Wallet $wallet, private ?Provisioner $provisioner = null, private ?\App\Infrastructure\Outbox $outbox = null) {}
+    public function __construct(private Database $db, private Wallet $wallet, private ?Provisioner $provisioner = null, private ?\App\Infrastructure\Outbox $outbox = null, private ?CustomerTimeline $timeline = null) {}
     /** Full user profile for the admin: account, balance, subscriptions, orders, promocodes, referrals. */
     public function profile(string $userId): array
     {
@@ -37,6 +37,7 @@ final class UserAdminService
             'referrer' => $referrer,
             'spent_kopeks' => -(int)($spending['s'] ?? 0),
             'gifts' => $gifts,
+            'timeline' => $this->timeline?->forUser($userId) ?? [],
         ];
     }
     /** Adjust user balance (credit or debit) with audit. */

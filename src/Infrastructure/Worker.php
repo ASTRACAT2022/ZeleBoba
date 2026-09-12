@@ -2,11 +2,11 @@
 declare(strict_types=1);
 namespace App\Infrastructure;
 use App\Integration\{Payments,Provisioner,PaymentService};
-use App\Billing\TopupService;
+use App\Billing\{TopupService,CustomerTimeline};
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo') {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null) {}
     public function handle(string $topic,array $payload): void
     {
         $span=Telemetry::start('billing.outbox.process',['messaging.operation'=>'process','messaging.destination.name'=>$topic]);
@@ -107,12 +107,15 @@ final class Worker
     {
         $s=$this->subscription($id);
         if (!$s || !in_array($s['status'],['provisioning','active','trial'],true) || $s['remote_id']!==null || (int)$s['expires_at']<=time()) return;
+        $this->timeline?->record($s['user_id'], 'vpn.provisioning_started', ['subscription_id'=>$id]);
         if($s['provision_driver']==='demo' && !$this->allowDemo) throw new \RuntimeException('Demo provisioning forbidden');
         $remote=$s['provision_driver']==='demo'?(new \App\Integration\DemoProvisioner())->provision($s):$this->provisioner->provision($s);
         $this->db->transaction(function () use ($s,$remote,$id) {
             $changed=$this->db->execute("UPDATE subscriptions SET status='active',remote_id=?,subscription_url=? WHERE id=? AND status IN ('provisioning','active','trial') AND remote_id IS NULL",[$remote['id'],$remote['url'],$id]);
             if (!$changed) return;
             $this->db->execute("UPDATE orders SET status='fulfilled' WHERE id=?",[$s['order_id']]);
+            $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
+            $this->timeline?->record($s['user_id'], 'subscription.active', ['subscription_id'=>$id]);
             $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
             if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','activated:'.$id,['chat_id'=>$user['telegram_id'],'text'=>'Подписка готова. Откройте веб-кабинет или отправьте /status.']);
         });
@@ -127,6 +130,7 @@ final class Worker
         }
         if ($s['remote_id']===null) { $this->provision($id); return; }
         $this->provisioner->extend($s);
+        $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
         $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
         if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','renewed:'.$id.':'.$s['expires_at'],['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
     }
@@ -177,6 +181,8 @@ final class Worker
         if (!$this->botToken) throw new \RuntimeException('Telegram is not configured');
         $result=$this->http->request('POST',rtrim($this->telegramApiBase,'/').'/bot'.$this->botToken.'/sendMessage',['json'=>$payload,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray();
         if (!($result['ok']??false)) throw new \RuntimeException('Telegram rejected message');
+        $user = $this->db->one('SELECT id FROM users WHERE telegram_id=?', [(string)($payload['chat_id'] ?? '')]);
+        if ($user) $this->timeline?->record($user['id'], 'telegram.notification_delivered', []);
     }
     private function answer(array $payload): void
     {

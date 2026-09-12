@@ -3,7 +3,7 @@ declare(strict_types=1);
 namespace Tests;
 use PHPUnit\Framework\TestCase;
 use App\Infrastructure\{Database,Outbox};
-use App\Billing\{BillingService,Wallet,UserAdminService,ReportingService};
+use App\Billing\{BillingService,Wallet,UserAdminService,ReportingService,CustomerTimeline};
 use App\Identity\Auth;
 final class UserAdminTest extends TestCase
 {
@@ -33,6 +33,16 @@ final class UserAdminTest extends TestCase
     {
         $this->expectException(\App\Billing\BillingError::class);
         $this->svc->profile('nonexistent');
+    }
+    public function testProfileIncludesCustomerTimelineInChronologicalOrder():void
+    {
+        $timeline = new CustomerTimeline($this->db);
+        $timeline->record($this->uid, 'payment.created', ['amount_kopeks' => 19900]);
+        $timeline->record($this->uid, 'payment.paid');
+        $svc = new UserAdminService($this->db, $this->wallet, null, null, $timeline);
+
+        $profile = $svc->profile($this->uid);
+        self::assertSame(['payment.created', 'payment.paid'], array_column($profile['timeline'], 'event_type'));
     }
     public function testAdjustBalanceCreditAndDebit():void
     {
