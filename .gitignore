@@ -1,5 +1,40 @@
 /vendor/
 /.env
+/.env.*
+/.env.rehearsal
 /var/*
 !/var/.gitkeep
 /.phpunit.cache/
+
+# OTel collector secrets — never commit. These contain live credentials
+# for the production observability pipeline.
+/infra/*.creds
+/infra/*.htpasswd
+/infra/*.bak-*
+
+# Laravel runtime artefacts that should never leak into the public repo
+/laravel/vendor/
+/laravel/.env
+/laravel/.env.*
+/laravel/.env.rehearsal
+/laravel/.env.testing
+/laravel/storage/app/cutover/*.json
+/laravel/storage/framework/cache/*
+/laravel/storage/framework/sessions/*
+/laravel/storage/framework/views/*
+/laravel/storage/logs/*
+/laravel/bootstrap/cache/*
+/laravel/public/build/
+/laravel/public/hot
+/laravel/node_modules/
+
+# IDE / editor state
+/.idea/
+/.vscode/
+/.zed/
+/*.swp
+/*.swo
+
+# OS noise
+.DS_Store
+Thumbs.db
