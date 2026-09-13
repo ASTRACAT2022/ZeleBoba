@@ -258,6 +258,17 @@ final class AuditRegressionTest extends TestCase
         self::assertSame(['topic'=>'payment.verify','payload'=>['payment_id'=>'invoice-1','provider'=>'cryptobot']],$received);
     }
 
+    public function testReconcilerRecoversProvisioningAfterDeadJob(): void
+    {
+        $now=time();
+        $this->app->db->execute("INSERT INTO orders(id,user_id,plan_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,created_at) VALUES('paid-order','recipient','basic','paid-order-key',19900,'RUB','Basic',30,0,3,'paid','demo',?)",[$now]);
+        $this->app->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit) VALUES('stuck-sub','paid-order','recipient','provisioning',?,?,0,3)",[$now+86400,$now]);
+        $this->app->outbox->enqueue('subscription.provision','provision:stuck-sub',['subscription_id'=>'stuck-sub']);
+        $this->app->db->execute("UPDATE outbox SET status='dead' WHERE dedup_key='provision:stuck-sub'");
+        (new Reconciler($this->app))->run();
+        self::assertCount(1,$this->app->db->all("SELECT * FROM outbox WHERE topic='subscription.provision' AND dedup_key LIKE 'reconcile-provision:stuck-sub:%'"));
+    }
+
     public function testMalformedConfiguredProviderWebhookIsRejectedWithoutServerError(): void
     {
         $config=['CRYPTOBOT_ENABLED'=>'1','CRYPTOBOT_API_TOKEN'=>'fixture-token'];

@@ -256,6 +256,7 @@ final class Telegram
     private function mainMenu(): array
     {
         return ['inline_keyboard'=>[
+            [['text'=>'🚀 Открыть приложение','web_app'=>['url'=>rtrim($this->appUrl,'/').'/miniapp']]],
             [['text'=>'Тарифы','callback_data'=>'menu:plans'],['text'=>'Мои подписки','callback_data'=>'menu:subs']],
             [['text'=>'Мои заказы','callback_data'=>'menu:orders'],['text'=>'Кабинет','callback_data'=>'menu:cabinet']],
             [['text'=>'Помощь','callback_data'=>'menu:help']],
@@ -473,11 +474,10 @@ final class Telegram
     }
     private function sendCabinet(int $id,string $tg): void
     {
-        if(!$this->login){ $this->reply($id,$tg,'Кабинет: '.$this->appUrl,$this->mainMenu()); return; }
+        if(!$this->login){ $this->reply($id,$tg,'Откройте приложение — в нём доступны тарифы, подписки и баланс.',$this->mainMenu()); return; }
         $this->db->transaction(function()use($id,$tg){
             if(!$this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$id,time()]))return;
-            $token=$this->login->magic($tg);
-            $this->outbox->enqueue('telegram.send','reply:'.$id,['chat_id'=>$tg,'text'=>'Одноразовая ссылка действует 5 минут. Не пересылайте её.','reply_markup'=>['inline_keyboard'=>[[['text'=>'Открыть кабинет','url'=>rtrim($this->appUrl,'/').'/telegram/magic#'.$token]]]]]);
+            $this->outbox->enqueue('telegram.send','reply:'.$id,['chat_id'=>$tg,'text'=>'Откройте Mini App — вход выполнится через Telegram, без одноразовой ссылки.','reply_markup'=>['inline_keyboard'=>[[['text'=>'🚀 Открыть приложение','web_app'=>['url'=>rtrim($this->appUrl,'/').'/miniapp']]]]]]);
         });
     }
     private function handleCallback($updateId,$callback): void

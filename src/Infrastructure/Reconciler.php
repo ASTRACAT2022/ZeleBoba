@@ -42,6 +42,15 @@ final class Reconciler
                 foreach ($rows as $row) $this->app->outbox->enqueue('payment.verify','reconcile-topup:'.$row['id'].':'.$bucket,['payment_id'=>$row['provider_payment_id'],'provider'=>$row['provider']]);
                 if ($rows) $after=end($rows)['id'];
             } while(count($rows)===100);
+            // A worker can exhaust provisioning retries while the panel is down.
+            // The original outbox dedup key remains occupied by the dead job, so
+            // enqueue a time-bucketed recovery operation rather than attempting
+            // to mutate a dead job in place. Worker::provision and the remote
+            // deterministic username make this safe to repeat after a timeout.
+            $stuck=$db->all("SELECT id FROM subscriptions WHERE status='provisioning' AND remote_id IS NULL AND expires_at>? ORDER BY created_at LIMIT 100",[time()]);
+            foreach ($stuck as $subscription) {
+                $this->app->outbox->enqueue('subscription.provision','reconcile-provision:'.$subscription['id'].':'.intdiv(time(),300),['subscription_id'=>$subscription['id']]);
+            }
             // Auto-renew: enqueue renew jobs for subscriptions near expiry
             $autoEnabled=$db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
             if (!$autoEnabled || $autoEnabled['value']==='1') {

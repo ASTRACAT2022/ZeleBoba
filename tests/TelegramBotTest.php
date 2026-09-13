@@ -41,6 +41,7 @@ final class TelegramBotTest extends TestCase
         self::assertStringContainsString('дублер',$job['text']);
         self::assertStringContainsString('https://cabinet.example',$job['text']);
         self::assertNotEmpty($job['reply_markup']['inline_keyboard']);
+        self::assertSame('https://cabinet.example/miniapp',$job['reply_markup']['inline_keyboard'][0][0]['web_app']['url']);
     }
     public function testPlansListsWithBuyButtons(): void
     {
