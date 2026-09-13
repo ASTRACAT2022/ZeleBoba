@@ -4,6 +4,15 @@ x-app: &app
     DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
     DATABASE_USER: billing
     DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    OTEL_PHP_AUTOLOAD_ENABLED: "true"
+    OTEL_SERVICE_NAME: zeleboba-billing
+    OTEL_TRACES_EXPORTER: otlp
+    OTEL_METRICS_EXPORTER: "none"
+    OTEL_LOGS_EXPORTER: "none"
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    OTEL_TRACES_SAMPLER: parentbased_traceidratio
+    OTEL_TRACES_SAMPLER_ARG: "1.0"
   depends_on:
     db: {condition: service_healthy}
   restart: unless-stopped
@@ -61,6 +70,17 @@ services:
     networks:
       - default
       - proxy
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    user: "0"
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - "./infra/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro"
+      - "/var/lib/docker/containers:/var/lib/docker/containers:ro"
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP gRPC (loopback, internal use)
+      - "127.0.0.1:4318:4318"   # OTLP HTTP (loopback, internal use)
+    restart: unless-stopped
 networks:
   proxy:
     external: true

@@ -107,6 +107,11 @@ final class Telegram
         }
         $user=$this->ensureUser($tg);
         if(!$user) return;
+        if($command==='/myid'||$command==='myid'||$command==='/id'||$command==='id'){
+            $info='Ваш chat_id: '.$tg."\nЭтот Telegram привязан к аккаунту ".$user['id'].(!empty($user['email']) && !str_starts_with($user['email'],'tg_') ? ' ('.$user['email'].')' : ' (только Telegram — без email)');
+            $this->reply($id, $tg, $info, $this->mainMenu());
+            return;
+        }
         if(($command==='/login'||$command==='login') && $this->login){
             $this->db->transaction(function()use($id,$tg){
                 if(!$this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$id,time()]))return;
@@ -270,7 +275,7 @@ final class Telegram
     }
     private function sendHelp(int $id,string $tg): void
     {
-        $text=$this->app?$this->app->branding->helpText():"Команды:\n/plans — тарифы\n/buy <id> — купить\n/status — подписки + pending заказы\n/orders — мои заказы\n/subs — мои подписки\n/cabinet — открыть веб-кабинет\n/login — вход в кабинет\n/support — поддержка\n\nКабинет и бот работают в тандеме: заказы и подписки общие.";
+        $text=$this->app?$this->app->branding->helpText():"Команды:\n/plans — тарифы\n/buy <id> — купить\n/status — подписки + pending заказы\n/orders — мои заказы\n/subs — мои подписки\n/cabinet — открыть веб-кабинет\n/login — вход в кабинет\n/myid — ваш chat_id и id аккаунта\n/support — поддержка\n\nКабинет и бот работают в тандеме: заказы и подписки общие.";
         $this->reply($id,$tg,$text,$this->mainMenu());
     }
     private function sendPlans(int $id,string $tg,?string $prefix=null): void
@@ -442,7 +447,20 @@ final class Telegram
     private function sendSubs(int $id,string $tg,array $user): void
     {
         $subs=$this->db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 10',[$user['id']]);
-        if(!$subs){ $this->reply($id,$tg,'Подписок пока нет. Выберите тариф:',['inline_keyboard'=>[[['text'=>'Тарифы','callback_data'=>'menu:plans']]]]); return; }
+        if(!$subs){
+            // If this Telegram account looks like the dashboard owner (real email, not tg_*@telegram.local)
+            // but is unlinked from a Telegram chat_id, the dashboard data is on a different user row.
+            // Tell them how to /link so подписки would show up here.
+            $realEmail = !empty($user['email']) && !str_starts_with((string)$user['email'], 'tg_');
+            $this->reply($id, $tg, $realEmail
+                ? 'Этот Telegram не привязан к подписке. Если у вас есть кабинет на сайте — откройте его, нажмите «Привязать Telegram», скопируйте токен и отправьте сюда: /link <токен>. После этого подписки появятся.'
+                : 'Подписок пока нет. Выберите тариф:',
+                ['inline_keyboard'=>[
+                    $realEmail ? [] : [['text'=>'Тарифы','callback_data'=>'menu:plans']],
+                    [['text'=>'Кабинет','callback_data'=>'menu:cabinet'],['text'=>'Меню','callback_data'=>'menu:main']],
+                ]]);
+            return;
+        }
         $lines=array_map(fn($s)=>$s['plan_name'].': '.((int)$s['expires_at']<=time()?'истекла':$s['status']).' до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC'.($s['subscription_url'] && (int)$s['expires_at']>time() ? ' · '.$s['subscription_url'] : '').((int)($s['auto_renew']??0)===1?' · автопродление вкл':''),$subs);
         $keyboard=[];
         foreach($subs as $s){
