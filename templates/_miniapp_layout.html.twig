@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="color-scheme" content="light dark"><title>{% block title %}{{ site_name }}{% endblock %} · Mini App</title><link rel="stylesheet" href="/miniapp.css"><script src="https://telegram.org/js/telegram-web-app.js?61"></script><script defer src="/miniapp.js"></script></head>
+<body class="mini-shell" data-authenticated="{{ user ? '1' : '0' }}" data-page="{% block page_id %}home{% endblock %}">
+{% set _page_id = block('page_id') %}
+<div class="bg-glow" aria-hidden="true"></div>
+<header class="topbar">
+  <div class="topbar-greet">
+    <span class="topbar-hi">{% block topbar_hi %}Привет 👋{% endblock %}</span>
+    <span class="topbar-name">{{ user.email ? (user.email|split('@')|first) : (user.telegram_id ? 'Telegram' : 'Гость') }}</span>
+  </div>
+  <button class="icon-btn" data-fullscreen aria-label="Во весь экран" type="button">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M21 16v3a2 2 0 0 1-2 2h-3"/></svg>
+  </button>
+</header>
+
+<main class="page">
+{% block content %}{% endblock %}
+</main>
+
+<nav class="tabbar" aria-label="Навигация">
+  <a href="/miniapp" class="tab {% if _page_id == 'home' %}active{% endif %}" data-nav="home" data-haptic="light">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8v9a2 2 0 0 1-2 2h-4v-7H10v7H6a2 2 0 0 1-2-2v-9Z"/></svg>
+    <span>Главная</span>
+  </a>
+  <a href="/miniapp/plans" class="tab {% if _page_id == 'plans' %}active{% endif %}" data-nav="plans" data-haptic="light">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    <span>Тарифы</span>
+  </a>
+  <a href="/miniapp/orders" class="tab {% if _page_id == 'orders' %}active{% endif %}" data-nav="orders" data-haptic="light">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11h6M9 15h4M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/></svg>
+    <span>Платежи</span>
+  </a>
+  <a href="/miniapp/settings" class="tab {% if _page_id == 'settings' %}active{% endif %}" data-nav="profile" data-haptic="light">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+    <span>Профиль</span>
+  </a>
+</nav>
+</body></html>

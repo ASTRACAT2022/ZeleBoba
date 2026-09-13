@@ -1,0 +1,33 @@
+{% extends '_miniapp_layout.html.twig' %}
+{% block title %}Платежи{% endblock %}
+{% block page_id %}orders{% endblock %}
+{% block content %}
+<section class="block">
+  <div class="block-head"><h2>Платежи</h2>{% if orders %}<span class="block-link">{{ orders|length }}</span>{% endif %}</div>
+  {% if orders %}
+    <div class="order-list">
+    {% for o in orders %}
+      <a class="order-card" href="/orders/{{ o.id }}" data-haptic="light">
+        <div class="order-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11h6M9 15h4M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/></svg>
+        </div>
+        <div class="order-body">
+          <div class="order-name">{{ o.plan_name }}</div>
+          <div class="order-meta">#{{ o.id|slice(0,8) }} · {{ o.created_at|date('d.m.Y') }}</div>
+        </div>
+        <div class="order-right">
+          <div class="order-price num">{{ o.price_minor|rub }}</div>
+          <span class="order-status order-status--{{ o.status }}">{% if o.status == 'pending' %}ожидает{% elseif o.status == 'paid' %}оплачен{% elseif o.status == 'fulfilled' %}активен{% elseif o.status == 'canceled' %}отменён{% elseif o.status == 'payment_unavailable' %}недоступен{% else %}{{ o.status }}{% endif %}</span>
+        </div>
+      </a>
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">
+      <div class="empty-emoji" aria-hidden="true">📋</div>
+      <p>Платежей пока нет</p>
+      <small>Здесь появится история ваших заказов.</small>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

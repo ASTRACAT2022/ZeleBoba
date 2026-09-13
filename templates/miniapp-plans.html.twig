@@ -1,0 +1,38 @@
+{% extends '_miniapp_layout.html.twig' %}
+{% block title %}Тарифы{% endblock %}
+{% block page_id %}plans{% endblock %}
+{% block content %}
+<section class="block">
+  <div class="block-head"><h2>Тарифы</h2>{% if trial_available %}<span class="block-link">Доступен триал</span>{% endif %}</div>
+  <div class="plans-list">
+    {% for p in plans %}
+    <article class="plan-card-full {% if loop.first %}plan-card-full--featured{% endif %}">
+      {% if loop.first %}<span class="plan-badge">Хит</span>{% endif %}
+      <div class="plan-head">
+        <div>
+          <div class="plan-name">{{ p.name }}</div>
+          <div class="plan-duration">{{ p.duration_days }} дней</div>
+        </div>
+        <div class="plan-price"><span class="num">{{ p.price_minor|rub }}</span></div>
+      </div>
+      <ul class="plan-feats">
+        <li>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4L19 7"/></svg>
+          {{ p.traffic_bytes == 0 ? 'Безлимитный трафик' : ((p.traffic_bytes / 1073741824)|round ~ ' ГБ') }}
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4L19 7"/></svg>
+          {{ p.devices == 0 ? 'Любое число устройств' : ('до ' ~ p.devices ~ ' устройств') }}
+        </li>
+      </ul>
+      <form method="post" action="/orders">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <input type="hidden" name="plan_id" value="{{ p.id }}">
+        <input type="hidden" name="idempotency_key" value="{{ key }}:mini:{{ p.id }}">
+        <button type="submit" class="plan-cta" data-haptic="success">{{ loop.first ? 'Попробовать' : 'Выбрать' }}</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

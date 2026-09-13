@@ -1,16 +1,5 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>{{ site_name }} · Mini App</title><link rel="stylesheet" href="/miniapp.css"><script src="https://telegram.org/js/telegram-web-app.js?61"></script><script defer src="/miniapp.js"></script></head>
-<body class="mini-shell" data-authenticated="{{ user ? '1' : '0' }}">
-{% if not user %}
-<main class="mini-loading"><div class="mini-mark">z</div><h1>{{ site_name }}</h1><p id="mini-status">Подключаем ваш аккаунт…</p><a id="mini-browser-login" href="/login">Открыть кабинет в браузере</a></main>
-{% else %}
-<main class="mini-app">
-  <header class="mini-header"><div class="mini-brand">{% if logo %}<img src="{{ logo }}" alt="">{% else %}<span>z</span>{% endif %}<div><strong>{{ site_name }}</strong><small>Личный кабинет</small></div></div><button type="button" class="mini-fullscreen" data-fullscreen aria-label="Полный экран">⛶</button></header>
-  <section class="mini-hero"><p>ВАШ БАЛАНС</p><strong>{{ balance_kopeks|rub }}</strong><a href="/balance">Пополнить →</a></section>
-  <section class="mini-section" id="subscriptions"><div class="mini-heading"><h1>Подписки</h1><a href="/">Все</a></div>{% if subscriptions %}{% for s in subscriptions %}<article class="mini-sub"><span class="mini-sub-icon">◒</span><div><strong>{{ s.plan_name }}</strong><small>{{ s.status == 'active' and s.expires_at > now ? 'Активна до ' ~ (s.expires_at|date('d.m.Y')) : 'Статус: ' ~ s.status }}</small></div><a href="/" aria-label="Открыть подписки">›</a></article>{% endfor %}{% else %}<div class="mini-empty">Подписок пока нет. Выберите тариф ниже.</div>{% endif %}</section>
-  <section class="mini-section" id="plans"><div class="mini-heading"><h1>Выберите тариф</h1><a href="/plans">Все</a></div><div class="mini-plans">{% for p in plans %}<article class="mini-plan {{ loop.first ? 'featured' : '' }}"><div><span>{{ p.duration_days }} дней</span><h2>{{ p.name }}</h2><p>{{ p.traffic_bytes == 0 ? 'Безлимитный трафик' : ((p.traffic_bytes / 1073741824)|round ~ ' ГБ трафика') }} · {{ p.devices == 0 ? 'любое число устройств' : ('до ' ~ p.devices ~ ' устройств') }}</p></div><strong>{{ p.price_minor|rub }}</strong><form method="post" action="/orders"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="plan_id" value="{{ p.id }}"><input type="hidden" name="idempotency_key" value="{{ key }}:mini:{{ p.id }}"><button type="submit">Выбрать</button></form></article>{% endfor %}</div></section>
-  <section class="mini-actions"><a href="/orders">Платежи</a><a href="/balance">Баланс</a><a href="/referral">Рефералы</a>{% if support_url %}<a href="{{ support_url }}" rel="noreferrer">Помощь</a>{% endif %}</section>
-</main>
-<nav class="mini-nav"><a href="#subscriptions" class="active">⌂<span>Главная</span></a><a href="#plans">⊞<span>Тарифы</span></a><a href="/orders">≡<span>Платежи</span></a><a href="/settings">⚙<span>Профиль</span></a></nav>
-{% endif %}
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="color-scheme" content="light dark"><title>{{ site_name }} · Mini App</title><link rel="stylesheet" href="/miniapp.css"><script src="https://telegram.org/js/telegram-web-app.js?61"></script><script defer src="/miniapp.js"></script></head>
+<body class="mini-shell" data-authenticated="0">
+<main class="boot"><div class="boot-mark">{{ site_name|first }}</div><p id="boot-status">Подключаем ваш аккаунт…</p><a id="boot-fallback" href="/login">Открыть кабинет в браузере</a></main>
 </body></html>

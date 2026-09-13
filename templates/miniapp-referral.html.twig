@@ -1,0 +1,90 @@
+{% extends '_miniapp_layout.html.twig' %}
+{% block title %}Рефералы{% endblock %}
+{% block page_id %}orders{% endblock %}
+{% block topbar_hi %}🤝 Партнёрам{% endblock %}
+{% block content %}
+<section class="balance-card balance-card--referral">
+  <div class="balance-top">
+    <span class="balance-label">Заработано</span>
+    <span class="balance-pill">RUB</span>
+  </div>
+  <div class="balance-amount"><span class="num">{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</span></div>
+</section>
+
+<section class="block">
+  <div class="block-head"><h2>Ваша ссылка</h2></div>
+  <div class="info-card">
+    <p class="info-text">Отправьте другу ссылку — при регистрации он станет вашим рефералом, а вы получите комиссию с его пополнений.</p>
+    <div class="link-code"><code>https://t.me/{{ telegram_username }}?start=ref_{{ stats.code }}</code></div>
+    <button class="btn-primary copy-btn" data-copy="https://t.me/{{ telegram_username }}?start=ref_{{ stats.code }}" data-haptic="success">Скопировать ссылку</button>
+    <p class="info-meta">Или код: <strong>{{ stats.code }}</strong></p>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-head"><h2>Статистика</h2></div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="stat-value num">{{ stats.referrals|length }}</div><div class="stat-label">Приглашено</div></div>
+    <div class="stat-card"><div class="stat-value num">{{ stats.paid_referrals }}</div><div class="stat-label">Оплатили</div></div>
+    <div class="stat-card"><div class="stat-value num">{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</div><div class="stat-label">Заработано</div></div>
+  </div>
+</section>
+
+{% if stats.referrals %}
+<section class="block">
+  <div class="block-head"><h2>Рефералы</h2></div>
+  <div class="sub-list">
+    {% for r in stats.referrals %}
+    <div class="sub-card">
+      <div class="sub-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+      </div>
+      <div class="sub-body">
+        <div class="sub-name">{{ r.email ?? ('TG ' ~ r.telegram_id) }}</div>
+        <div class="sub-meta">с {{ r.created_at|date('d.m.Y') }}</div>
+      </div>
+      <span class="sub-status {% if r.has_made_first_topup %}ok{% else %}warn{% endif %}">{% if r.has_made_first_topup %}оплатил{% else %}не оплатил{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if withdrawal_enabled %}
+<section class="block">
+  <div class="block-head"><h2>Вывод средств</h2></div>
+  <form method="post" action="/referral/withdraw" class="topup-form">
+    <input type="hidden" name="_csrf" value="{{ user.csrf }}">
+    <p class="info-text">Минимум — {{ (min_withdrawal / 100)|round(0, 'floor') }} ₽. Выводятся только реферальные начисления.</p>
+    <label class="field">
+      <span class="field-label">Сумма, ₽</span>
+      <input type="number" name="amount" min="{{ (min_withdrawal / 100)|round(0, 'floor') }}" required class="field-input" inputmode="numeric">
+    </label>
+    <label class="field">
+      <span class="field-label">Реквизиты</span>
+      <textarea name="payment_details" required maxlength="500" rows="2" placeholder="Номер карты / кошелька" class="field-input field-input--textarea"></textarea>
+    </label>
+    <button class="btn-primary" type="submit" data-haptic="success">Подать заявку →</button>
+  </form>
+  {% if withdrawals %}
+  <div class="order-list" style="margin-top: 12px">
+    {% for w in withdrawals %}
+    <div class="order-card">
+      <div class="order-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+      <div class="order-body">
+        <div class="order-name">Вывод №{{ w.id|slice(0,6) }}</div>
+        <div class="order-meta">{{ w.created_at|date('d.m.Y H:i') }}</div>
+      </div>
+      <div class="order-right">
+        <div class="order-price num">{{ (w.amount_kopeks / 100)|round(0, 'floor') }} ₽</div>
+        <span class="order-status order-status--{{ w.status == 'paid' ? 'fulfilled' : w.status }}">{{ w.status == 'paid' ? 'выплачено' : w.status == 'pending' ? 'ожидает' : w.status }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
