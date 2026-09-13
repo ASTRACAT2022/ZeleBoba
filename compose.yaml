@@ -4,6 +4,8 @@ x-app: &app
     DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
     DATABASE_USER: billing
     DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    APP_URL: ${APP_URL:?Set APP_URL in .env}
+    APP_ENV: ${APP_ENV:-prod}
     OTEL_PHP_AUTOLOAD_ENABLED: "true"
     OTEL_SERVICE_NAME: zeleboba-billing
     OTEL_TRACES_EXPORTER: otlp
