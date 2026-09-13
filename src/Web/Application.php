@@ -46,8 +46,6 @@ final class Application
         try {
             $routes=new RouteCollection();
             foreach ([['tg-start','/telegram/start',['POST']],['tg-status','/telegram/status',['GET']],['tg-finish','/telegram/finish',['POST']],['tg-magic','/telegram/magic',['GET','POST']],['security','/security',['GET']],['mfa-begin','/security/begin',['POST']],['mfa-enroll','/security/enroll',['POST']],['mfa-verify','/security/verify',['POST']],['admin-config','/admin/config',['GET']],['admin-config-save','/admin/config',['POST']],['admin-check','/admin/check/{id}',['POST']],['admin-readiness','/admin/readiness',['GET']],['admin-plans','/admin/plans',['GET']],['admin-plan-save','/admin/plans/{id}',['POST']],['admin-users','/admin/users',['GET']],['admin-user-search','/admin/users/search',['GET']],['admin-user-toggle','/admin/users/{id}/toggle',['POST']],['admin-user','/admin/users/{id}',['GET']],['admin-user-balance','/admin/users/{id}/balance',['POST']],['admin-user-days','/admin/users/{id}/days',['POST']],['admin-user-discount','/admin/users/{id}/discount',['POST']],['admin-user-discount-clear','/admin/users/{id}/discount/clear',['POST']],['admin-user-subscription-remove','/admin/users/{id}/subscriptions/{sid}/remove',['POST']],['admin-subscription','/admin/subscriptions/{sid}',['GET']],['admin-subscription-traffic','/admin/users/{id}/subscriptions/{sid}/traffic',['POST']],['admin-subscription-devices','/admin/users/{id}/subscriptions/{sid}/devices',['POST']],['admin-subscription-extend','/admin/users/{id}/subscriptions/{sid}/extend',['POST']],['admin-subscription-expiry','/admin/users/{id}/subscriptions/{sid}/expiry',['POST']],['admin-subscription-reset-traffic','/admin/users/{id}/subscriptions/{sid}/reset-traffic',['POST']],['admin-sync','/admin/sync',['POST']],['admin-promocodes','/admin/promocodes',['GET']],['admin-promocode-create','/admin/promocodes',['POST']],['admin-promocode-toggle','/admin/promocodes/{id}/toggle',['POST']],['admin-withdrawals','/admin/withdrawals',['GET']],['admin-withdrawal-process','/admin/withdrawals/{id}',['POST']],['admin-broadcasts','/admin/broadcasts',['GET']],['admin-broadcast-create','/admin/broadcasts',['POST']],['admin-compensations','/admin/compensations',['GET']],['admin-compensation-create','/admin/compensations',['POST']],['admin-channels','/admin/channels',['GET']],['admin-channel-add','/admin/channels',['POST']],['admin-channel-toggle','/admin/channels/{id}/toggle',['POST']],['admin-channel-remove','/admin/channels/{id}/remove',['POST']],['admin-landings','/admin/landings',['GET']],['admin-landing-save','/admin/landings',['POST']],['admin-landing-toggle','/admin/landings/{id}/toggle',['POST']],['admin-contests','/admin/contests',['GET']],['admin-contest-create','/admin/contests',['POST']],['admin-contest-round','/admin/contests/{id}/round',['POST']],['admin-polls','/admin/polls',['GET']],['admin-poll-create','/admin/polls',['POST']],['admin-campaigns','/admin/campaigns',['GET']],['admin-campaign-create','/admin/campaigns',['POST']],['admin-reports','/admin/reports',['GET']],['admin-monitoring','/admin/monitoring',['GET']],['admin-monitoring-clear','/admin/monitoring/clear',['POST']],['admin-backups','/admin/backups',['GET']],['admin-backup-create','/admin/backups',['POST']],['admin-backup-restore','/admin/backups/{id}/restore',['POST']],['admin-roles','/admin/roles',['GET']],['admin-role-create','/admin/roles',['POST']],['admin-role-assign','/admin/roles/assign',['POST']],['admin-role-revoke','/admin/roles/revoke',['POST']],['admin-audit','/admin/audit',['GET']],['admin-maintenance','/admin/maintenance',['POST']],['landing','/l/{id}',['GET']],['health','/health/live',['GET']],['ready','/health/ready',['GET']],['login','/login',['GET','POST']],['register','/register',['GET','POST']],['forgot','/forgot',['GET','POST']],['reset','/reset/{token}',['GET','POST']],['logout','/logout',['POST']],['home','/',['GET']],['plans','/plans',['GET']],['orders','/orders',['GET']],['buy','/orders',['POST']],['order','/orders/{id}',['GET']],['demo','/orders/{id}/demo-pay',['POST']],['autorenew','/subscriptions/{id}/autorenew',['POST']],['trial','/trial',['POST']],['trial-convert','/trial/{id}/convert',['POST']],['settings','/settings',['GET']],['link','/settings/telegram',['POST']],['promo','/promo',['POST']],['referral','/referral',['GET']],['withdraw','/referral/withdraw',['POST']],['gifts','/gifts',['GET']],['gift-buy','/gifts/buy',['POST']],['gift-claim','/gifts/claim',['POST']],['gift-claim-page','/gifts/claim',['GET']],['gift-buy-page','/buy/gift/{id}',['GET']],['balance','/balance',['GET']],['topup','/balance/topup',['POST']],['topup-order','/balance/topup/{id}',['GET']],['topup-demo','/balance/topup/{id}/demo-pay',['POST']],['buy-balance','/orders/balance',['POST']],['admin','/admin',['GET']],['retry','/admin/jobs/{id}/retry',['POST']],['plan','/admin/plans',['POST']],['yookassa','/webhooks/yookassa',['POST']],['freekassa','/webhooks/freekassa',['GET','POST']],['cryptobot','/webhooks/cryptobot',['POST']],['lava','/webhooks/lava',['POST']],['wata','/webhooks/wata',['POST']],['heleket','/webhooks/heleket',['POST']],['platega','/webhooks/platega',['POST']],['tribute','/webhooks/tribute',['POST']],['mulenpay','/webhooks/mulenpay',['POST']],['pal24','/webhooks/pal24',['POST']],['cloudpayments','/webhooks/cloudpayments',['POST']],['kassa_ai','/webhooks/kassa_ai',['POST']],['riopay','/webhooks/riopay',['POST']],['severpay','/webhooks/severpay',['POST']],['paypear','/webhooks/paypear',['POST']],['rollypay','/webhooks/rollypay',['POST']],['overpay','/webhooks/overpay',['POST']],['aurapay','/webhooks/aurapay',['POST']],['etoplatezhi','/webhooks/etoplatezhi',['POST']],['antilopay','/webhooks/antilopay',['POST']],['jupiter','/webhooks/jupiter',['POST']],['donut','/webhooks/donut',['POST']],['cispay','/webhooks/cispay',['POST']],['tabpay','/webhooks/tabpay',['POST']],['paritypay','/webhooks/paritypay',['POST']],['telegram','/webhooks/telegram',['POST']]] as [$name,$path,$methods]) $routes->add($name,new Route($path,['_handler'=>$name],[],[], '',[],$methods));
-            $routes->add('miniapp',new Route('/miniapp',['_handler'=>'miniapp'],[],[], '',[],['GET']));
-            $routes->add('miniapp-auth',new Route('/miniapp/auth',['_handler'=>'miniapp-auth'],[],[], '',[],['POST']));
             $match=(new UrlMatcher($routes,(new RequestContext())->fromRequest($r)))->match($r->getPathInfo());
             $handler=$match['_handler'];
             if ($handler==='health') return new JsonResponse(['status'=>'ok']);
@@ -55,8 +53,6 @@ final class Application
             if (strlen($r->getContent())>65536) return new JsonResponse(['error'=>'Request too large'],413);
             if (in_array($handler,['yookassa','freekassa','telegram','cryptobot','lava','wata','heleket','platega','tribute','mulenpay','pal24','cloudpayments','kassa_ai','riopay','severpay','paypear','rollypay','overpay','aurapay','etoplatezhi','antilopay','jupiter','donut','cispay','tabpay','paritypay'],true)) return $this->webhook($handler);
             $this->user=$this->app->auth->session($r->cookies->get('zb_session',''));
-            if ($handler==='miniapp-auth') return $this->miniAppAuth();
-            if ($handler==='miniapp') return $this->miniApp();
             if(str_starts_with($handler,'tg-')) return $this->telegramAuth($handler);
             if (in_array($handler,['login','register','forgot','reset'],true)) return $this->authentication($handler,$match['token']??'');
             if ($handler==='landing') return $this->landing($match['id']);
@@ -110,32 +106,6 @@ final class Application
             default => throw new \LogicException('Missing admin permission'),
         };
     }
-    private function miniAppAuth(): Response
-    {
-        try {
-            $raw = (string)$this->request->request->get('init_data','');
-            $this->app->auth->throttle('miniapp:'.$this->request->getClientIp(), 30, 300);
-            $session = $this->app->telegramWebApp->authenticate($raw);
-            $response = new JsonResponse(['ok'=>true]);
-            $response->headers->setCookie($this->cookie('zb_session',$session,time()+86400));
-            return $response;
-        } catch (BillingError $e) {
-            return new JsonResponse(['ok'=>false,'error'=>$e->getMessage()],401);
-        }
-    }
-
-    private function miniApp(): Response
-    {
-        $uid = $this->user['id'] ?? null;
-        $plans = $uid ? $this->app->db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor') : [];
-        if ($uid) foreach ($plans as &$plan) $plan['price_minor']=$this->app->billing->priceFor($uid,$plan);
-        unset($plan);
-        $subscriptions = $uid ? $this->app->db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 3',[$uid]) : [];
-        $balance = $uid ? $this->app->wallet->balance($uid)['balance_kopeks'] : 0;
-        $branding=$this->app->branding;
-        return new Response($this->twig->render('miniapp.html.twig',['style_nonce'=>$this->styleNonce,'user'=>$this->user,'plans'=>$plans,'subscriptions'=>$subscriptions,'balance_kopeks'=>$balance,'site_name'=>$branding->name(),'logo'=>$branding->logo(),'support_url'=>$this->app->config['SUPPORT_URL'],'csrf'=>$this->user['csrf']??'','key'=>Database::id(),'now'=>time()]));
-    }
-
     private function dispatch(string $handler,string $id): Response
     {
         $db=$this->app->db; $uid=$this->user['id']; $input=$this->request->request;

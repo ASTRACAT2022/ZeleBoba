@@ -3,7 +3,7 @@ declare(strict_types=1);
 namespace App;
 use App\Infrastructure\{Database,Outbox,Worker};
 use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline};
-use App\Identity\{Auth,TelegramLogin,TelegramWebApp,Mfa};
+use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService,Mailer};
 use App\Integration\Payment\{ProviderRegistry,CryptoBotProvider,TelegramStarsProvider,LavaProvider,WataProvider,HeleketProvider,PlategaProvider,TributeProvider,YooKassaProvider,FreeKassaProvider,MulenPayProvider,Pal24Provider,CloudPaymentsProvider,KassaAiProvider,RioPayProvider,SeverPayProvider,PayPearProvider,RollyPayProvider,OverpayProvider,AuraPayProvider,EtoplatezhiProvider,AntilopayProvider,JupiterProvider,DonutProvider,CisPayProvider,TabPayProvider,ParityPayProvider};
@@ -43,7 +43,6 @@ final class Container
     public readonly Auth $auth;
     public readonly Telegram $telegram;
     public readonly TelegramLogin $telegramLogin;
-    public readonly TelegramWebApp $telegramWebApp;
     public readonly Mfa $mfa;
     public readonly Settings $settings;
     public readonly Branding $branding;
@@ -94,7 +93,6 @@ final class Container
         $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations,$config['PROVISION_DRIVER'],$this->timeline);
         $this->auth=new Auth($this->db);$this->mfa=new Mfa($this->db,$this->settings->vault);
         $this->telegramLogin=new TelegramLogin($this->db,$this->auth);
-        $this->telegramWebApp=new TelegramWebApp($this->db,$this->auth,$config['TELEGRAM_BOT_TOKEN']);
         $this->telegram=new Telegram($this->db,$this->outbox,$this->billing,$config['APP_URL'],$this->telegramLogin,$tgBase,$http);
         $this->telegram->setApp($this);
     }
