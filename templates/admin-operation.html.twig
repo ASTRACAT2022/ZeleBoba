@@ -23,21 +23,26 @@
 <div class="metadata-grid">
 <div class="meta-item"><span class="meta-label">CLIENT</span><span class="meta-value">{{ operation.email ?? ('TG ' ~ operation.telegram_id) }}</span></div>
 {% if operation.invoice_id %}<div class="meta-item"><span class="meta-label">INVOICE</span><span class="meta-value">#{{ operation.invoice_id }}</span></div>{% endif %}
-{% if operation.transaction_id %}<div class="meta-item"><span class="meta-label">TRANSACTION</span><span class="meta-value">#{{ operation.transaction_id }}</span></div>{% endif %}
+{% if operation.provider_payment_id %}<div class="meta-item"><span class="meta-label">TRANSACTION</span><span class="meta-value mono">#{{ operation.provider_payment_id }}</span></div>{% endif %}
 {% if operation.provider %}<div class="meta-item"><span class="meta-label">PROVIDER</span><span class="meta-value">{{ operation.provider }}</span></div>{% endif %}
 <div class="meta-item"><span class="meta-label">TRACE ID</span><span class="meta-value mono">{{ operation.trace_id|slice(0, 12) }}…</span></div>
 <div class="meta-item"><span class="meta-label">STATUS</span><span class="meta-value"><span class="badge {{ operation.status == 'success' ? 'fulfilled' : (operation.status == 'failed' ? 'canceled' : 'pending') }}">{{ operation.status }}</span></span></div>
 {% if operation.duration_ms %}<div class="meta-item"><span class="meta-label">DURATION</span><span class="meta-value">{{ operation.duration_ms }} ms</span></div>{% endif %}
 </div>
 {% if supportSummary %}
+{% set pay_st = supportSummary.payment.status ?? '' %}
+{% set inv_st = supportSummary.invoice.status ?? '' %}
+{% set sub_st = supportSummary.subscription.status ?? '' %}
+{% set prov_st = supportSummary.provisioning.status ?? '' %}
+{% set not_st = supportSummary.notification.status ?? '' %}
 <div class="support-summary">
 <h3>Support Summary</h3>
 <div class="support-grid">
-<div class="support-item {{ supportSummary.payment.status == 'success' ? 'ok' : (supportSummary.payment.status == 'failed' ? 'fail' : 'pending') }}"><small>PAYMENT</small><strong>{{ supportSummary.payment.status ?? '—' }}</strong></div>
-<div class="support-item {{ supportSummary.invoice.status == 'success' ? 'ok' : (supportSummary.invoice.status == 'failed' ? 'fail' : 'pending') }}"><small>INVOICE</small><strong>{{ supportSummary.invoice.status ?? '—' }}</strong></div>
-<div class="support-item {{ supportSummary.subscription.status == 'success' ? 'ok' : (supportSummary.subscription.status == 'failed' ? 'fail' : 'pending') }}"><small>SUBSCRIPTION</small><strong>{{ supportSummary.subscription.status ?? '—' }}</strong></div>
-<div class="support-item {{ supportSummary.provisioning.status == 'success' ? 'ok' : (supportSummary.provisioning.status == 'failed' ? 'fail' : 'pending') }}"><small>PROVISIONING</small><strong>{{ supportSummary.provisioning.status ?? '—' }}</strong></div>
-<div class="support-item {{ supportSummary.notification.status == 'success' ? 'ok' : 'fail' }}"><small>NOTIFICATION</small><strong>{{ supportSummary.notification.status ?? '—' }}</strong></div>
+<div class="support-item {{ pay_st == 'success' ? 'ok' : (pay_st == 'failed' ? 'fail' : 'pending') }}"><small>PAYMENT</small><strong>{{ supportSummary.payment.status ?? '—' }}</strong></div>
+<div class="support-item {{ inv_st == 'success' ? 'ok' : (inv_st == 'failed' ? 'fail' : 'pending') }}"><small>INVOICE</small><strong>{{ supportSummary.invoice.status ?? '—' }}</strong></div>
+<div class="support-item {{ sub_st == 'success' ? 'ok' : (sub_st == 'failed' ? 'fail' : 'pending') }}"><small>SUBSCRIPTION</small><strong>{{ supportSummary.subscription.status ?? '—' }}</strong></div>
+<div class="support-item {{ prov_st == 'success' ? 'ok' : (prov_st == 'failed' ? 'fail' : 'pending') }}"><small>PROVISIONING</small><strong>{{ supportSummary.provisioning.status ?? '—' }}</strong></div>
+<div class="support-item {{ not_st == 'success' ? 'ok' : 'fail' }}"><small>NOTIFICATION</small><strong>{{ supportSummary.notification.status ?? '—' }}</strong></div>
 </div>
 {% if supportSummary.problem %}<div class="problem-box"><strong>Problem:</strong> {{ supportSummary.problem.name ?? supportSummary.problem.error_message ?? 'Unknown' }}
 {% if supportSummary.last_retry %}<br><small>Last retry: {{ (supportSummary.last_retry.finished_at ?? supportSummary.last_retry.started_at)|date('H:i:s') }}</small>{% endif %}</div>{% endif %}
