@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace Tests;
 use PHPUnit\Framework\TestCase;
-use App\Infrastructure\{Database,Outbox,Worker};
+use App\Infrastructure\{Database,Outbox,Worker,JobDeferred};
 use App\Billing\{BillingService,BillingError};
 use App\Identity\Auth;
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram};
@@ -66,6 +66,13 @@ final class BillingTest extends TestCase
     {
         $this->outbox->enqueue('test','test',[]);$this->db->execute("UPDATE outbox SET status='processing',locked_until=0");
         self::assertTrue($this->outbox->runOne(fn()=>null));self::assertSame('done',$this->db->one('SELECT status FROM outbox')['status']);
+    }
+    public function testOperationalPauseDoesNotConsumeRetryBudget():void
+    {
+        $this->outbox->enqueue('subscription.provision','paused',['subscription_id'=>'missing']);
+        self::assertTrue($this->outbox->runOne(fn()=>throw new JobDeferred(30)));
+        $job=$this->db->one("SELECT * FROM outbox WHERE dedup_key='paused'");
+        self::assertSame('pending',$job['status']);self::assertSame(0,(int)$job['attempts']);self::assertNull($job['last_error']);
     }
     public function testSuccessfulProvisionIsIdempotent():void
     {

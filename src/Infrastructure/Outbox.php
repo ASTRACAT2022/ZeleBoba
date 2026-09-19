@@ -60,6 +60,14 @@ final class Outbox
             $handler($job['topic'], $payload);
             $this->db->execute("UPDATE outbox SET status='done',locked_until=NULL,last_error=NULL,payload='{}' WHERE id=? AND lock_token=?", [$job['id'],$job['lock_token']]);
             if($operation)$operations->event($operation['id'],'outbox.completed','success','Outbox job completed',['metadata'=>['topic'=>$job['topic']]]);
+        } catch (JobDeferred $e) {
+            // Maintenance and global safety mode are expected operational
+            // states, not failures. Do not exhaust attempts or dead-letter a
+            // valid money/provisioning command while an integration is paused.
+            $this->db->execute("UPDATE outbox SET status='pending',attempts=CASE WHEN attempts>0 THEN attempts-1 ELSE 0 END,available_at=?,locked_until=NULL,lock_token=NULL,last_error=NULL WHERE id=? AND lock_token=?",[
+                time()+max(1,$e->delaySeconds),$job['id'],$job['lock_token']
+            ]);
+            if($operation)$operations->event($operation['id'],'outbox.deferred','processing','Outbox job deferred by operational control',['metadata'=>['topic'=>$job['topic']]]);
         } catch (\Throwable $e) {
             $attempt = (int)$job['attempts']+1;
             // Never persist raw HTTP errors: they may contain tokens or subscription URLs.

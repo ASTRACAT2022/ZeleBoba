@@ -28,6 +28,16 @@ final class TelegramLogin
         $identities=new IdentityService($this->db);
         $id=$identities->userId('telegram',$tg);
         if ($id===null) {
+            // Rolling-migration compatibility: an older account may already
+            // have the immutable Telegram id in the legacy projection while
+            // user_identities has not been populated yet.
+            $legacy=$this->db->one('SELECT id FROM users WHERE telegram_id=?',[$tg]);
+            if($legacy){
+                $id=(string)$legacy['id'];
+                $identities->attach($id,'telegram',$tg,true);
+            }
+        }
+        if ($id===null) {
             $id=Database::id();
             try {
                 $this->db->execute('INSERT INTO users(id,telegram_id,created_at) VALUES(?,?,?)',[$id,$tg,time()]); // legacy read projection

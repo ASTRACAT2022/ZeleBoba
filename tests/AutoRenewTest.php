@@ -66,6 +66,8 @@ final class AutoRenewTest extends TestCase
         self::assertGreaterThan($oldExpiry,(int)$sub3['expires_at']);
         self::assertSame('active',$sub3['status']);
         self::assertNull($sub3['renew_order_id']);
+        $worker->handle('subscription.extend',['subscription_id'=>$sub['id'],'order_id'=>$renewOrder['id']]);
+        self::assertSame('fulfilled',$db->one('SELECT status FROM orders WHERE id=?',[$renewOrder['id']])['status']);
     }
     public function testRenewRespectsMaxFailsAndPurchasesPause(): void
     {

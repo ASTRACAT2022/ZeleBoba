@@ -15,7 +15,7 @@ CREATE TABLE plan_versions (
  UNIQUE(plan_id,version_number)
 );
 INSERT INTO plan_versions(id,plan_id,version_number,name,price_minor,currency,duration_days,duration_months,entitlements_json,created_at)
-SELECT 'pv' || id,id,1,name,price_minor,currency,duration_days,duration_months,
+SELECT substr(id,1,30) || 'pv',id,1,name,price_minor,currency,duration_days,duration_months,
        '{"vpn_access":true,"traffic_bytes":' || traffic_bytes || ',"devices":' || devices || '}',0
 FROM plans;
 ALTER TABLE subscriptions ADD COLUMN plan_version_id VARCHAR(32);

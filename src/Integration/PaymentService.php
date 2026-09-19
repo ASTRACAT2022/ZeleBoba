@@ -130,7 +130,7 @@ final class PaymentService
                 $eventId=(string)($result['event_id'] ?? ($paymentId.':'.$status));
                 $id=$this->events?->receive($providerId,$eventId,$paymentId,$result,true) ?? '';
                 if ($id!=='') {
-                    $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
+                    $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
                         Database::id(),'payment.event.process','payment-event:'.$id,json_encode(['event_id'=>$id],JSON_THROW_ON_ERROR),100,time(),time(),$id
                     ]);
                 } else $this->outboxEnqueueVerify($paymentId,$providerId,$status);

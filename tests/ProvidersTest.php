@@ -7,6 +7,7 @@ use App\Billing\{BillingService,Wallet,TopupService};
 use App\Identity\Auth;
 use App\Integration\Payment\{ProviderRegistry,CryptoBotProvider,TelegramStarsProvider,LavaProvider,YooKassaProvider,FreeKassaProvider};
 use App\Integration\PaymentService;
+use App\Payments\PaymentEventStore;
 use Symfony\Component\HttpClient\{MockHttpClient,Response\MockResponse};
 use Symfony\Component\HttpFoundation\Request;
 final class ProvidersTest extends TestCase
@@ -68,9 +69,20 @@ final class ProvidersTest extends TestCase
         $sig=hash_hmac('sha256',$body,hash('sha256','tok',true));
         $req=Request::create('/webhooks/cryptobot','POST',[],[],[],['CONTENT_TYPE'=>'application/json','HTTP_CRYPTO_PAY_API_SIGNATURE'=>$sig],$body);
         self::assertNotNull($r->get('cryptobot')->handleWebhook($req));
-        self::assertFalse($svc->handleWebhook('cryptobot',$req));
+        self::assertTrue($svc->handleWebhook('cryptobot',$req));
         $req2=Request::create('/webhooks/cryptobot','POST',[],[],[],['CONTENT_TYPE'=>'application/json','HTTP_CRYPTO_PAY_API_SIGNATURE'=>'bad'],$body);
         self::assertFalse($svc->handleWebhook('cryptobot',$req2));
+    }
+    public function testVerifiedWebhookIsDurableBeforeAcknowledgement():void
+    {
+        $config=['CRYPTOBOT_ENABLED'=>'1','CRYPTOBOT_API_TOKEN'=>'tok'];
+        $r=$this->registry($config);$svc=new PaymentService($this->db,$this->billing,new MockHttpClient(),$config,$r,new PaymentEventStore($this->db));
+        $body=json_encode(['update_type'=>'invoice_paid','payload'=>['invoice_id'=>7]]);
+        $sig=hash_hmac('sha256',$body,hash('sha256','tok',true));
+        $req=Request::create('/webhooks/cryptobot','POST',[],[],[],['CONTENT_TYPE'=>'application/json','HTTP_CRYPTO_PAY_API_SIGNATURE'=>$sig],$body);
+        self::assertTrue($svc->handleWebhook('cryptobot',$req));
+        self::assertSame(1,(int)$this->db->one('SELECT COUNT(*) c FROM payment_events')['c']);
+        self::assertSame(1,(int)$this->db->one("SELECT COUNT(*) c FROM outbox WHERE topic='payment.event.process'")['c']);
     }
     public function testYooKassaOrderCheckoutAndVerify():void
     {
@@ -103,7 +115,7 @@ final class ProvidersTest extends TestCase
         $data['signature']=$sign;
         $req=Request::create('/webhooks/lava','POST',[],[],[],['CONTENT_TYPE'=>'application/json'],json_encode($data));
         self::assertNotNull($r->get('lava')->handleWebhook($req));
-        self::assertFalse($svc->handleWebhook('lava',$req));
+        self::assertTrue($svc->handleWebhook('lava',$req));
     }
     public function testStarsProviderConfiguredCheck():void
     {
@@ -120,7 +132,7 @@ final class ProvidersTest extends TestCase
         $sign=md5('123:199.00:secret2:order-1');
         $req=Request::create('/webhooks/freekassa','POST',['MERCHANT_ID'=>'123','AMOUNT'=>'199.00','MERCHANT_ORDER_ID'=>'order-1','SIGN'=>$sign]);
         self::assertNotNull($r->get('freekassa')->handleWebhook($req));
-        self::assertFalse($svc->handleWebhook('freekassa',$req));
+        self::assertTrue($svc->handleWebhook('freekassa',$req));
         $req2=Request::create('/webhooks/freekassa','POST',['MERCHANT_ID'=>'123','AMOUNT'=>'199.00','MERCHANT_ORDER_ID'=>'order-1','SIGN'=>'bad']);
         self::assertFalse($svc->handleWebhook('freekassa',$req2));
     }
