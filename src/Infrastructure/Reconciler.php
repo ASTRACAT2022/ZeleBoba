@@ -111,7 +111,19 @@ final class Reconciler
                     }
                 }
             }
-            $db->execute("UPDATE subscriptions SET status='expired' WHERE status='active' AND expires_at<=?",[time()]);
+            // Self-heal subscription expiry: keep status AND lifecycle_status consistent
+            // so the "active-but-expired" invariant (lifecycle_status='active' && expires_at<=now)
+            // never accumulates. lifecycle_status is the source the invariant checks.
+            $db->execute("UPDATE subscriptions SET status='expired', lifecycle_status='expired' WHERE status='active' AND expires_at<=?",[time()]);
+            // Also sweep subs whose lifecycle_status still says active/grace but the date passed
+            // (drift from webhooks, manual edits or interrupted renewals) so the dashboard
+            // self-cleans. Keyed on lifecycle_status, since status may already be 'expired'.
+            $db->execute("UPDATE subscriptions SET status='expired', lifecycle_status='expired' WHERE lifecycle_status IN ('active','grace') AND expires_at<=?",[time()]);
+            // Auto-close operational cases whose underlying violation is already gone
+            // (the billing self-healed the data, so the open case is stale). This keeps the
+            // "Требуют внимания" queue honest without manual review for self-healed issues.
+            $db->execute("UPDATE operational_cases SET status='resolved',resolved_at=? WHERE status='open' AND title='Активная подписка с истёкшим сроком' AND subscription_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.id=operational_cases.subscription_id AND s.lifecycle_status='active' AND s.expires_at<=?)",[time(),time()]);
+            $db->execute("UPDATE operational_cases SET status='resolved',resolved_at=? WHERE status='open' AND title='Оплата/заказ без выдачи подписки' AND EXISTS (SELECT 1 FROM orders o JOIN subscriptions s ON s.order_id=o.id WHERE o.id=CAST(operational_cases.details AS jsonb)->>'order_id')",[time()]);
             // Flush pending transactional emails (registration welcome, password reset)
             try { $this->app->mailer->flushQueue(50); } catch (\Throwable $e) { error_log(json_encode(['event'=>'mail.flush.failed','error'=>get_class($e)])); }
             foreach(['sessions','telegram_links','login_challenges','mfa_enrollments','rate_limits'] as $table)$db->execute("DELETE FROM $table WHERE expires_at<=?",[time()]);
