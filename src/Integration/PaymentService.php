@@ -89,8 +89,17 @@ final class PaymentService
         }
         if (!$entity) return;
         $isOrder=$orders!==[];
-        $expected=$providerId==='freekassa'?($metadata['merchant_order_id']??null):($metadata[$isOrder?'order_id':'topup_id']??null);
-        if (in_array($providerId,['yookassa','platega','freekassa'],true) && $expected!==$entity['id']) throw new BillingError('Платёж относится к другому заказу.');
+        // When the entity was resolved by its own stored provider_payment_id,
+        // the binding is already authoritative (payment belongs to this entity).
+        // Metadata-id checks only matter for the recover-checkout path (entity
+        // matched via metadata, not by provider_payment_id). A canceled/expired
+        // Platega tx returns no orderId, so an empty metadata id must not reject
+        // a topup/order whose provider_payment_id already equals the payment.
+        $boundById = ($entity['provider_payment_id'] ?? null) === (string)$paymentId;
+        $expected = $providerId === 'freekassa' ? ($metadata['merchant_order_id'] ?? null) : ($metadata[$isOrder ? 'order_id' : 'topup_id'] ?? null);
+        if (!$boundById
+            && in_array($providerId, ['yookassa', 'platega', 'freekassa'], true)
+            && $expected !== $entity['id']) throw new BillingError('Платёж относится к другому заказу.');
         if ($providerId==='cryptobot' && ($metadata['payload']??'')!==($isOrder?'order:':'topup:').$entity['id']) throw new BillingError('CryptoBot: неверная привязка счёта.');
         $account=match($providerId){'yookassa'=>($this->config['YOOKASSA_SHOP_ID']??''),'platega'=>($this->config['PLATEGA_MERCHANT_ID']??''),'freekassa'=>($this->config['FREEKASSA_SHOP_ID']??''),default=>''};
         if (isset($entity['provider_account']) && $entity['provider_account']!=='' && $entity['provider_account']!==$account) throw new BillingError('Несовпадение магазина.');
@@ -149,6 +158,19 @@ final class PaymentService
         $correlation='cor_'.substr(hash('sha256',$event['provider'].':'.($event['payment_id']?:$event['provider_event_id'])),0,40);
         $op=$this->db->one('SELECT id FROM operations WHERE correlation_id=?',[$correlation]);
         try {
+            $payload=$event['payload'];
+            $payloadStatus=is_string($payload)?(json_decode($payload,true)['status']??''):'';
+            // A canceled event carries no money: settle nothing and skip the
+            // provider verify() HTTP call (Platega returns non-2xx for orphan/
+            // closed txs, which otherwise poisons the worker with retry jobs).
+            if ($payloadStatus==='canceled') {
+                $pid=(string)$event['payment_id'];
+                $this->db->execute("UPDATE orders SET status='canceled' WHERE provider_payment_id=? OR (provider=? AND id=?)",[$pid,$event['provider'],$pid]);
+                $this->db->execute("UPDATE topups SET status='canceled' WHERE provider_payment_id=? OR (provider=? AND id=?)",[$pid,$event['provider'],$pid]);
+                if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
+                if($op){$operations->event($op['id'],'payment.canceled','success','Canceled payment, nothing to settle');$operations->complete($op['id']);}
+                return;
+            }
             $this->verify((string)$event['payment_id'],(string)$event['provider'],$correlation);
             if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
             if($op){$operations->event($op['id'],'payment.verified','success','Payment verified with provider');$operations->complete($op['id']);}

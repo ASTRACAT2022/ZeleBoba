@@ -132,7 +132,28 @@ final class PlategaProvider extends AbstractProvider
      */
     public function verify(string $paymentId): array
     {
-        $res = $this->post('v2/transaction/'.rawurlencode($paymentId), []);
+        // A canceled/expired transaction may return a non-2xx from the status
+        // endpoint (the tx is no longer an open charge). Treat 4xx as canceled
+        // so topups/orders that were never funded settle-as-canceled instead of
+        // poisoning the worker with retry churn. HTTP 5xx stays terminal-error.
+        $res = [];
+        try {
+            $res = $this->post('v2/transaction/'.rawurlencode($paymentId), []);
+        } catch (\Symfony\Contracts\HttpClient\Exception\ClientExceptionInterface $e) {
+            $code = 0;
+            try { $code = $e->getResponse()?->getStatusCode() ?? 0; } catch (\Throwable) {}
+            // 4xx client error on a status probe => the tx is gone/invalid.
+            if ($code >= 404) {
+                return [
+                    'status' => 'canceled',
+                    'amount_kopeks' => 0,
+                    'currency' => 'RUB',
+                    'payment_id' => $paymentId,
+                    'metadata' => ['order_id' => '', 'topup_id' => ''],
+                ];
+            }
+            throw $e;
+        }
         $status = strtoupper((string)($res['status'] ?? ''));
         return [
             'status' => $status === 'CONFIRMED' ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED', 'CANCELED'], true) ? 'canceled' : 'pending'),
