@@ -43,16 +43,22 @@ final class IntegrationCheck
                 // scheme the provider uses, and that the API host is reachable — without
                 // creating a real payment.
                 $merchant=(string)$c['PLATEGA_MERCHANT_ID']; $secret=(string)$c['PLATEGA_SECRET'];
-                $base=rtrim((string)($c['PLATEGA_API_BASE']??'https://api.platega.com'),'/');
+                $base=rtrim((string)($c['PLATEGA_API_BASE']??'https://app.platega.io'),'/');
                 if($base==='')throw new BillingError('Заполните API-адрес Platega.');
-                $probe=['merchant_id'=>$merchant];
-                $expected=hash_hmac('sha256', json_encode($probe, JSON_UNESCAPED_UNICODE), $secret);
-                $recomputed=$expected; // same inputs => identical; guards against config swap
-                if(!hash_equals($expected,$recomputed)||$expected==='')throw new BillingError('Секрет Platega не дал валидной подписи.');
+                // Creation needs header auth + a body; an empty body must reach field-
+                // validation (400) — NOT 401/403/404 or HTML — to prove host+auth work.
                 try {
-                    $r=$http->request('GET',$base.'/',['max_duration'=>8])->getStatusCode();
-                    if($r>=500)throw new BillingError('API Platega недоступен (' . $r . ').');
-                } catch (\Throwable $e) { throw new BillingError('API Platega недоступен: ' . $e->getMessage()); }
+                    $r=$http->request('POST',$base.'/v2/transaction/process',[
+                        'headers'=>['X-MerchantId'=>$merchant,'X-Secret'=>$secret,'Content-Type'=>'application/json'],
+                        'json'=>[],'max_duration'=>10,'max_redirects'=>0]);
+                    $code=$r->getStatusCode();
+                    $ct=$r->getHeaders(false)['content-type'][0]??'';
+                    if(in_array($code,[401,403],true))throw new BillingError('Platega не принял ключи ('.$code.'): проверьте merchant_id и секрет.');
+                    if($code===404)throw new BillingError('API Platega по адресу '.$base.' не найден ('.$code.').');
+                    if($code>=500)throw new BillingError('API Platega недоступен ('.$code.').');
+                    if(str_contains($ct,'text/html'))throw new BillingError('По адресу '.$base.' не API Platega (вернул страницу).');
+                    // 400 (validation) or 2xx means the endpoint and header auth are live.
+                } catch (BillingError $e) { throw $e; } catch (\Throwable $e) { throw new BillingError('API Platega недоступен: '.$e->getMessage()); }
             }elseif($name==='freekassa'){
                 if(!$c['FREEKASSA_SHOP_ID']||!$c['FREEKASSA_API_KEY'])throw new BillingError('Заполните ID магазина и API ключ FreeKassa.');
                 $shopId=(int)$c['FREEKASSA_SHOP_ID']; $apiKey=(string)$c['FREEKASSA_API_KEY'];
