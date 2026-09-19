@@ -185,7 +185,10 @@ final class Application
                 $history=$this->app->wallet->history($uid,50);
                 $topups=$db->all('SELECT * FROM topups WHERE user_id=? ORDER BY created_at DESC LIMIT 10',[$uid]);
                 $providers=[];
-                foreach ($this->app->providers->enabled() as $id=>$provider) $providers[$id]=$provider->name();
+                foreach ($this->app->providers->enabled() as $id=>$provider) {
+                    if ($id==='freekassa') continue; // FreeKassa removed from payment selection (legacy data only)
+                    $providers[$id]=$provider->name();
+                }
                 if ($this->app->config['PAYMENT_DRIVER']==='demo') $providers=['demo'=>'Демо'];
                 return $this->render('balance',['balance'=>$balance['balance_kopeks'],'history'=>$history,'topups'=>$topups,'key'=>Database::id(),'providers'=>$providers]);
             case 'topup':

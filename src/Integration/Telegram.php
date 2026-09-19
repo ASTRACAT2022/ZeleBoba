@@ -409,6 +409,7 @@ final class Telegram
         $keyboard=[];
         if ($this->app) {
             foreach ($this->app->providers->enabled() as $pid=>$provider) {
+                if ($pid==='freekassa') continue; // FreeKassa removed from payment selection (legacy data only)
                 $keyboard[]=[['text'=>$provider->name(),'callback_data'=>'topup-provider:'.$pid]];
             }
         }
