@@ -51,15 +51,32 @@ final class PlategaProvider extends AbstractProvider
         $secret = (string)($this->config['PLATEGA_SECRET'] ?? '');
         if ($merchant === '' || $secret === '') throw new BillingError('Platega: не заполнены ключи (merchant_id/secret).');
         $resp = $this->json('POST', $this->base().'/'.$endpoint, [
-            'headers' => [
-                'X-MerchantId' => $merchant,
-                'X-Secret' => $secret,
-                'Content-Type' => 'application/json',
-            ],
+            'headers' => $this->authHeaders(),
             'json' => $body,
         ]);
         if (isset($resp['errors'])) throw new BillingError('Platega: '.$this->summarizeErrors($resp['errors']));
         return $resp;
+    }
+
+    private function get(string $endpoint, array $query = []): array
+    {
+        $merchant = (string)($this->config['PLATEGA_MERCHANT_ID'] ?? '');
+        $secret = (string)($this->config['PLATEGA_SECRET'] ?? '');
+        if ($merchant === '' || $secret === '') throw new BillingError('Platega: не заполнены ключи (merchant_id/secret).');
+        $url = $this->base().'/'.$endpoint;
+        if ($query) $url .= '?'.http_build_query($query);
+        $resp = $this->json('GET', $url, ['headers' => $this->authHeaders()]);
+        if (isset($resp['errors'])) throw new BillingError('Platega: '.$this->summarizeErrors($resp['errors']));
+        return $resp;
+    }
+
+    private function authHeaders(): array
+    {
+        return [
+            'X-MerchantId' => (string)($this->config['PLATEGA_MERCHANT_ID'] ?? ''),
+            'X-Secret' => (string)($this->config['PLATEGA_SECRET'] ?? ''),
+            'Content-Type' => 'application/json',
+        ];
     }
 
     private function summarizeErrors($errors): string
@@ -86,11 +103,15 @@ final class PlategaProvider extends AbstractProvider
     /** POST /v2/transaction/process → check the created payment URL. */
     private function create(array $orderOrTopup, array $user, string $description, string $return, string $failedUrl): array
     {
-        $amount = (int)($orderOrTopup['amount_kopeks'] ?? $orderOrTopup['price_minor'] ?? 0);
-        if ($amount < 100) throw new BillingError('Platega: некорректная сумма заказа.');
+        $amountMinor = (int)($orderOrTopup['amount_kopeks'] ?? $orderOrTopup['price_minor'] ?? 0);
+        if ($amountMinor < 100) throw new BillingError('Platega: некорректная сумма заказа.');
+        // Platega expects `amount` in RUB major units (rubles), not kopeks.
+        // Sending kopeks here inflates the charge 100x (100 RUB became 10 000 RUB).
+        $amountRub = (int)intdiv($amountMinor, 100);
+        if ($amountRub < 1) throw new BillingError('Platega: некорректная сумма заказа.');
         $res = $this->post('v2/transaction/process', [
             'paymentDetails' => [
-                'amount' => $amount,
+                'amount' => $amountRub,
                 'currency' => 'RUB',
             ],
             'description' => $description,
@@ -138,7 +159,10 @@ final class PlategaProvider extends AbstractProvider
         // poisoning the worker with retry churn. HTTP 5xx stays terminal-error.
         $res = [];
         try {
-            $res = $this->post('v2/transaction/'.rawurlencode($paymentId), []);
+            // Correct status endpoint per docs: GET /transaction/{id} (NOT
+            // POST /v2/transaction/{id} — that returns 404, which made every
+            // verify() misread a live transaction as "canceled").
+            $res = $this->get('transaction/'.rawurlencode($paymentId), []);
         } catch (\Symfony\Contracts\HttpClient\Exception\ClientExceptionInterface $e) {
             $code = 0;
             try { $code = $e->getResponse()?->getStatusCode() ?? 0; } catch (\Throwable) {}
@@ -157,9 +181,10 @@ final class PlategaProvider extends AbstractProvider
         $status = strtoupper((string)($res['status'] ?? ''));
         return [
             'status' => $status === 'CONFIRMED' ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED', 'CANCELED'], true) ? 'canceled' : 'pending'),
-            'amount_kopeks' => (int)($res['amount'] ?? $res['paymentDetails']['amount'] ?? 0),
-            'currency' => (string)($res['currency'] ?? 'RUB'),
-            'payment_id' => (string)($res['transactionId'] ?? $paymentId),
+            // Platega returns paymentDetails.amount in RUB rubles; convert back to kopeks.
+            'amount_kopeks' => (int)round(((float)($res['paymentDetails']['amount'] ?? 0)) * 100),
+            'currency' => (string)($res['paymentDetails']['currency'] ?? 'RUB'),
+            'payment_id' => (string)($res['id'] ?? $res['transactionId'] ?? $paymentId),
             'metadata' => ['order_id' => (string)($res['orderId'] ?? ''), 'topup_id' => (string)($res['orderId'] ?? '')],
         ];
     }
