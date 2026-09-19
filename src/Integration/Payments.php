@@ -2,12 +2,14 @@
 declare(strict_types=1);
 namespace App\Integration;
 use App\Billing\{BillingError,BillingService};
-use App\Infrastructure\Database;
+use App\Infrastructure\{Database,CircuitBreaker};
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Payments
 {
     private const FREEKASSA_API = 'https://api.fk.life/v1/';
+    private ?CircuitBreaker $breaker = null;
     public function __construct(private Database $db, private BillingService $billing, private HttpClientInterface $http, private array $config) {}
+    public function setCircuitBreaker(?CircuitBreaker $b): void { $this->breaker = $b; }
     /** Create a checkout for a balance topup. Mirrors order checkout but for the topups table. */
     public function createTopup(array $topup): void
     {
@@ -261,6 +263,10 @@ final class Payments
     private function freekassaRequest(string $path, array $params): array
     {
         if (!$this->config['FREEKASSA_API_KEY']) throw new BillingError('FreeKassa не настроена.');
+        $breaker = $this->breaker;
+        if ($breaker !== null && !$breaker->allow('freekassa_api')) {
+            throw new BillingError('FreeKassa временно недоступна (circuit open). Повторите позже.');
+        }
         $apiKey=(string)$this->config['FREEKASSA_API_KEY'];
         // Ensure nonce exists
         if (!isset($params['nonce'])) $params['nonce']=self::nonce();
@@ -269,7 +275,13 @@ final class Payments
         $values=array_map(fn($v)=> (string)$v, array_values($sorted));
         $sign=hash_hmac('sha256', implode('|',$values), $apiKey);
         $params['signature']=$sign;
-        $resp=$this->http->request('POST', self::FREEKASSA_API.$path, ['json'=>$params,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray(false);
+        try {
+            $resp=$this->http->request('POST', self::FREEKASSA_API.$path, ['json'=>$params,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray(false);
+        } catch (\Throwable $e) {
+            $breaker?->failure('freekassa_api');
+            throw $e;
+        }
+        $breaker?->success('freekassa_api');
         // FreeKassa returns type=success or error; handle both
         if (($resp['type']??'')==='error' || isset($resp['error'])) {
             $msg=$resp['error']??$resp['message']??'FreeKassa error';

@@ -91,7 +91,7 @@ final class Application
         catch (BillingError $e) { return $this->render('error',['message'=>$e->getMessage()],422); }
         catch (\JsonException|\Symfony\Component\HttpFoundation\Exception\BadRequestException $e) { return new JsonResponse(['error'=>'Malformed request'],400); }
         catch (\Throwable $e) {
-            error_log(json_encode(['event'=>'request.failed','request_id'=>$requestId,'type'=>get_class($e)]));
+            error_log(json_encode(['event'=>'request.failed','request_id'=>$requestId,'type'=>get_class($e),'message'=>$e->getMessage(),'file'=>$e->getFile(),'line'=>$e->getLine()]));
             return $this->render('error',['message'=>'Не удалось выполнить запрос. Повторите позже. Код: '.$requestId],503);
         }
     }
@@ -139,7 +139,7 @@ final class Application
                 foreach ($plans as &$plan) $plan['price_minor']=$this->app->billing->priceFor($uid,$plan);
                 unset($plan);
                 return $this->render('plans',['plans'=>$plans,'key'=>Database::id(),'trial_available'=>$this->app->trials->available($uid)]);
-            case 'buy': $order=$this->app->billing->order($uid,$input->get('plan_id',''),$input->get('idempotency_key',''),$input->get('receipt_email'),self::clientIp($this->request),null,$input->get('landing_slug')); return new RedirectResponse('/orders/'.$order['id'],303);
+            case 'buy': $this->app->killSwitch->assertCanPurchase($this->app->config['PAYMENT_DRIVER']); $order=$this->app->billing->order($uid,$input->get('plan_id',''),$input->get('idempotency_key',''),$input->get('receipt_email'),self::clientIp($this->request),null,$input->get('landing_slug')); return new RedirectResponse('/orders/'.$order['id'],303);
             case 'orders': return $this->render('orders',['orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100',[$uid])]);
             case 'order':
             case 'demo':
@@ -179,6 +179,7 @@ final class Application
             case 'topup':
                 $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
                 if ($amount===false || $amount < -1000000 || $amount > 1000000) throw new BillingError('Некорректная сумма.');
+                $this->app->killSwitch->assertCanPurchase($input->get('provider',''));
                 $key=$input->get('idempotency_key','');
                 $provider=$input->get('provider','');
                 $topup=$this->app->topups->create($uid,($amount??0)*100,$key,$provider);
@@ -194,6 +195,7 @@ final class Application
                 }
                 return $this->render('topup',['topup'=>$topup]);
             case 'buy-balance':
+                $this->app->killSwitch->assertCanPurchase(null);
                 $this->app->billing->purchaseFromBalance($uid,$input->get('plan_id',''),$input->get('idempotency_key',''));
                 return new RedirectResponse('/',303);
             case 'settings': return $this->render('settings',['link_token'=>null]);
@@ -219,10 +221,12 @@ final class Application
                 if (!$dashboard) return $this->render('error',['message'=>'Этот аккаунт не подключён к Creators Program.'],403);
                 return $this->render('creators',['data'=>$dashboard,'app_url'=>$this->app->config['APP_URL']]);
             case 'creator-payout':
+                $this->app->killSwitch->assertCanWithdraw();
                 $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
                 $this->app->creators->requestPayout($uid,(int)($amount?:0)*100,(string)$input->get('details',''));
                 return new RedirectResponse('/creators',303);
             case 'withdraw':
+                $this->app->killSwitch->assertCanWithdraw();
                 $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
                 if ($amount===false || $amount < -1000000 || $amount > 1000000) throw new BillingError('Некорректная сумма.');
                 $details=$input->get('payment_details','');
@@ -384,6 +388,17 @@ final class Application
         $allowed=['168.119.157.136','168.119.60.227','178.154.197.79','51.250.54.238'];
         if (!in_array($this->request->getClientIp(),$allowed,true)) return new Response('hacking attempt!',403);
         if (!\App\Integration\Payments::verifyFreekassaNotification(['MERCHANT_ID'=>$merchantId,'AMOUNT'=>$amount,'MERCHANT_ORDER_ID'=>$orderId,'SIGN'=>$sign],(string)($this->app->config['FREEKASSA_SECRET2']??''))) return new Response('wrong sign',403);
+
+        // Replay / duplicate protection: only process each (merchant, order) notification once.
+        $eventId = $orderId . ($intid !== '' ? ':' . $intid : '');
+        try {
+            $claim = $this->app->webhookGuard->claim('freekassa', $eventId, $this->request->query->all() ?: $this->request->request->all());
+        } catch (\RuntimeException) {
+            return new Response('YES'); // possible tamper: same id different payload -> drop
+        }
+        if ($claim === 'duplicate') return new Response('YES');
+        // 'new' or 'same_payload' -> continue processing (idempotent).
+
         if (!preg_match('/^[a-f0-9]{32}$/D',$orderId)) return new Response('YES');
         $order=$this->app->db->one("SELECT * FROM orders WHERE id=? AND provider='freekassa'",[$orderId]);
         if (!$order) {
@@ -396,6 +411,7 @@ final class Application
             if ($topup['status']!=='pending') return new Response('YES');
             $verifyId=$intid!==''?$intid:$orderId;
             $this->app->db->transaction(function()use($verifyId,$intid,$orderId){$this->app->outbox->enqueue('payment.verify','verify-fk:'.$orderId.':'.$intid,['payment_id'=>$orderId,'provider'=>'freekassa']);});
+            $this->app->webhookGuard->markProcessed('freekassa', $orderId . ($intid !== '' ? ':' . $intid : ''));
             return new Response('YES');
         }
         try {
@@ -409,6 +425,7 @@ final class Application
         }
         $verifyId=$intid!==''?$intid:$orderId;
         $this->app->db->transaction(function()use($verifyId,$intid,$orderId){$this->app->outbox->enqueue('payment.verify','verify-fk:'.$orderId.':'.$intid,['payment_id'=>$orderId,'provider'=>'freekassa']);});
+        $this->app->webhookGuard->markProcessed('freekassa', $orderId . ($intid !== '' ? ':' . $intid : ''));
         return new Response('YES');
     }
     private function cookie(string $name,string $value,int $expires): Cookie

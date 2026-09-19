@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace App;
-use App\Infrastructure\{Database,Outbox,Worker,SecretRedactor};
+use App\Infrastructure\{Database,Outbox,Worker,SecretRedactor,KillSwitch,CircuitBreaker,RateLimiter,WebhookGuard,OptimisticLock,WorkerHeartbeat};
 use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,CreatorService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline};
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
@@ -35,6 +35,12 @@ final class Container
     public readonly MonitoringService $monitoring;
     public readonly BackupService $backups;
     public readonly MaintenanceService $maintenance;
+    public readonly KillSwitch $killSwitch;
+    public readonly CircuitBreaker $circuitBreaker;
+    public readonly RateLimiter $rateLimiter;
+    public readonly WebhookGuard $webhookGuard;
+    public readonly OptimisticLock $optimisticLock;
+    public readonly WorkerHeartbeat $heartbeat;
     public readonly UserAdminService $userAdmin;
     public readonly CompensationService $compensations;
     public readonly CustomerTimeline $timeline;
@@ -92,9 +98,16 @@ final class Container
         $this->monitoring=new MonitoringService($this->db);
         $this->backups=new BackupService($this->db,dirname(__DIR__).'/var/backups');
         $this->maintenance=new MaintenanceService($this->db);
+        $this->killSwitch=new KillSwitch($this->db);
+        $this->circuitBreaker=new CircuitBreaker($this->db);
+        $this->rateLimiter=new RateLimiter($this->db);
+        $this->webhookGuard=new WebhookGuard($this->db);
+        $this->optimisticLock=new OptimisticLock($this->db);
+        $this->heartbeat=new WorkerHeartbeat($this->db);
         $this->compensations=new CompensationService($this->db,$this->outbox,$this->wallet);
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
+        $this->payments->setCircuitBreaker($this->circuitBreaker);
         $remnawave=new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID']);
         $this->userAdmin=new UserAdminService($this->db,$this->wallet,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->outbox,$this->timeline);
         $this->providers=new ProviderRegistry($http,$config);
