@@ -6,8 +6,19 @@ final class ConsistencyChecker {
  public function __construct(private Database $db){}
  public function run():array {
   $missing=$this->db->all("SELECT p.id FROM payments p LEFT JOIN ledger_entries l ON l.order_id=p.order_id LEFT JOIN orders o ON o.id=p.order_id WHERE p.status='succeeded' GROUP BY p.id,o.status HAVING COUNT(l.id)<>2 OR SUM(l.amount_minor)<>0 OR o.status NOT IN ('paid','fulfilled')");
-  $details=['critical_payment_drift'=>array_column($missing,'id')];$status=$missing?'critical':'ok';
+  $creatorDrift=[];
+  // A creator commission and its positive ledger entry are one atomic fact.
+  // Keep reconciliation non-destructive: it reports drift for an operator
+  // instead of inventing a financial correction with incomplete evidence.
+  if ($this->creatorTablesExist()) {
+   $creatorDrift=$this->db->all("SELECT c.id FROM creator_commissions c LEFT JOIN creator_ledger l ON l.commission_id=c.id AND l.entry_type='commission' AND l.amount_minor=c.commission_minor GROUP BY c.id HAVING COUNT(l.id)<>1 UNION SELECT l.id FROM creator_ledger l LEFT JOIN creator_commissions c ON c.id=l.commission_id WHERE l.entry_type='commission' AND c.id IS NULL UNION SELECT c.id FROM creator_commissions c LEFT JOIN creator_ledger l ON l.creator_id=c.creator_id AND l.entry_type='reversal' AND l.metadata LIKE '%' || c.id || '%' WHERE c.status='reversed' GROUP BY c.id HAVING COUNT(l.id)<>1");
+  }
+  $details=['critical_payment_drift'=>array_column($missing,'id'),'critical_creator_drift'=>array_column($creatorDrift,'id')];$status=($missing||$creatorDrift)?'critical':'ok';
   $this->db->execute('INSERT INTO consistency_checks(id,kind,status,details,checked_at) VALUES(?,?,?,?,?)',[Database::id(),'money',$status,json_encode($details,JSON_THROW_ON_ERROR),time()]);
-  return ['status'=>$status,'count'=>count($missing),'details'=>$details];
+  return ['status'=>$status,'count'=>count($missing)+count($creatorDrift),'details'=>$details];
+ }
+ private function creatorTablesExist():bool {
+  if($this->db->postgres())return (bool)($this->db->one("SELECT to_regclass('creator_commissions') name")['name']??null);
+  return $this->db->one("SELECT name FROM sqlite_master WHERE type='table' AND name='creator_commissions'")!==null;
  }
 }
