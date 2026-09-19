@@ -148,6 +148,37 @@ trait AdminActions
             return $this->render('admin-reports',['stats'=>$stats,'daily'=>$daily,'by_provider'=>$byProvider,'by_plan'=>$byPlan,'by_type'=>$byType,'top_customers'=>$topCustomers,'top'=>$top,'days'=>$days,'earnings'=>$earnings]);
         }
         if($handler==='admin-monitoring')return $this->render('admin-monitoring',['events'=>$this->app->monitoring->recentEvents(),'errors'=>$this->app->monitoring->errors(),'anomalies'=>$this->app->monitoring->trafficAnomalies()]);
+        if($handler==='admin-operations'){
+            $period=$this->request->query->get('period','7d');
+            $since=match($period){'today'=>strtotime('today UTC'),'24h'=>time()-86400,'30d'=>time()-30*86400,'7d'=>time()-7*86400,default=>0};
+            return $this->render('admin-operations',['operations'=>$this->app->operations->search(trim($this->request->query->get('q','')),$this->request->query->get('type',''),$this->request->query->get('status',''),$since),'q'=>$this->request->query->get('q',''),'type'=>$this->request->query->get('type',''),'status'=>$this->request->query->get('status',''),'period'=>$period]);
+        }
+        if($handler==='admin-operation'){
+            $operation=$this->app->operations->detail($id); if(!$operation) throw new BillingError('Операция не найдена.');
+            return $this->render('admin-operation',['operation'=>$operation]);
+        }
+        if($handler==='admin-provisioning')return $this->render('admin-provisioning',['accounts'=>$db->all("SELECT p.*,s.expires_at,s.lifecycle_status,u.email,u.telegram_id FROM provisioning_accounts p JOIN subscriptions s ON s.id=p.subscription_id JOIN users u ON u.id=s.user_id ORDER BY CASE p.state WHEN 'failed' THEN 0 WHEN 'retry' THEN 1 ELSE 2 END,p.updated_at DESC LIMIT 200")]);
+        if($handler==='admin-provisioning-retry'){
+            $reason=trim($input->get('reason','')); if($reason===''||mb_strlen($reason)>200)throw new BillingError('Укажите причину повторной синхронизации (до 200 символов).');
+            $account=$db->one('SELECT p.*,s.remote_id,s.user_id FROM provisioning_accounts p JOIN subscriptions s ON s.id=p.subscription_id WHERE p.id=?'.$db->lock(),[$id]); if(!$account)throw new BillingError('Provisioning account не найден.');
+            $operation=$this->app->operations->start('provisioning.retry',['user_id'=>$account['user_id'],'subscription_id'=>$account['subscription_id'],'metadata'=>['requested_by'=>$uid,'reason'=>$reason]]);
+            $topic=$account['remote_id']===null?'subscription.provision':'subscription.extend';
+            $db->transaction(function()use($db,$account,$topic,$operation,$reason,$uid){
+                $db->execute("UPDATE provisioning_accounts SET state='retry',last_error=NULL,updated_at=? WHERE id=?",[time(),$account['id']]);
+                $key='manual-retry:'.$account['subscription_id'].':'.$operation['id'];
+                $this->app->outbox->enqueue($topic,$key,['subscription_id'=>$account['subscription_id']],0);
+                $db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$operation['correlation_id'],$key]);
+                $this->app->billing->audit($uid,'provisioning.retry_requested',$account['subscription_id']);
+            });
+            $this->app->operations->event($operation['id'],'provisioning.queued','warning','Manual retry queued',['metadata'=>['reason'=>$reason]]);
+            return new RedirectResponse('/admin/operations/'.$operation['id'],303);
+        }
+        if($handler==='admin-explain'){$state=(new \App\Observability\StateExplanation($db))->subscription($id);if(!$state)throw new BillingError('Подписка не найдена.');return $this->render('admin-explain',['state'=>$state,'subscription_id'=>$id]);}
+        if($handler==='admin-preview-extend'){$months=$this->request->query->getInt('months',1);if($months<1||$months>36)throw new BillingError('1–36 месяцев.');$s=$db->one('SELECT * FROM subscriptions WHERE id=?',[$id]);if(!$s)throw new BillingError('Подписка не найдена.');$after=(new \App\Subscriptions\SubscriptionService($db,$this->app->outbox))->expiryAfter(max(time(),(int)$s['expires_at']),0,$months);return $this->render('admin-preview-extend',['sub'=>$s,'months'=>$months,'after'=>$after]);}
+        if($handler==='admin-flags')return $this->render('admin-flags',['flags'=>(new \App\Observability\FeatureFlags($db))->all()]);
+        if($handler==='admin-flag-save'){(new \App\Observability\FeatureFlags($db))->set($input->get('name',''),$input->get('enabled')==='1',$input->getInt('rollout',100),$uid);$this->app->billing->audit($uid,'feature_flag.updated',$input->get('name',''));return new RedirectResponse('/admin/flags',303);}
+        if($handler==='admin-incidents')return $this->render('admin-incidents',['incidents'=>(new \App\Observability\IncidentService($db))->list()]);
+        if($handler==='admin-incident-create'){(new \App\Observability\IncidentService($db))->create($input->get('title',''),$uid);return new RedirectResponse('/admin/incidents',303);}
         if($handler==='admin-monitoring-clear'){
             $this->app->monitoring->clearErrors();return new RedirectResponse('/admin/monitoring',303);
         }

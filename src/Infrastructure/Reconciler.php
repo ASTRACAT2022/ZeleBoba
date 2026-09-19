@@ -16,6 +16,8 @@ final class Reconciler
         });
         if(!$taken)return 0;
         try{
+            $money=(new \App\Observability\ConsistencyChecker($db))->run();
+            if($money['status']!=='ok') error_log(json_encode(['event'=>'financial.drift','count'=>$money['count']]));
             $after='';$bucket=intdiv(time(),300);
             // Only retry providers that can be verified with the credentials
             // currently installed. Retrying demo or incomplete integrations
@@ -51,6 +53,13 @@ final class Reconciler
             foreach ($stuck as $subscription) {
                 $this->app->outbox->enqueue('subscription.provision','reconcile-provision:'.$subscription['id'].':'.intdiv(time(),300),['subscription_id'=>$subscription['id']]);
             }
+            // Recover provisioning work whose original outbox command exhausted
+            // its retries. This covers renewals of already active accounts too.
+            $recover=$db->all("SELECT p.subscription_id,s.remote_id FROM provisioning_accounts p JOIN subscriptions s ON s.id=p.subscription_id WHERE p.state IN ('retry','failed') AND s.expires_at>? AND s.lifecycle_status IN ('pending','active','grace') ORDER BY p.updated_at LIMIT 100",[time()]);
+            foreach ($recover as $account) {
+                $topic=$account['remote_id']===null?'subscription.provision':'subscription.extend';
+                $this->app->outbox->enqueue($topic,'reconcile-account:'.$account['subscription_id'].':'.intdiv(time(),300),['subscription_id'=>$account['subscription_id']]);
+            }
             // Auto-renew: enqueue renew jobs for subscriptions near expiry
             $autoEnabled=$db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
             if (!$autoEnabled || $autoEnabled['value']==='1') {
@@ -85,7 +94,8 @@ final class Reconciler
                             $this->app->config['REMNAWAVE_TOKEN']??'',
                             $this->app->config['REMNAWAVE_SQUAD_UUID']??''
                         ));
-                        $report=$sync->run(50,true);
+                        $heal=$db->one("SELECT enabled FROM feature_flags WHERE name='reconciliation.auto_heal'");
+                        $report=$sync->run(50,(int)($heal['enabled']??0)===1);
                         if($report['fixed']>0||$report['reprovisioned']>0||$report['disabled']>0){
                             error_log(json_encode(['event'=>'remnawave.sync','fixed'=>$report['fixed'],'reprovisioned'=>$report['reprovisioned'],'disabled'=>$report['disabled'],'errors'=>$report['errors']]));
                         }

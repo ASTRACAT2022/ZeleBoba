@@ -1,12 +1,14 @@
 <?php
 declare(strict_types=1);
 namespace App\Infrastructure;
+use App\Observability\OperationsService;
 final class Outbox
 {
     public function __construct(private Database $db, private ?\App\Settings\Vault $vault=null) {}
     /** Higher priority = drained first. Personal Telegram replies/answers outrank mass broadcasts. */
     private const PRIORITY = [
         'payment.verify' => 100,
+        'payment.event.process' => 100,
         'payment.create' => 90,
         'topup.create' => 90,
         'topup.after' => 90,
@@ -47,15 +49,28 @@ final class Outbox
             return $job;
         });
         if (!$job) return false;
+        $payload=[];
+        $operations=new OperationsService($this->db);
+        $operation=$job['correlation_id'] ? $this->db->one('SELECT id FROM operations WHERE correlation_id=?',[$job['correlation_id']]) : null;
+        if($operation)$operations->event($operation['id'],'outbox.started','processing','Outbox job started',['metadata'=>['topic'=>$job['topic'],'attempt'=>(int)$job['attempts']+1]]);
         try {
             $json=$job['payload'];
             if(str_starts_with($json,'enc:'))$json=$this->vault?->open('outbox:'.$job['topic'],substr($json,4))??throw new \RuntimeException('Outbox decryption unavailable');
-            $handler($job['topic'], json_decode($json,true,512,JSON_THROW_ON_ERROR));
+            $payload=json_decode($json,true,512,JSON_THROW_ON_ERROR);
+            $handler($job['topic'], $payload);
             $this->db->execute("UPDATE outbox SET status='done',locked_until=NULL,last_error=NULL,payload='{}' WHERE id=? AND lock_token=?", [$job['id'],$job['lock_token']]);
+            if($operation)$operations->event($operation['id'],'outbox.completed','success','Outbox job completed',['metadata'=>['topic'=>$job['topic']]]);
         } catch (\Throwable $e) {
             $attempt = (int)$job['attempts']+1;
             // Never persist raw HTTP errors: they may contain tokens or subscription URLs.
             $this->db->execute('UPDATE outbox SET status=?, available_at=?, locked_until=NULL,last_error=? WHERE id=? AND lock_token=?', [$attempt>=8?'dead':'pending',time()+min(3600,2**$attempt)+random_int(0,5),get_class($e),$job['id'],$job['lock_token']]);
+            if (in_array($job['topic'],['subscription.provision','subscription.extend'],true) && isset($payload['subscription_id'])) {
+                $state=$attempt>=8?'failed':'retry';
+                $this->db->execute('UPDATE provisioning_accounts SET state=?,last_error=?,updated_at=? WHERE subscription_id=? AND state<>\'active\'',[
+                    $state,get_class($e),time(),(string)$payload['subscription_id']
+                ]);
+            }
+            if($operation)$operations->event($operation['id'],'outbox.retry','warning','Outbox retry scheduled',['metadata'=>['topic'=>$job['topic'],'attempt'=>$attempt,'error_class'=>get_class($e)]]);
             error_log(json_encode(['event'=>'job.failed','job_id'=>$job['id'],'type'=>get_class($e),'attempt'=>$attempt]));
         }
         return true;

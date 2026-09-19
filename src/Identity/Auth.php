@@ -11,7 +11,11 @@ final class Auth
         $email=mb_strtolower(trim($email));
         if (!filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($email)>254 || strlen($password)<12 || strlen($password)>128) throw new BillingError('Введите корректную почту и пароль от 12 до 128 символов.');
         $id=Database::id();
-        try { $this->db->execute('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)',[$id,$email,password_hash($password,PASSWORD_ARGON2ID),time()]); }
+        try { $this->db->transaction(function() use($id,$email,$password) {
+            $now=time();
+            $this->db->execute('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)',[$id,$email,password_hash($password,PASSWORD_ARGON2ID),$now]);
+            (new IdentityService($this->db))->attach($id,'email',$email,true);
+        }); }
         catch (\PDOException $e) { if (in_array($e->getCode(),['23000','23505'])) throw new BillingError('Не удалось создать аккаунт с этой почтой.'); throw $e; }
         return $id;
     }

@@ -9,6 +9,7 @@ final class RbacService
         'admin.channels','admin.landings','admin.contests','admin.polls','admin.campaigns',
         'admin.withdrawals','admin.settings','admin.sync','admin.backup','admin.reports',
         'admin.roles','admin.audit','admin.monitoring','admin.maintenance',
+        'operations.view','operations.view_technical','operations.view_financial','operations.retry_provisioning','operations.reconcile','sentry.view',
     ];
     public function __construct(private Database $db) {}
     /** Create a role. */

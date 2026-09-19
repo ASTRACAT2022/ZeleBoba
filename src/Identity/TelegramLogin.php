@@ -25,8 +25,18 @@ final class TelegramLogin
     public function telegramUser(string $tg):string
     {
         if (!preg_match('/^[1-9][0-9]{0,19}$/D',$tg))throw new BillingError('Некорректный Telegram ID.');
-        $this->db->execute('INSERT INTO users(id,telegram_id,created_at) VALUES(?,?,?) ON CONFLICT(telegram_id) DO NOTHING',[Database::id(),$tg,time()]);
-        $user=$this->db->one('SELECT id,disabled FROM users WHERE telegram_id=?',[$tg]);
+        $identities=new IdentityService($this->db);
+        $id=$identities->userId('telegram',$tg);
+        if ($id===null) {
+            $id=Database::id();
+            try {
+                $this->db->execute('INSERT INTO users(id,telegram_id,created_at) VALUES(?,?,?)',[$id,$tg,time()]); // legacy read projection
+                $identities->attach($id,'telegram',$tg,true);
+            } catch (\PDOException $e) {
+                $id=$identities->userId('telegram',$tg) ?? throw $e;
+            }
+        }
+        $user=$this->db->one('SELECT id,disabled FROM users WHERE id=?',[$id]);
         if ((int)$user['disabled']===1)throw new BillingError('Аккаунт отключён.');
         return $user['id'];
     }

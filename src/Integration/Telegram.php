@@ -201,9 +201,11 @@ final class Telegram
         return $this->db->transaction(function () use ($tg,$token) {
             $link=$this->db->one('SELECT * FROM telegram_links WHERE token_hash=? AND expires_at>?'.$this->db->lock(),[hash('sha256',$token),time()]);
             if (!$link) return 'Код недействителен. Получите новый в веб-кабинете.';
-            $existing=$this->db->one('SELECT * FROM users WHERE telegram_id=?',[$tg]);
+            $identities=new \App\Identity\IdentityService($this->db);
+            $existingId=$identities->userId('telegram',$tg);
             $target=$this->db->one('SELECT * FROM users WHERE id=?'.$this->db->lock(),[$link['user_id']]);
-            if (($existing && $existing['id']!==$target['id']) || ($target['telegram_id'] && $target['telegram_id']!==$tg)) return 'Telegram уже связан с аккаунтом. Обратитесь к администратору для переноса данных.';
+            if (($existingId && $existingId!==$target['id']) || ($target['telegram_id'] && $target['telegram_id']!==$tg)) return 'Telegram уже связан с аккаунтом. Обратитесь к администратору для переноса данных.';
+            $identities->attach($target['id'],'telegram',$tg,true);
             $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',[$tg,$target['id']]);
             $this->db->execute('DELETE FROM telegram_links WHERE token_hash=?',[$link['token_hash']]);
             return 'Telegram подключён к веб-кабинету.';
@@ -212,8 +214,8 @@ final class Telegram
 
     private function ensureUser(string $tg): ?array
     {
-        $this->db->execute('INSERT INTO users(id,telegram_id,created_at) VALUES(?,?,?) ON CONFLICT(telegram_id) DO NOTHING',[Database::id(),$tg,time()]);
-        $user=$this->db->one('SELECT * FROM users WHERE telegram_id=?',[$tg]);
+        $id=(new \App\Identity\TelegramLogin($this->db,new \App\Identity\Auth($this->db)))->telegramUser($tg);
+        $user=$this->db->one('SELECT * FROM users WHERE id=?',[$id]);
         if(!$user || (int)$user['disabled']===1) return null;
         return $user;
     }

@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace App\Infrastructure;
 use App\Integration\{Payments,Provisioner,PaymentService};
 use App\Billing\{TopupService,CustomerTimeline};
+use App\Observability\OperationsService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
@@ -14,11 +15,12 @@ final class Worker
             match ($topic) {
                 'payment.create'=>$this->paymentService?$this->paymentService->createOrder($payload['order_id']):$this->payments->create($payload['order_id']),
                 'payment.verify'=>$this->paymentService?$this->paymentService->verify($payload['payment_id'],$payload['provider']??null):$this->payments->refresh($payload['payment_id']),
+                'payment.event.process'=>$this->paymentService?->processEvent($payload['event_id']) ?? throw new \RuntimeException('Payment event processor unavailable'),
                 'topup.create'=>$this->topupCreate($payload['topup_id']),
                 'topup.after'=>$this->topupAfter($payload['user_id']),
                 'referral.topup'=>isset($payload['topup_id'])?$this->referrals?->processSettledTopup($payload['topup_id']):$this->referralTopup($payload['user_id'],(int)($payload['amount_kopeks']??0)),
                 'subscription.provision'=>$this->provision($payload['subscription_id']),
-                'subscription.extend'=>$this->extend($payload['subscription_id']),
+                'subscription.extend'=>$this->extend($payload['subscription_id'],$payload['order_id']??null),
                 'subscription.renew'=>$this->renew($payload['subscription_id']),
                 'subscription.traffic'=>$this->traffic($payload['subscription_id'],(int)($payload['traffic_gb']??0)),
                 'subscription.devices'=>$this->devices($payload['subscription_id'],(int)($payload['devices']??0)),
@@ -105,34 +107,59 @@ final class Worker
     }
     private function provision(string $id): void
     {
+        $flag=$this->db->one("SELECT enabled FROM feature_flags WHERE name='provisioning.enabled'");
+        if($flag && (int)$flag['enabled']===0) throw new \RuntimeException('Provisioning disabled by kill switch');
         $s=$this->subscription($id);
         if (!$s || !in_array($s['status'],['provisioning','active','trial'],true) || $s['remote_id']!==null || (int)$s['expires_at']<=time()) return;
+        $this->db->execute("UPDATE provisioning_accounts SET state='processing',updated_at=? WHERE subscription_id=? AND provider=?",[time(),$id,$s['provision_driver']]);
+        $this->operationEvent($id,'provisioning.started','processing','Provisioning job started');
         $this->timeline?->record($s['user_id'], 'vpn.provisioning_started', ['subscription_id'=>$id]);
         if($s['provision_driver']==='demo' && !$this->allowDemo) throw new \RuntimeException('Demo provisioning forbidden');
         $remote=$s['provision_driver']==='demo'?(new \App\Integration\DemoProvisioner())->provision($s):$this->provisioner->provision($s);
         $this->db->transaction(function () use ($s,$remote,$id) {
-            $changed=$this->db->execute("UPDATE subscriptions SET status='active',remote_id=?,subscription_url=? WHERE id=? AND status IN ('provisioning','active','trial') AND remote_id IS NULL",[$remote['id'],$remote['url'],$id]);
+            $changed=$this->db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',remote_id=?,subscription_url=?,updated_at=?,version=version+1 WHERE id=? AND status IN ('provisioning','active','trial') AND remote_id IS NULL",[$remote['id'],$remote['url'],time(),$id]);
             if (!$changed) return;
-            $this->db->execute("UPDATE orders SET status='fulfilled' WHERE id=?",[$s['order_id']]);
+            $this->db->execute("UPDATE orders SET status='fulfilled',workflow_status='fulfilled' WHERE id=?",[$s['order_id']]);
+            $this->db->execute("UPDATE provisioning_accounts SET external_user_id=?,state='active',last_synced_at=?,last_error=NULL,updated_at=? WHERE subscription_id=? AND provider=?",[$remote['id'],time(),time(),$id,$s['provision_driver']]);
+            $this->operationEvent($id,'provisioning.completed','success','Provisioning ACTIVE');
             $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
             $this->timeline?->record($s['user_id'], 'subscription.active', ['subscription_id'=>$id]);
             $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
             if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','activated:'.$id,['chat_id'=>$user['telegram_id'],'text'=>'Подписка готова. Откройте веб-кабинет или отправьте /status.']);
         });
     }
-    private function extend(string $id): void
+    private function extend(string $id, ?string $orderId=null): void
     {
+        $flag=$this->db->one("SELECT enabled FROM feature_flags WHERE name='provisioning.enabled'");
+        if($flag && (int)$flag['enabled']===0) throw new \RuntimeException('Provisioning disabled by kill switch');
         $s=$this->subscription($id);
         if (!$s || $s['status']!=='active') return;
+        $this->db->execute("UPDATE provisioning_accounts SET state='processing',updated_at=? WHERE subscription_id=? AND provider=?",[time(),$id,$s['provision_driver']]);
+        $this->operationEvent($id,'provisioning.started','processing','Provisioning synchronization started');
         if($s['provision_driver']==='demo'){
-            // Demo: nothing to extend remotely
+            $this->markExtended($s,$orderId);
             return;
         }
         if ($s['remote_id']===null) { $this->provision($id); return; }
         $this->provisioner->extend($s);
+        $this->markExtended($s,$orderId);
         $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
+        $this->operationEvent($id,'provisioning.completed','success','Remnawave synchronization successful',['expires_at'=>$s['expires_at']]);
         $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
         if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','renewed:'.$id.':'.$s['expires_at'],['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
+    }
+    private function markExtended(array $s, ?string $orderId): void
+    {
+        $now=time();
+        $this->db->transaction(function() use($s,$now) {
+            if ($orderId!==null) $this->db->execute("UPDATE orders SET status='fulfilled',workflow_status='fulfilled' WHERE id=? AND status='paid'",[$orderId]);
+            $this->db->execute("UPDATE provisioning_accounts SET state='active',last_synced_at=?,last_error=NULL,updated_at=? WHERE subscription_id=? AND provider=?",[$now,$now,$s['id'],$s['provision_driver']]);
+        });
+    }
+    private function operationEvent(string $subscriptionId,string $type,string $status,string $message,array $metadata=[]): void
+    {
+        $op=$this->db->one('SELECT id FROM operations WHERE subscription_id=? ORDER BY started_at DESC LIMIT 1',[$subscriptionId]);
+        if($op)(new OperationsService($this->db))->event($op['id'],$type,$status,$message,['subscription_id'=>$subscriptionId,'metadata'=>$metadata]);
     }
     private function renew(string $id): void
     {

@@ -34,6 +34,7 @@ final class RemnawaveSync
                     if($fix){
                         $result=$this->provisioner->provision($s);
                         $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[$result['id'],$result['url'],$s['id']]);
+                        $this->markActive($s['id'],(string)$result['id']);
                         $report['reprovisioned']++; $report['details'][]="$username: reprovisioned";
                     } else {
                         $report['details'][]="$username: missing on panel";
@@ -62,10 +63,15 @@ final class RemnawaveSync
                 if($fix && (empty($s['remote_id']) || empty($s['subscription_url']))){
                     $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[(string)($remote['id']??$s['remote_id']),$remote['subscriptionUrl']??$s['subscription_url'],$s['id']]);
                 }
+                if ($fix) $this->markActive($s['id'],(string)($remote['id']??$s['remote_id']));
             } catch (\Throwable $e) {
                 $report['errors']++; $report['details'][]="$username: error ".get_class($e);
             }
         }
         return $report;
+    }
+    private function markActive(string $subscriptionId,string $externalId): void
+    {
+        $this->db->execute("UPDATE provisioning_accounts SET state='active',external_user_id=?,last_synced_at=?,last_error=NULL,updated_at=? WHERE subscription_id=?",[$externalId,time(),time(),$subscriptionId]);
     }
 }

@@ -4,6 +4,8 @@ namespace App\Integration;
 use App\Billing\{BillingError,BillingService};
 use App\Infrastructure\Database;
 use App\Integration\Payment\ProviderRegistry;
+use App\Payments\PaymentEventStore;
+use App\Observability\OperationsService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 /**
  * Unified payment service. Routes order/topup checkouts and verification
@@ -18,6 +20,7 @@ final class PaymentService
         private HttpClientInterface $http,
         private array $config,
         private ProviderRegistry $registry,
+        private ?PaymentEventStore $events=null,
     ) {}
     public function registry(): ProviderRegistry { return $this->registry; }
     /** Create checkout for an order. Returns [payment_id, checkout_url]. */
@@ -59,7 +62,7 @@ final class PaymentService
         if (in_array($provider,['telegram_stars','tribute'],true)) throw new BillingError('Подтверждение платежей этого провайдера пока не реализовано.');
     }
     /** Verify a payment with the provider and settle if paid. */
-    public function verify(string $paymentId, ?string $providerId=null): void
+    public function verify(string $paymentId, ?string $providerId=null, ?string $correlationId=null): void
     {
         if ($paymentId==='' || strlen($paymentId)>100) throw new BillingError('Некорректный платёж.');
         $params=[$paymentId,$paymentId];
@@ -95,7 +98,7 @@ final class PaymentService
         if (!is_string($actualId) || $actualId==='' || strlen($actualId)>100 || ($entity['provider_payment_id']!==null && $entity['provider_payment_id']!==$actualId)) throw new BillingError('Несовпадение платежа.');
         if (($result['status']??'')==='paid') {
             if (($this->config['APP_ENV']??'dev')==='prod' && !empty($result['test'])) throw new BillingError('Тестовый платёж запрещён в production.');
-            if ($isOrder) $this->billing->settle($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency']);
+            if ($isOrder) $this->billing->settle($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency'],$correlationId);
             else $this->billing->settleTopup($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency']);
         } elseif (($result['status']??'')==='canceled') {
             $table=$isOrder?'orders':'topups';
@@ -120,16 +123,38 @@ final class PaymentService
         $paymentId = $result['payment_id'];
         $status = $result['status'];
         if (!is_string($paymentId) || $paymentId==='' || strlen($paymentId)>100) return false;
-        $known=$this->db->one('SELECT id FROM orders WHERE provider=? AND provider_payment_id=?',[$providerId,$paymentId])
-            ??$this->db->one('SELECT id FROM topups WHERE provider=? AND provider_payment_id=?',[$providerId,$paymentId]);
-        if (!$known) return false;
         if (in_array($status,['paid','canceled'],true)) {
-            // Neither payment nor cancellation is trusted until fetched from this provider.
-            $this->db->transaction(function () use ($paymentId,$providerId,$status) {
-                $this->outboxEnqueueVerify($paymentId,$providerId,$status);
+            // Acknowledge only after a durable inbox row and its outbox command
+            // are committed. The provider API remains authoritative for settlement.
+            $this->db->transaction(function () use ($paymentId,$providerId,$status,$result) {
+                $eventId=(string)($result['event_id'] ?? ($paymentId.':'.$status));
+                $id=$this->events?->receive($providerId,$eventId,$paymentId,$result,true) ?? '';
+                if ($id!=='') {
+                    $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
+                        Database::id(),'payment.event.process','payment-event:'.$id,json_encode(['event_id'=>$id],JSON_THROW_ON_ERROR),100,time(),time(),$id
+                    ]);
+                } else $this->outboxEnqueueVerify($paymentId,$providerId,$status);
             });
         }
         return true;
+    }
+    /** Worker-only: process one durable webhook event exactly once locally. */
+    public function processEvent(string $eventId): void
+    {
+        $event=$this->db->one('SELECT * FROM payment_events WHERE id=?',[$eventId]);
+        if (!$event || $event['processed_at']!==null || (int)$event['signature_valid']!==1) return;
+        $operations=new OperationsService($this->db);
+        $correlation='cor_'.substr(hash('sha256',$event['provider'].':'.($event['payment_id']?:$event['provider_event_id'])),0,40);
+        $op=$this->db->one('SELECT id FROM operations WHERE correlation_id=?',[$correlation]);
+        try {
+            $this->verify((string)$event['payment_id'],(string)$event['provider'],$correlation);
+            $this->events?->processed($eventId);
+            if($op){$operations->event($op['id'],'payment.verified','success','Payment verified with provider');$operations->complete($op['id']);}
+        } catch (\Throwable $e) {
+            $this->events?->failed($eventId,$e);
+            if($op)$operations->fail($op['id'],$e);
+            throw $e;
+        }
     }
     private function outboxEnqueueVerify(string $paymentId,string $providerId,string $status): void
     {
