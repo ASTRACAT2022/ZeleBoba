@@ -65,8 +65,8 @@
 {% endif %}
 <section class="panel detail">
 <div class="section-heading"><h2>Details</h2></div>
-<p><strong>Started:</strong> {{ (operation.started_at|date('d.m.Y H:i:s')) ?? '—' }}</p>
-<p><strong>Finished:</strong> {{ (operation.completed_at|date('d.m.Y H:i:s')) ?? '—' }}</p>
+<p><strong>Started:</strong> {{ operation.started_at ? operation.started_at|date('d.m.Y H:i:s') : '—' }}</p>
+<p><strong>Finished:</strong> {{ operation.completed_at ? operation.completed_at|date('d.m.Y H:i:s') : '—' }}</p>
 <p><strong>Trace:</strong> <code>{{ operation.trace_id }}</code></p>
 <p><strong>Correlation:</strong> <code>{{ operation.correlation_id }}</code></p>
 {% if operation.last_error %}<p><strong>Last Error:</strong> <code>{{ operation.last_error }}</code></p>{% endif %}
@@ -98,7 +98,7 @@ function toggleStep(el){
 <span class="step-icon">{{ step.status == 'success' ? '✓' : (step.status == 'failed' ? '✕' : (step.status == 'processing' ? '◷' : '○')) }}</span>
 <span class="step-name">{{ step.name }}</span>
 <span class="step-duration">{{ step.duration_ms ? step.duration_ms ~ ' ms' : '' }}</span>
-<span class="step-time">{{ (step.started_at|date('H:i:s')) ?? '' }}</span>
+<span class="step-time">{{ step.started_at ? step.started_at|date('H:i:s') : '' }}</span>
 </div>
 <div class="step-details" style="display:none">
 {% if step.http_method %}<p><strong>Request:</strong> {{ step.http_method }} {{ step.http_url ?? '' }}</p>{% endif %}
