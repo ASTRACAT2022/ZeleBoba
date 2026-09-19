@@ -23,6 +23,7 @@ final class Reconciler
                 $this->app->creators->releaseDue();
                 $this->app->creators->reconcile('scheduler');
             }
+            if (isset($this->app->paymentService)) $this->app->paymentService->requeueStaleEvents();
             if($money['status']!=='ok') error_log(json_encode(['event'=>'financial.drift','count'=>$money['count']]));
             $after='';$bucket=intdiv(time(),300);
             // Only retry providers that can be verified with the credentials

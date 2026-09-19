@@ -141,20 +141,31 @@ final class PaymentService
     /** Worker-only: process one durable webhook event exactly once locally. */
     public function processEvent(string $eventId): void
     {
-        $event=$this->db->one('SELECT * FROM payment_events WHERE id=?',[$eventId]);
-        if (!$event || $event['processed_at']!==null || (int)$event['signature_valid']!==1) return;
+        $event=$this->events
+            ? $this->events->claim($eventId)
+            : $this->db->one('SELECT * FROM payment_events WHERE id=? AND processed_at IS NULL AND signature_valid=1',[$eventId]);
+        if (!$event) return;
         $operations=new OperationsService($this->db);
         $correlation='cor_'.substr(hash('sha256',$event['provider'].':'.($event['payment_id']?:$event['provider_event_id'])),0,40);
         $op=$this->db->one('SELECT id FROM operations WHERE correlation_id=?',[$correlation]);
         try {
             $this->verify((string)$event['payment_id'],(string)$event['provider'],$correlation);
-            $this->events?->processed($eventId);
+            if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
             if($op){$operations->event($op['id'],'payment.verified','success','Payment verified with provider');$operations->complete($op['id']);}
         } catch (\Throwable $e) {
-            $this->events?->failed($eventId,$e);
+            if ($this->events) $this->events->failed($eventId,(string)$event['lock_token'],$e);
             if($op)$operations->fail($op['id'],$e);
             throw $e;
         }
+    }
+    /** Reconciliation recovery for inbox events whose outbox delivery died or lease expired. */
+    public function requeueStaleEvents(int $limit=100): int
+    {
+        $now=time();
+        $rows=$this->db->all("SELECT id FROM payment_events WHERE signature_valid=1 AND ((status IN ('pending','retry') AND COALESCE(next_attempt_at,received_at)<=?) OR (status='processing' AND locked_until<=?)) ORDER BY received_at LIMIT ?",[$now,$now,$limit]);
+        $bucket=intdiv($now,300);
+        foreach($rows as $row) $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[Database::id(),'payment.event.process','payment-event-recover:'.$row['id'].':'.$bucket,json_encode(['event_id'=>$row['id']],JSON_THROW_ON_ERROR),100,$now,$now,$row['id']]);
+        return count($rows);
     }
     private function outboxEnqueueVerify(string $paymentId,string $providerId,string $status): void
     {
