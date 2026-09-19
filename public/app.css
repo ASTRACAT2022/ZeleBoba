@@ -94,3 +94,12 @@ a.creator-program-link.selected{color:var(--green);background:#d7ecf0;border-col
    включая Firefox/macOS: задаём системно-совместимую цепочку с полноценным глифом ₽ */
 .price,.amount,h2,td,th,.token{font-feature-settings:"sups" off,"subs" off;font-variant-position:normal;font-variant-numeric:tabular-nums}
 .price,.amount,h2,.side-card h2,.panel h2,td{font-family:system-ui,-apple-system,"SF Pro Text","SF Pro Display","Helvetica Neue",Helvetica,Arial,"Segoe UI",Roboto,sans-serif}
+/* Command palette (⌘K) must stay readable in dark theme — the palette bg is hard #fff
+   but --ink goes light in dark mode, so text turned invisible. */
+html[data-theme="dark"] .command-palette{background:#1a2520;border-color:#405b4e;color:var(--ink)}
+html[data-theme="dark"] .command-palette input{background:transparent;color:var(--ink);border-color:#31453e}
+html[data-theme="dark"] .command-palette input::placeholder{color:#7f968b}
+html[data-theme="dark"] .command-palette a{color:var(--ink)}
+html[data-theme="dark"] .command-palette a.selected,html[data-theme="dark"] .command-palette a:hover{background:#214834;color:#d9f6e6}
+html[data-theme="dark"] .command-palette a span,html[data-theme="dark"] .command-palette p{color:#7f968b}
+html[data-theme="dark"] .command-palette::backdrop{background:#050a08cc}
