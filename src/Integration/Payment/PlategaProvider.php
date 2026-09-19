@@ -9,7 +9,9 @@ final class PlategaProvider extends AbstractProvider
     public function name(): string { return 'Platega'; }
     public function configured(): bool
     {
-        return ($this->config['PLATEGA_ENABLED'] ?? '0') === '1'
+        $enabled = ($this->config['PLATEGA_ENABLED'] ?? '0') === '1'
+            || (($this->config['PAYMENT_DRIVER'] ?? '') === 'platega');
+        return $enabled
             && ($this->config['PLATEGA_MERCHANT_ID'] ?? '') !== ''
             && ($this->config['PLATEGA_SECRET'] ?? '') !== '';
     }

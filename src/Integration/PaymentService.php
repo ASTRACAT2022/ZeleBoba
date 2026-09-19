@@ -92,7 +92,7 @@ final class PaymentService
         $expected=$providerId==='freekassa'?($metadata['merchant_order_id']??null):($metadata[$isOrder?'order_id':'topup_id']??null);
         if (in_array($providerId,['yookassa','freekassa'],true) && $expected!==$entity['id']) throw new BillingError('Платёж относится к другому заказу.');
         if ($providerId==='cryptobot' && ($metadata['payload']??'')!==($isOrder?'order:':'topup:').$entity['id']) throw new BillingError('CryptoBot: неверная привязка счёта.');
-        $account=$providerId==='yookassa'?($this->config['YOOKASSA_SHOP_ID']??''):($this->config['FREEKASSA_SHOP_ID']??'');
+        $account=match($providerId){'yookassa'=>($this->config['YOOKASSA_SHOP_ID']??''),'platega'=>($this->config['PLATEGA_MERCHANT_ID']??''),'freekassa'=>($this->config['FREEKASSA_SHOP_ID']??''),default=>''};
         if (isset($entity['provider_account']) && $entity['provider_account']!=='' && $entity['provider_account']!==$account) throw new BillingError('Несовпадение магазина.');
         $actualId=$result['payment_id']??'';
         if (!is_string($actualId) || $actualId==='' || strlen($actualId)>100 || ($entity['provider_payment_id']!==null && $entity['provider_payment_id']!==$actualId)) throw new BillingError('Несовпадение платежа.');

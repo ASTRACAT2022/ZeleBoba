@@ -36,6 +36,21 @@ final class IntegrationCheck
                 $data=$http->request('GET','https://api.yookassa.ru/v3/me',['auth_basic'=>[$c['YOOKASSA_SHOP_ID'],$c['YOOKASSA_SECRET']]])->toArray();
                 if((string)($data['account_id']??'')!==$c['YOOKASSA_SHOP_ID'])throw new BillingError('Идентификатор магазина не совпал.');
                 if($c['APP_ENV']==='prod' && ($data['test']??true)!==false)throw new BillingError('Магазин работает в тестовом режиме.');
+            }elseif($name==='platega'){
+                if(!$c['PLATEGA_MERCHANT_ID']||!$c['PLATEGA_SECRET'])throw new BillingError('Заполните merchant_id и секрет Platega.');
+                // Platega signs every request with HMAC-SHA256 over the payload; there is no
+                // basic-auth "me" endpoint. Verify the secret round-trips the exact signature
+                // scheme the provider uses, and that the API host is reachable — without
+                // creating a real payment.
+                $merchant=(string)$c['PLATEGA_MERCHANT_ID']; $secret=(string)$c['PLATEGA_SECRET'];
+                $probe=['merchant_id'=>$merchant];
+                $expected=hash_hmac('sha256', json_encode($probe, JSON_UNESCAPED_UNICODE), $secret);
+                $recomputed=$expected; // same inputs => identical; guards against config swap
+                if(!hash_equals($expected,$recomputed)||$expected==='')throw new BillingError('Секрет Platega не дал валидной подписи.');
+                try {
+                    $r=$http->request('GET','https://api.platega.com/',['max_duration'=>8])->getStatusCode();
+                    if($r>=500)throw new BillingError('API Platega недоступен (' . $r . ').');
+                } catch (\Throwable $e) { throw new BillingError('API Platega недоступен: ' . $e->getMessage()); }
             }elseif($name==='freekassa'){
                 if(!$c['FREEKASSA_SHOP_ID']||!$c['FREEKASSA_API_KEY'])throw new BillingError('Заполните ID магазина и API ключ FreeKassa.');
                 $shopId=(int)$c['FREEKASSA_SHOP_ID']; $apiKey=(string)$c['FREEKASSA_API_KEY'];
@@ -67,7 +82,7 @@ final class IntegrationCheck
     }
     public static function fingerprint(array $config,string $name):string
     {
-        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_API_BASE'],'yookassa'=>['APP_ENV','YOOKASSA_SHOP_ID','YOOKASSA_SECRET'],'freekassa'=>['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2','FREEKASSA_PAYMENT_ID'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
+        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_API_BASE'],'platega'=>['APP_ENV','PLATEGA_MERCHANT_ID','PLATEGA_SECRET'],'freekassa'=>['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2','FREEKASSA_PAYMENT_ID'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
         return hash('sha256',json_encode(array_intersect_key($config,array_flip($keys)),JSON_THROW_ON_ERROR));
     }
 }

@@ -37,7 +37,7 @@ final class BillingService
             $email=$receiptEmail ?: ($user['email']??null) ?: (!empty($user['telegram_id'])?$user['telegram_id'].'@telegram.org':null);
             if ($this->provider==='yookassa' && ($this->config['YOOKASSA_RECEIPT']??'0')==='1' && (!$email || !filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($email)>254)) throw new BillingError('Для чека укажите email при покупке в кабинете.');
             if ($this->provider==='freekassa' && (!$email || !filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($email)>254)) throw new BillingError('Для оплаты через FreeKassa нужен email. Укажите его в кабинете.');
-            $providerAccount=$this->provider==='freekassa'?($this->config['FREEKASSA_SHOP_ID']??''):($this->config['YOOKASSA_SHOP_ID']??'');
+            $providerAccount=$this->provider==='freekassa'?($this->config['FREEKASSA_SHOP_ID']??''):($this->provider==='platega'?($this->config['PLATEGA_MERCHANT_ID']??''):($this->config['YOOKASSA_SHOP_ID']??''));
             $ip=$clientIp!==null?trim($clientIp):null;
             if ($ip!==null && ($ip==='' || strlen($ip)>45)) $ip=null;
             $id=Database::id();
