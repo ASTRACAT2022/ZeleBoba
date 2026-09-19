@@ -225,7 +225,7 @@ trait AdminActions
         if($handler==='admin-why-not-renewed')return $this->render('admin-why-not-renewed',$this->app->investigations->whyNotRenewed($id));
         if($handler==='admin-flags')return $this->render('admin-flags',['flags'=>(new \App\Observability\FeatureFlags($db))->all()]);
         if($handler==='admin-flag-save'){(new \App\Observability\FeatureFlags($db))->set($input->get('name',''),$input->get('enabled')==='1',$input->getInt('rollout',100),$uid);$this->app->billing->audit($uid,'feature_flag.updated',$input->get('name',''));return new RedirectResponse('/admin/flags',303);}
-        if($handler==='admin-switches')return $this->render('admin-switches',['data'=>$this->app->killSwitch->all(),'breakers'=>array_map(fn($name)=>$this->app->circuitBreaker->state($name),['freekassa_api','remnawave_api'])]);
+        if($handler==='admin-switches')return $this->render('admin-switches',['data'=>$this->app->killSwitch->all(),'breakers'=>array_map(fn($name)=>$this->app->circuitBreaker->state($name),['remnawave_api'])]);
         if($handler==='admin-switch-save'){
             $name=$input->get('name','');
             if($name==='__safe_mode__'){$this->app->killSwitch->setSafeMode($input->get('enabled')==='1',$uid,$input->get('reason',''));}

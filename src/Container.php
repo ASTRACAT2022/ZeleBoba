@@ -68,7 +68,7 @@ final class Container
         $this->config=$config=array_merge(Settings::DEFAULTS,$config,$this->settings->overrides());
         $this->branding=new Branding($config);
         if (!in_array($config['APP_ENV'],['dev','test','prod'],true)) throw new \RuntimeException('Invalid APP_ENV');
-        if (!in_array($config['PAYMENT_DRIVER'],['demo','platega','yookassa','freekassa'],true) || !in_array($config['PROVISION_DRIVER'],['demo','remnawave'],true)) throw new \RuntimeException('Unknown integration driver');
+        if (!in_array($config['PAYMENT_DRIVER'],['demo','platega','yookassa'],true) || !in_array($config['PROVISION_DRIVER'],['demo','remnawave'],true)) throw new \RuntimeException('Unknown integration driver');
         if ($config['APP_ENV']==='prod' && (!$this->db->postgres() || !str_starts_with($config['APP_URL'],'https://'))) throw new \RuntimeException('Production requires PostgreSQL and HTTPS');
         $this->outbox=new Outbox($this->db,$this->settings->vault);
         $this->operations=new OperationsService($this->db);

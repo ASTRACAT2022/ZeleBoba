@@ -87,7 +87,7 @@ final class Settings
             }
             $this->validate($next);
             // A merchant/panel/bot replacement must not misroute outstanding work or existing access.
-            foreach(['YOOKASSA_SHOP_ID','FREEKASSA_SHOP_ID','REMNAWAVE_URL','TELEGRAM_BOT_USERNAME'] as $key){
+            foreach(['YOOKASSA_SHOP_ID','REMNAWAVE_URL','TELEGRAM_BOT_USERNAME'] as $key){
                 if ($old[$key]!=='' && $old[$key]!==$next[$key]) throw new BillingError('Замена магазина, панели или бота требует отдельной миграции. Обновить ключ доступа можно здесь.');
             }
             foreach($next as $key=>$value){
@@ -101,7 +101,7 @@ final class Settings
     }
     private function validate(array $v):void
     {
-        foreach(['APP_ENV'=>['dev','prod'],'PAYMENT_DRIVER'=>['demo','platega','freekassa'],'PROVISION_DRIVER'=>['demo','remnawave'],'PURCHASES_ENABLED'=>['0','1'],'REGISTRATION_ENABLED'=>['0','1'],'YOOKASSA_RECEIPT'=>['0','1'],'AUTORENEW_ENABLED'=>['0','1']] as $key=>$allowed)if(!in_array($v[$key],$allowed,true))throw new BillingError('Некорректная настройка '.$key);
+        foreach(['APP_ENV'=>['dev','prod'],'PAYMENT_DRIVER'=>['demo','platega','yookassa'],'PROVISION_DRIVER'=>['demo','remnawave'],'PURCHASES_ENABLED'=>['0','1'],'REGISTRATION_ENABLED'=>['0','1'],'YOOKASSA_RECEIPT'=>['0','1'],'AUTORENEW_ENABLED'=>['0','1']] as $key=>$allowed)if(!in_array($v[$key],$allowed,true))throw new BillingError('Некорректная настройка '.$key);
         if (!filter_var($v['APP_URL'],FILTER_VALIDATE_URL) || !preg_match('/^https?:\/\/[^\s]+$/D',$v['APP_URL']) || parse_url($v['APP_URL'],PHP_URL_USER)!==null || parse_url($v['APP_URL'],PHP_URL_QUERY)!==null || parse_url($v['APP_URL'],PHP_URL_FRAGMENT)!==null || !in_array(parse_url($v['APP_URL'],PHP_URL_PATH),[null,'','/'],true)) throw new BillingError('Укажите корневой URL кабинета, без пути и параметров.');
         if (mb_strlen($v['SITE_NAME'])<1 || mb_strlen($v['SITE_NAME'])>60) throw new BillingError('Название: от 1 до 60 символов.');
         if ($v['BRAND_LOGO']!=='' && !preg_match('/^https:\/\/[^\s]+$/D',$v['BRAND_LOGO'])) throw new BillingError('Логотип: нужен HTTPS URL картинки.');
@@ -166,7 +166,7 @@ final class Settings
             foreach(self::purchaseErrors($v) as $error) throw new BillingError($error);
             if($v['APP_ENV']==='prod'){
                 if(!\App\Infrastructure\Permissions::safe($this->db))throw new BillingError('Ограничьте права runtime-пользователя базы перед включением продаж.');
-                foreach([$v['PAYMENT_DRIVER']==='freekassa'?'freekassa':'platega','remnawave','telegram'] as $integration){
+                foreach(['platega','remnawave','telegram'] as $integration){
                     $check=$this->db->one('SELECT * FROM integration_checks WHERE integration=?',[$integration]);
                     if(!$check||$check['status']!=='ok'||!hash_equals($check['config_hash'],IntegrationCheck::fingerprint($v,$integration))||(int)$check['checked_at']<time()-86400)throw new BillingError('Сначала сохраните настройки с выключенными продажами и проверьте '.$integration.'.');
                 }
@@ -178,7 +178,6 @@ final class Settings
         $errors=[];
         if($v['APP_ENV']==='prod' && ($v['PAYMENT_DRIVER']==='demo'||$v['PROVISION_DRIVER']==='demo'))$errors[]='В боевом режиме демоадаптеры запрещены.';
         if($v['PAYMENT_DRIVER']==='platega')foreach(['PLATEGA_MERCHANT_ID','PLATEGA_SECRET'] as $key)if(!$v[$key])$errors[]='Не заполнено: '.$key;
-        if($v['PAYMENT_DRIVER']==='freekassa')foreach(['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2'] as $key)if(!$v[$key])$errors[]='Не заполнено: '.$key;
         if($v['PROVISION_DRIVER']==='remnawave')foreach(['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'] as $key)if(!$v[$key])$errors[]='Не заполнено: '.$key;
         return $errors;
     }

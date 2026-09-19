@@ -36,11 +36,11 @@ final class Reconciler
             // containers use the dynamic registry.
             $providers=isset($this->app->providers)
                 ? array_keys($this->app->providers->enabled())
-                : ['platega','yookassa','freekassa'];
+                : ['platega','yookassa'];
             do{
                 $placeholders=implode(',',array_fill(0,count($providers),'?'));
-                $rows=$providers===[]?[]:$db->all("SELECT id,provider,provider_payment_id,freekassa_intid FROM orders WHERE id>? AND status='pending' AND provider IN ($placeholders) AND provider_payment_id IS NOT NULL ORDER BY id LIMIT 100",array_merge([$after],$providers));
-                $db->transaction(function()use($rows,$bucket){foreach($rows as $row){$pid=$row['provider']==='freekassa'&&!empty($row['freekassa_intid'])?$row['freekassa_intid']:$row['provider_payment_id'];$this->app->outbox->enqueue('payment.verify','reconcile:'.$row['id'].':'.$bucket,['payment_id'=>$pid,'provider'=>$row['provider']]);}});
+                $rows=$providers===[]?[]:$db->all("SELECT id,provider,provider_payment_id FROM orders WHERE id>? AND status='pending' AND provider IN ($placeholders) AND provider_payment_id IS NOT NULL ORDER BY id LIMIT 100",array_merge([$after],$providers));
+                $db->transaction(function()use($rows,$bucket){foreach($rows as $row){$this->app->outbox->enqueue('payment.verify','reconcile:'.$row['id'].':'.$bucket,['payment_id'=>$row['provider_payment_id'],'provider'=>$row['provider']]);}});
                 if($rows)$after=end($rows)['id'];
                 $db->execute("UPDATE advisory_leases SET expires_at=? WHERE name='reconcile' AND token=?",[time()+120,$token]);
             }while(count($rows)===100);

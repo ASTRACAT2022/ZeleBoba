@@ -59,22 +59,6 @@ final class IntegrationCheck
                     if(str_contains($ct,'text/html'))throw new BillingError('По адресу '.$base.' не API Platega (вернул страницу).');
                     // 400 (validation) or 2xx means the endpoint and header auth are live.
                 } catch (BillingError $e) { throw $e; } catch (\Throwable $e) { throw new BillingError('API Platega недоступен: '.$e->getMessage()); }
-            }elseif($name==='freekassa'){
-                if(!$c['FREEKASSA_SHOP_ID']||!$c['FREEKASSA_API_KEY'])throw new BillingError('Заполните ID магазина и API ключ FreeKassa.');
-                $shopId=(int)$c['FREEKASSA_SHOP_ID']; $apiKey=(string)$c['FREEKASSA_API_KEY'];
-                // FreeKassa rejects nonces <= the last one it saw. Use the same
-                // PostgreSQL sequence as the provider (strictly monotonic, atomic).
-                $row=$this->app->db->one("SELECT nextval('freekassa_nonce_seq') AS v");
-                $nonce=(int)($row['v'] ?? (int)(microtime(true)*1000));
-                $params=['shopId'=>$shopId,'nonce'=>$nonce];
-                ksort($params);
-                $sign=hash_hmac('sha256', implode('|', array_map('strval', array_values($params))), $apiKey);
-                $params['signature']=$sign;
-                // /v1/balance is not a real endpoint; /v1/orders is the documented
-                // status call (Django used it the same way).
-                $data=$http->request('POST','https://api.fk.life/v1/orders',['json'=>$params])->toArray(false);
-                if(($data['type']??'')==='error') throw new BillingError('FreeKassa: '.($data['error']??'ошибка авторизации'));
-                if(($data['type']??'')!=='success') throw new BillingError('FreeKassa не вернула список заказов.');
             }elseif($name==='remnawave'){
                 if(!$c['REMNAWAVE_URL']||!$c['REMNAWAVE_TOKEN']||!$c['REMNAWAVE_SQUAD_UUID'])throw new BillingError('Заполните URL, токен и UUID группы.');
                 $data=$http->request('GET',rtrim($c['REMNAWAVE_URL'],'/').'/api/internal-squads',['auth_bearer'=>$c['REMNAWAVE_TOKEN']])->toArray();
@@ -90,7 +74,7 @@ final class IntegrationCheck
     }
     public static function fingerprint(array $config,string $name):string
     {
-        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_API_BASE'],'platega'=>['APP_ENV','PLATEGA_MERCHANT_ID','PLATEGA_SECRET','PLATEGA_API_BASE'],'freekassa'=>['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2','FREEKASSA_PAYMENT_ID'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
+        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_API_BASE'],'platega'=>['APP_ENV','PLATEGA_MERCHANT_ID','PLATEGA_SECRET','PLATEGA_API_BASE'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
         return hash('sha256',json_encode(array_intersect_key($config,array_flip($keys)),JSON_THROW_ON_ERROR));
     }
 }

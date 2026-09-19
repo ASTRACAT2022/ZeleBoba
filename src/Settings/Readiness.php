@@ -12,9 +12,9 @@ final class Readiness
         $add('PostgreSQL',$db->postgres(),'SQLite подходит только для локальной разработки.');
         $add('Ограниченные права базы',\App\Infrastructure\Permissions::safe($db),'Процесс приложения не должен быть владельцем таблиц или изменять финансовый журнал.');
         $add('HTTPS кабинета',str_starts_with($c['APP_URL'],'https://'),'URL должен совпадать с публичным адресом.');
-        $add('Реальные адаптеры',in_array($c['PAYMENT_DRIVER'],['platega','freekassa'],true)&&$c['PROVISION_DRIVER']==='remnawave','Демо не выдаёт реальный доступ.');
+        $add('Реальные адаптеры',in_array($c['PAYMENT_DRIVER'],['platega'],true)&&$c['PROVISION_DRIVER']==='remnawave','Демо не выдаёт реальный доступ.');
         $add('Параметры оплаты и панели',Settings::purchaseErrors($c)===[],'Магазин, ключи и группа панели должны быть заполнены.');
-        $paymentCheck=$c['PAYMENT_DRIVER']==='freekassa'?'freekassa':'platega';
+        $paymentCheck='platega';
         foreach(['telegram',$paymentCheck,'remnawave'] as $name){$row=$db->one('SELECT * FROM integration_checks WHERE integration=?',[$name]);$ok=$row && $row['status']==='ok' && hash_equals($row['config_hash'],IntegrationCheck::fingerprint($c,$name)) && (int)$row['checked_at']>time()-86400;$add('Проверка '.$name,(bool)$ok,'Проверка текущих настроек должна пройти в последние 24 часа.');}
         $admins=$db->all("SELECT totp_secret FROM users WHERE role='admin' AND disabled=0");
         $add('Защита администраторов',count($admins)>0&&!in_array(null,array_column($admins,'totp_secret'),true),'Для каждого администратора обязательна 2FA.');

@@ -139,7 +139,7 @@ final class PlategaProvider extends AbstractProvider
             'amount_kopeks' => (int)($res['amount'] ?? $res['paymentDetails']['amount'] ?? 0),
             'currency' => (string)($res['currency'] ?? 'RUB'),
             'payment_id' => (string)($res['transactionId'] ?? $paymentId),
-            'metadata' => ['order_id' => (string)($res['orderId'] ?? '')],
+            'metadata' => ['order_id' => (string)($res['orderId'] ?? ''), 'topup_id' => (string)($res['orderId'] ?? '')],
         ];
     }
 
@@ -151,6 +151,10 @@ final class PlategaProvider extends AbstractProvider
      */
     public function handleWebhook(Request $request): ?array
     {
+        // Reject callbacks that don't identify this merchant (defense in depth).
+        $merchant = (string)($this->config['PLATEGA_MERCHANT_ID'] ?? '');
+        $incoming = (string)($request->headers->get('X-MerchantId') ?? $request->headers->get('X-Merchant-Id') ?? '');
+        if ($merchant !== '' && $incoming !== '' && !hash_equals($merchant, $incoming)) return null;
         $data = $request->toArray();
         $paymentId = (string)($data['transactionId'] ?? $data['id'] ?? $data['payment_id'] ?? '');
         if ($paymentId === '') return null;
@@ -159,7 +163,7 @@ final class PlategaProvider extends AbstractProvider
         return [
             'payment_id' => $paymentId,
             'status' => $status === 'CONFIRMED' ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED', 'CANCELED'], true) ? 'canceled' : 'pending'),
-            'metadata' => ['order_id' => $orderId],
+            'metadata' => ['order_id' => $orderId, 'topup_id' => $orderId],
         ];
     }
 }

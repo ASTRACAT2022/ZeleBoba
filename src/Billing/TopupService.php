@@ -14,7 +14,7 @@ final class TopupService
         if ($amountKopeks < 100 || $amountKopeks > 100000000) throw new BillingError('Сумма пополнения: от 1 до 1 000 000 ₽.');
         if (!preg_match('/^[a-zA-Z0-9:_-]{8,128}$/D', $key)) throw new BillingError('Некорректный ключ операции.');
         $effective = $provider !== null && $provider !== '' ? $provider : $this->provider;
-        if (!in_array($effective, ['demo','yookassa','freekassa','cryptobot','telegram_stars','lava','wata','heleket','platega','tribute','mulenpay','pal24','cloudpayments','kassa_ai','riopay','severpay','paypear','rollypay','overpay','aurapay','etoplatezhi','antilopay','jupiter','donut','cispay','tabpay','paritypay'], true)) throw new BillingError('Некорректный платёжный провайдер.');
+        if (!in_array($effective, ['demo','yookassa','cryptobot','telegram_stars','lava','wata','heleket','platega','tribute','mulenpay','pal24','cloudpayments','kassa_ai','riopay','severpay','paypear','rollypay','overpay','aurapay','etoplatezhi','antilopay','jupiter','donut','cispay','tabpay','paritypay'], true)) throw new BillingError('Некорректный платёжный провайдер.');
         if (in_array($effective,['telegram_stars','tribute'],true)) throw new BillingError('Этот способ оплаты пока не поддерживает подтверждение платежа.');
         if ($effective==='demo' && ($this->config['APP_ENV']??'dev')==='prod') throw new BillingError('Демоплатёж запрещён.');
         return $this->db->transaction(function () use ($userId, $amountKopeks, $key, $effective) {
