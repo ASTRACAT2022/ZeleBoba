@@ -107,6 +107,7 @@ final class Worker
     }
     private function provision(string $id): void
     {
+        if($this->provisioningPaused()) throw new \RuntimeException('Provisioning safely queued by maintenance or safety mode');
         $flag=$this->db->one("SELECT enabled FROM feature_flags WHERE name='provisioning.enabled'");
         if($flag && (int)$flag['enabled']===0) throw new \RuntimeException('Provisioning disabled by kill switch');
         $s=$this->subscription($id);
@@ -130,6 +131,7 @@ final class Worker
     }
     private function extend(string $id, ?string $orderId=null): void
     {
+        if($this->provisioningPaused()) throw new \RuntimeException('Provisioning safely queued by maintenance or safety mode');
         $flag=$this->db->one("SELECT enabled FROM feature_flags WHERE name='provisioning.enabled'");
         if($flag && (int)$flag['enabled']===0) throw new \RuntimeException('Provisioning disabled by kill switch');
         $s=$this->subscription($id);
@@ -155,6 +157,12 @@ final class Worker
             if ($orderId!==null) $this->db->execute("UPDATE orders SET status='fulfilled',workflow_status='fulfilled' WHERE id=? AND status='paid'",[$orderId]);
             $this->db->execute("UPDATE provisioning_accounts SET state='active',last_synced_at=?,last_error=NULL,updated_at=? WHERE subscription_id=? AND provider=?",[$now,$now,$s['id'],$s['provision_driver']]);
         });
+    }
+    private function provisioningPaused(): bool
+    {
+        $safe=$this->db->one("SELECT value FROM app_settings WHERE name='GLOBAL_SAFETY_MODE'");
+        if(($safe['value']??'0')==='1') return true;
+        return (bool)$this->db->one("SELECT id FROM service_maintenance_windows WHERE service='remnawave' AND starts_at<=? AND ends_at>? LIMIT 1",[time(),time()]);
     }
     private function operationEvent(string $subscriptionId,string $type,string $status,string $message,array $metadata=[]): void
     {

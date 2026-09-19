@@ -39,7 +39,10 @@ final class BillingService
             $ip=$clientIp!==null?trim($clientIp):null;
             if ($ip!==null && ($ip==='' || strlen($ip)>45)) $ip=null;
             $id=Database::id();
-            $this->db->execute("INSERT INTO orders(id,user_id,plan_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?,?)",[$id,$userId,$planId,$key,$plan['price_minor'],$plan['currency'],$plan['name'],$plan['duration_days'],$plan['traffic_bytes'],$plan['devices'],$this->provider,time()]);
+            // A checkout is pinned to an immutable product version. Later plan
+            // edits must never change the terms that an existing customer paid for.
+            $version=$this->db->one('SELECT id FROM plan_versions WHERE plan_id=? ORDER BY version_number DESC LIMIT 1',[$planId]);
+            $this->db->execute("INSERT INTO orders(id,user_id,plan_id,plan_version_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)",[$id,$userId,$planId,$version['id']??null,$key,$plan['price_minor'],$plan['currency'],$plan['name'],$plan['duration_days'],$plan['traffic_bytes'],$plan['devices'],$this->provider,time()]);
             $this->db->execute('INSERT INTO order_items(id,order_id,product_type,plan_id,quantity,unit_price_minor,total_minor,metadata,created_at) VALUES(?,?,?,?,?,?,?,?,?)',[
                 Database::id(),$id,'subscription',$planId,1,(int)$plan['price_minor'],(int)$plan['price_minor'],json_encode(['duration_days'=>(int)$plan['duration_days']],JSON_THROW_ON_ERROR),time()
             ]);
@@ -110,7 +113,7 @@ final class BillingService
                 // Each purchase is an independent subscription unless it is a renewal order.
                 $months=(int)($this->db->one('SELECT duration_months FROM plans WHERE id=?',[$order['plan_id']])['duration_months'] ?? 0);
                 $expiry=(new SubscriptionService($this->db,$this->outbox))->expiryAfter($now,(int)$order['duration_days'],$months);
-                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,plan_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,?,?,'provisioning',?,?,?,?,?,'pending',?,?,?)",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$now,(int)$order['traffic_bytes'],$now]);
+                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,?,?,'provisioning',?,?,?,?,?,?,'pending',?,?,?)",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
                 $this->db->execute('UPDATE operations SET subscription_id=? WHERE id=?',[$sub,$op['id']]);
                 $operations->event($op['id'],'subscription.created','success','Subscription created',['subscription_id'=>$sub,'metadata'=>['expires_at_after'=>$expiry]]);
                 $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,state,created_at,updated_at) VALUES(?,?,?,'pending',?,?)",[Database::id(),$sub,$order['provision_driver']??'demo',$now,$now]);

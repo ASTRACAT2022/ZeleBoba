@@ -31,7 +31,13 @@ trait AdminActions
             if(!$name||mb_strlen($name)>100||$price<100||$price>100000000||$days<1||$days>3650||$devices<0||$devices>20||$traffic===false||$traffic<0||$traffic>100000||($squad!==''&&!preg_match('/^[0-9a-f-]{36}$/iD',$squad)))throw new BillingError('Проверьте параметры тарифа. Цена указывается в копейках.');
             $db->transaction(function()use($db,$input,$name,$price,$days,$devices,$traffic,$squad,$id,$uid){
                 if(!$db->one('SELECT id FROM plans WHERE id=?'.$db->lock(),[$id]))throw new BillingError('Тариф не найден.');
-                $db->execute('UPDATE plans SET name=?,price_minor=?,duration_days=?,devices=?,traffic_bytes=?,squad_uuid=?,active=? WHERE id=?',[$name,$price,$days,$devices,$traffic*1073741824,$squad,$input->get('active')==='1'?1:0,$id]);$this->app->billing->audit($uid,'plan.updated',$id);
+                $db->execute('UPDATE plans SET name=?,price_minor=?,duration_days=?,devices=?,traffic_bytes=?,squad_uuid=?,active=? WHERE id=?',[$name,$price,$days,$devices,$traffic*1073741824,$squad,$input->get('active')==='1'?1:0,$id]);
+                // Product changes create a new immutable version. Existing orders
+                // and subscriptions remain pinned to their previous version.
+                $next=(int)($db->one('SELECT COALESCE(MAX(version_number),0) v FROM plan_versions WHERE plan_id=?',[$id])['v']??0)+1;
+                $db->execute('UPDATE plan_versions SET retired_at=? WHERE plan_id=? AND retired_at IS NULL',[time(),$id]);
+                $db->execute('INSERT INTO plan_versions(id,plan_id,version_number,name,price_minor,currency,duration_days,duration_months,entitlements_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',[Database::id(),$id,$next,$name,$price,'RUB',$days,0,json_encode(['vpn_access'=>true,'traffic_bytes'=>$traffic*1073741824,'devices'=>$devices],JSON_THROW_ON_ERROR),time()]);
+                $this->app->billing->audit($uid,'plan.version_created',$id);
             });return new RedirectResponse('/admin/plans',303);
         }
         if($handler==='admin-users')return $this->render('admin-users',['users'=>$db->all('SELECT id,email,telegram_id,role,disabled,balance_kopeks,created_at FROM users ORDER BY created_at DESC LIMIT 100')]);
@@ -175,6 +181,13 @@ trait AdminActions
         }
         if($handler==='admin-explain'){$state=(new \App\Observability\StateExplanation($db))->subscription($id);if(!$state)throw new BillingError('Подписка не найдена.');return $this->render('admin-explain',['state'=>$state,'subscription_id'=>$id]);}
         if($handler==='admin-preview-extend'){$months=$this->request->query->getInt('months',1);if($months<1||$months>36)throw new BillingError('1–36 месяцев.');$s=$db->one('SELECT * FROM subscriptions WHERE id=?',[$id]);if(!$s)throw new BillingError('Подписка не найдена.');$after=(new \App\Subscriptions\SubscriptionService($db,$this->app->outbox))->expiryAfter(max(time(),(int)$s['expires_at']),0,$months);return $this->render('admin-preview-extend',['sub'=>$s,'months'=>$months,'after'=>$after]);}
+        if($handler==='admin-intelligence')return $this->render('admin-intelligence',$this->app->intelligence->overview()+['safety'=>($db->one("SELECT value FROM app_settings WHERE name='GLOBAL_SAFETY_MODE'")['value']??'0')==='1','checked'=>$this->request->query->has('checked')]);
+        if($handler==='admin-invariants-run'){$this->app->intelligence->invariants(true);return new RedirectResponse('/admin/intelligence?checked=1',303);}
+        if($handler==='admin-safety-mode'){$this->app->intelligence->setSafety($input->get('enabled')==='1',$uid);return new RedirectResponse('/admin/intelligence',303);}
+        if($handler==='admin-maintenance-window'){$starts=strtotime($input->get('starts_at','').' UTC');$ends=strtotime($input->get('ends_at','').' UTC');if($starts===false||$ends===false)throw new BillingError('Укажите время технических работ.');$this->app->intelligence->setMaintenance($input->get('service',''),$starts,$ends,$input->get('note',''),$uid);return new RedirectResponse('/admin/intelligence',303);}
+        if($handler==='admin-time-travel'){$at=strtotime($this->request->query->get('at','').' UTC');if($at===false)throw new BillingError('Укажите дату и время.');return $this->render('admin-time-travel',['state'=>$this->app->intelligence->timeTravel($id,$at)]);}
+        if($handler==='admin-simulator')return $this->render('admin-simulator',['result'=>$this->app->intelligence->simulate($id,$this->request->query->get('plan_id',''),$this->request->query->getInt('promo',0),$this->request->query->get('action','renew')),'user_id'=>$id]);
+        if($handler==='admin-dependency-graph'){$graph=$this->app->intelligence->graph($id);if(!$graph)throw new BillingError('Подписка не найдена.');return $this->render('admin-dependency-graph',['graph'=>$graph]);}
         if($handler==='admin-flags')return $this->render('admin-flags',['flags'=>(new \App\Observability\FeatureFlags($db))->all()]);
         if($handler==='admin-flag-save'){(new \App\Observability\FeatureFlags($db))->set($input->get('name',''),$input->get('enabled')==='1',$input->getInt('rollout',100),$uid);$this->app->billing->audit($uid,'feature_flag.updated',$input->get('name',''));return new RedirectResponse('/admin/flags',303);}
         if($handler==='admin-incidents')return $this->render('admin-incidents',['incidents'=>(new \App\Observability\IncidentService($db))->list()]);
