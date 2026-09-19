@@ -84,3 +84,12 @@ tbody tr:hover{background:#f5f7f6}
 .section-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .section-heading h2{margin:0;font-size:16px;font-weight:700}
 .section-heading a{font-size:13px;color:var(--green)}
+
+/* Creator Program sidebar item */
+a.creator-program-link{color:#0b3d2e;background:#eef7ec;border:1px solid #d3ead0;font-weight:600}
+a.creator-program-link:hover{background:#e0f1dc;text-decoration:none}
+a.creator-program-link.selected{color:var(--green);background:#d7ecf0;border-color:#c3e0e6}
+
+/* Fix: корректный рендер символа рубля (U+20BD) — не суперскрипт */
+.price,.amount,h2,td,th,.token{font-feature-settings:"sups" 0,"subs" 0;font-variant-position:normal;font-variant-numeric:tabular-nums}
+.price,h2,.amount,.side-card h2,.panel h2{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}

@@ -108,7 +108,7 @@ final class OperationsService
 
     public function detail(string $id): ?array
     {
-        $operation = $this->db->one('SELECT o.*,u.email,u.telegram_id,p.provider,p.provider_payment_id,p.amount_minor,p.currency,i.id AS invoice_id FROM operations o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN payments p ON p.id=o.payment_id LEFT JOIN invoices i ON i.id=o.invoice_id WHERE o.id=?', [$id]);
+        $operation = $this->db->one('SELECT o.*,u.email,u.telegram_id,p.provider,p.provider_payment_id,p.amount_minor,p.currency FROM operations o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN payments p ON p.id=o.payment_id WHERE o.id=?', [$id]);
         if (!$operation) return null;
         $operation['events'] = $this->db->all('SELECT * FROM operation_events WHERE operation_id=? ORDER BY occurred_at,id', [$id]);
         $operation['steps'] = $this->getStepsTree($id);
@@ -132,7 +132,7 @@ final class OperationsService
 
     public function recentActivity(string $clientId, int $limit = 20): array
     {
-        return $this->db->all('SELECT o.*,u.email FROM operations o LEFT JOIN users u ON u.id=o.user_id WHERE o.user_id=? OR o.email=? ORDER BY o.started_at DESC LIMIT ?', [$clientId, $clientId, $limit]);
+        return $this->db->all('SELECT o.*,u.email FROM operations o LEFT JOIN users u ON u.id=o.user_id WHERE o.user_id=? OR u.email=? ORDER BY o.started_at DESC LIMIT ?', [$clientId, $clientId, $limit]);
     }
 
     public function supportSummary(string $operationId): ?array
