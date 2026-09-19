@@ -188,6 +188,13 @@ trait AdminActions
         if($handler==='admin-time-travel'){$at=strtotime($this->request->query->get('at','').' UTC');if($at===false)throw new BillingError('Укажите дату и время.');return $this->render('admin-time-travel',['state'=>$this->app->intelligence->timeTravel($id,$at)]);}
         if($handler==='admin-simulator')return $this->render('admin-simulator',['result'=>$this->app->intelligence->simulate($id,$this->request->query->get('plan_id',''),$this->request->query->getInt('promo',0),$this->request->query->get('action','renew')),'user_id'=>$id]);
         if($handler==='admin-dependency-graph'){$graph=$this->app->intelligence->graph($id);if(!$graph)throw new BillingError('Подписка не найдена.');return $this->render('admin-dependency-graph',['graph'=>$graph]);}
+        if($handler==='admin-investigations')return $this->render('admin-investigations',['cases'=>$this->app->investigations->list(),'queues'=>$this->app->investigations->smartQueues()]);
+        if($handler==='admin-investigation-start'){$case=$this->app->investigations->start($input->get('subject_type',''),$input->get('subject_id',''),$input->get('title',''),$uid);return new RedirectResponse('/admin/investigations/'.$case['id'],303);}
+        if($handler==='admin-investigation'){$case=$this->app->investigations->detail($id);if(!$case)throw new BillingError('Расследование не найдено.');return $this->render('admin-investigation',['case'=>$case]);}
+        if($handler==='admin-investigation-note'){$this->app->investigations->note($id,$input->get('body',''),$uid);return new RedirectResponse('/admin/investigations/'.$id,303);}
+        if($handler==='admin-investigation-resolve'){$this->app->investigations->resolve($id,$uid);return new RedirectResponse('/admin/investigations/'.$id,303);}
+        if($handler==='admin-expected-actual'){$comparison=$this->app->investigations->expectedActual($id);if(!$comparison)throw new BillingError('Подписка не найдена.');return $this->render('admin-expected-actual',['comparison'=>$comparison]);}
+        if($handler==='admin-why-not-renewed')return $this->render('admin-why-not-renewed',$this->app->investigations->whyNotRenewed($id));
         if($handler==='admin-flags')return $this->render('admin-flags',['flags'=>(new \App\Observability\FeatureFlags($db))->all()]);
         if($handler==='admin-flag-save'){(new \App\Observability\FeatureFlags($db))->set($input->get('name',''),$input->get('enabled')==='1',$input->getInt('rollout',100),$uid);$this->app->billing->audit($uid,'feature_flag.updated',$input->get('name',''));return new RedirectResponse('/admin/flags',303);}
         if($handler==='admin-incidents')return $this->render('admin-incidents',['incidents'=>(new \App\Observability\IncidentService($db))->list()]);

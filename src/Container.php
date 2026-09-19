@@ -8,7 +8,7 @@ use App\Settings\{Settings,Vault,Branding};
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService,Mailer};
 use App\Integration\Payment\{ProviderRegistry,CryptoBotProvider,TelegramStarsProvider,LavaProvider,WataProvider,HeleketProvider,PlategaProvider,TributeProvider,YooKassaProvider,FreeKassaProvider,MulenPayProvider,Pal24Provider,CloudPaymentsProvider,KassaAiProvider,RioPayProvider,SeverPayProvider,PayPearProvider,RollyPayProvider,OverpayProvider,AuraPayProvider,EtoplatezhiProvider,AntilopayProvider,JupiterProvider,DonutProvider,CisPayProvider,TabPayProvider,ParityPayProvider};
 use App\Payments\PaymentEventStore;
-use App\Observability\{OperationsService,ConsistencyChecker,OperationsIntelligence};
+use App\Observability\{OperationsService,ConsistencyChecker,OperationsIntelligence,InvestigationService};
 use Symfony\Component\HttpClient\HttpClient;
 final class Container
 {
@@ -50,6 +50,7 @@ final class Container
     public readonly Branding $branding;
     public readonly OperationsService $operations;
     public readonly OperationsIntelligence $intelligence;
+    public readonly InvestigationService $investigations;
     public readonly array $config;
     public function __construct(array $config)
     {
@@ -63,6 +64,7 @@ final class Container
         $this->outbox=new Outbox($this->db,$this->settings->vault);
         $this->operations=new OperationsService($this->db);
         $this->intelligence=new OperationsIntelligence($this->db,new ConsistencyChecker($this->db));
+        $this->investigations=new InvestigationService($this->db);
         $this->timeline=new CustomerTimeline($this->db);
         $this->billing=new BillingService($this->db,$this->outbox,$config['PAYMENT_DRIVER'],$config,$this->timeline);
         $this->wallet=new Wallet($this->db);
