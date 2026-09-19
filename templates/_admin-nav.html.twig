@@ -1,1 +1,34 @@
-<nav class="admin-tabs" aria-label="Управление"><a href="/admin" class="{{ path == '/admin' ? 'selected' : '' }}">Обзор</a><a href="/admin/operations" class="{{ path starts with '/admin/operations' ? 'selected' : '' }}">Операции</a><a href="/admin/provisioning" class="{{ path == '/admin/provisioning' ? 'selected' : '' }}">Выдача VPN</a><a href="/admin/flags" class="{{ path == '/admin/flags' ? 'selected' : '' }}">Переключатели</a><a href="/admin/incidents" class="{{ path == '/admin/incidents' ? 'selected' : '' }}">Инциденты</a><a href="/admin/plans">Тарифы</a><a href="/admin/users">Клиенты</a><a href="/admin/reports">Отчёты</a><a href="/admin/monitoring">Мониторинг</a><a href="/admin/audit">Аудит</a><a href="/admin/config">Настройки</a></nav><a class="admin-back" href="/">← Выйти из управления в личный кабинет</a>
+<nav class="admin-nav" aria-label="Разделы управления">
+    <div class="admin-nav-top">
+        <div>
+            <p class="admin-nav-eyebrow">ОПЕРАЦИОННЫЙ ЦЕНТР</p>
+            <strong>Управление биллингом</strong>
+        </div>
+        <a class="admin-exit" href="/" title="Вернуться в личный кабинет">← <span>В личный кабинет</span></a>
+    </div>
+
+    <div class="admin-nav-primary">
+        <a href="/admin/operations" class="admin-nav-card {{ path starts with '/admin/operations' ? 'selected' : '' }}">
+            <span class="admin-nav-icon">⌘</span><span><strong>Операции</strong><small>Платежи, заказы и расследования</small></span>
+        </a>
+        <a href="/admin/provisioning" class="admin-nav-card {{ path == '/admin/provisioning' ? 'selected' : '' }}">
+            <span class="admin-nav-icon">↻</span><span><strong>Выдача VPN</strong><small>Очередь и синхронизация Remnawave</small></span>
+        </a>
+        <a href="/admin/flags" class="admin-nav-card {{ path == '/admin/flags' ? 'selected' : '' }}">
+            <span class="admin-nav-icon">⚡</span><span><strong>Переключатели</strong><small>Функции и аварийные стопы</small></span>
+        </a>
+        <a href="/admin/incidents" class="admin-nav-card {{ path == '/admin/incidents' ? 'selected' : '' }}">
+            <span class="admin-nav-icon">!</span><span><strong>Инциденты</strong><small>Влияние, восстановление, история</small></span>
+        </a>
+    </div>
+
+    <div class="admin-nav-secondary" aria-label="Остальные разделы">
+        <a href="/admin" class="{{ path == '/admin' ? 'selected' : '' }}">Обзор</a>
+        <a href="/admin/users">Клиенты</a>
+        <a href="/admin/plans">Тарифы</a>
+        <a href="/admin/reports">Отчёты</a>
+        <a href="/admin/monitoring">Мониторинг</a>
+        <a href="/admin/audit">Журнал действий</a>
+        <a href="/admin/config">Настройки</a>
+    </div>
+</nav>
