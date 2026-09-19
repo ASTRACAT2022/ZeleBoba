@@ -89,26 +89,23 @@ final class OperationsService
         if ($status !== '') { $where[] = 'o.status=?'; $params[] = $status; }
         if ($since > 0) { $where[] = 'o.started_at>=?'; $params[] = $since; }
         if ($client !== '') { $where[] = '(o.user_id=? OR u.email=?)'; array_push($params, $client, $client); }
-        if ($invoice !== '') { $where[] = 'o.invoice_id=?'; $params[] = $invoice; }
-        if ($service !== '') { $where[] = 'o.service_id=?'; $params[] = $service; }
         if ($provider !== '') { $where[] = 'p.provider=?'; $params[] = $provider; }
-        if ($httpStatus !== '') { $where[] = 'o.http_status=?'; $params[] = (int)$httpStatus; }
         if ($period !== '') {
             $since = match ($period) { 'today' => strtotime('today UTC'), '24h' => time() - 86400, '7d' => time() - 7 * 86400, '30d' => time() - 30 * 86400, default => 0 };
             if ($since > 0) { $where[] = 'o.started_at>=?'; $params[] = $since; }
         }
         if ($query !== '') {
             $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $query) . '%';
-            $where[] = '(o.id LIKE ? OR o.correlation_id LIKE ? OR o.trace_id LIKE ? OR o.user_id LIKE ? OR o.subscription_id LIKE ? OR o.order_id LIKE ? OR o.invoice_id LIKE ? OR p.provider_payment_id LIKE ? OR ui.external_id LIKE ?)';
-            array_push($params, $like, $like, $like, $like, $like, $like, $like, $like, $like);
+            $where[] = '(o.id LIKE ? OR o.correlation_id LIKE ? OR o.trace_id LIKE ? OR o.user_id LIKE ? OR o.subscription_id LIKE ? OR o.order_id LIKE ? OR p.provider_payment_id LIKE ? OR ui.external_id LIKE ?)';
+            array_push($params, $like, $like, $like, $like, $like, $like, $like, $like);
         }
-        $sql = 'SELECT o.*,u.email,u.telegram_id,p.provider,p.provider_payment_id,p.amount_minor,p.currency,i.id AS invoice_id FROM operations o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN payments p ON p.id=o.payment_id LEFT JOIN invoices i ON i.id=o.invoice_id LEFT JOIN user_identities ui ON ui.user_id=o.user_id AND ui.type=\'telegram\'' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY o.started_at DESC LIMIT 100';
+        $sql = 'SELECT o.*,u.email,u.telegram_id,p.provider,p.provider_payment_id,p.amount_minor,p.currency,(CASE WHEN o.completed_at IS NOT NULL THEN (o.completed_at - o.started_at) * 1000 ELSE NULL END) AS duration_ms,NULL AS invoice_id FROM operations o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN payments p ON p.id=o.payment_id LEFT JOIN user_identities ui ON ui.user_id=o.user_id AND ui.type=\'telegram\'' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY o.started_at DESC LIMIT 100';
         return $this->db->all($sql, $params);
     }
 
     public function detail(string $id): ?array
     {
-        $operation = $this->db->one('SELECT o.*,u.email,u.telegram_id,p.provider,p.provider_payment_id,p.amount_minor,p.currency FROM operations o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN payments p ON p.id=o.payment_id WHERE o.id=?', [$id]);
+        $operation = $this->db->one('SELECT o.*,u.email,u.telegram_id,p.provider,p.provider_payment_id,p.amount_minor,p.currency,(CASE WHEN o.completed_at IS NOT NULL THEN (o.completed_at - o.started_at) * 1000 ELSE NULL END) AS duration_ms,NULL AS invoice_id FROM operations o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN payments p ON p.id=o.payment_id WHERE o.id=?', [$id]);
         if (!$operation) return null;
         $operation['events'] = $this->db->all('SELECT * FROM operation_events WHERE operation_id=? ORDER BY occurred_at,id', [$id]);
         $operation['steps'] = $this->getStepsTree($id);
@@ -132,7 +129,7 @@ final class OperationsService
 
     public function recentActivity(string $clientId, int $limit = 20): array
     {
-        return $this->db->all('SELECT o.*,u.email FROM operations o LEFT JOIN users u ON u.id=o.user_id WHERE o.user_id=? OR u.email=? ORDER BY o.started_at DESC LIMIT ?', [$clientId, $clientId, $limit]);
+        return $this->db->all('SELECT o.*,u.email,(CASE WHEN o.completed_at IS NOT NULL THEN (o.completed_at - o.started_at) * 1000 ELSE NULL END) AS duration_ms,NULL AS invoice_id FROM operations o LEFT JOIN users u ON u.id=o.user_id WHERE o.user_id=? OR u.email=? ORDER BY o.started_at DESC LIMIT ?', [$clientId, $clientId, $limit]);
     }
 
     public function supportSummary(string $operationId): ?array
