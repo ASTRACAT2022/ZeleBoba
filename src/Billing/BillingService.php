@@ -7,7 +7,9 @@ use App\Observability\OperationsService;
 final class BillingService
 {
     private ?\App\Billing\TopupService $topups = null;
+    private ?CreatorService $creators = null;
     public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null, private ?CustomerTimeline $timeline=null) {}
+    public function setCreators(CreatorService $creators): void { $this->creators=$creators; }
     public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null, ?string $renewSubscriptionId=null, ?string $landingSlug=null): array
     {
         if ($this->config!==null) {
@@ -82,6 +84,9 @@ final class BillingService
                 Database::id(),$orderId,$order['user_id'],$provider,$paymentId,$amount,$currency,$now,$now
             ]);
             $payment=$this->db->one('SELECT id FROM payments WHERE provider=? AND provider_payment_id=?',[$provider,$paymentId]);
+            // Creator credit is part of the same verified-payment transaction;
+            // its payment_id unique index makes provider retries harmless.
+            if ($payment && $this->creators) $this->creators->recordPayment($payment['id']);
             $this->db->execute('UPDATE operations SET user_id=?,payment_id=? WHERE id=?',[$order['user_id'],$payment['id']??null,$op['id']]);
             $operations->event($op['id'],'payment.succeeded','success','Payment recorded',['user_id'=>$order['user_id'],'payment_id'=>$payment['id']??null,'metadata'=>['amount_minor'=>$amount,'currency'=>$currency]]);
             foreach (['provider_clearing'=>$amount,'subscription_sales'=>-$amount] as $account=>$value) {

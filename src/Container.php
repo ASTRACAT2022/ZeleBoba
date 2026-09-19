@@ -1,14 +1,14 @@
 <?php
 declare(strict_types=1);
 namespace App;
-use App\Infrastructure\{Database,Outbox,Worker};
-use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline};
+use App\Infrastructure\{Database,Outbox,Worker,SecretRedactor};
+use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,CreatorService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline};
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService,Mailer};
 use App\Integration\Payment\{ProviderRegistry,CryptoBotProvider,TelegramStarsProvider,LavaProvider,WataProvider,HeleketProvider,PlategaProvider,TributeProvider,YooKassaProvider,FreeKassaProvider,MulenPayProvider,Pal24Provider,CloudPaymentsProvider,KassaAiProvider,RioPayProvider,SeverPayProvider,PayPearProvider,RollyPayProvider,OverpayProvider,AuraPayProvider,EtoplatezhiProvider,AntilopayProvider,JupiterProvider,DonutProvider,CisPayProvider,TabPayProvider,ParityPayProvider};
 use App\Payments\PaymentEventStore;
-use App\Observability\{OperationsService,ConsistencyChecker,OperationsIntelligence,InvestigationService};
+use App\Observability\{OperationsService,ConsistencyChecker,OperationsIntelligence,InvestigationService,DemoEvents};
 use Symfony\Component\HttpClient\HttpClient;
 final class Container
 {
@@ -21,6 +21,7 @@ final class Container
     public readonly AutoPurchaseService $autoPurchase;
     public readonly PromoCodeService $promocodes;
     public readonly ReferralService $referrals;
+    public readonly CreatorService $creators;
     public readonly GiftService $gifts;
     public readonly TrialService $trials;
     public readonly BroadcastService $broadcasts;
@@ -51,6 +52,7 @@ final class Container
     public readonly OperationsService $operations;
     public readonly OperationsIntelligence $intelligence;
     public readonly InvestigationService $investigations;
+    public readonly DemoEvents $demoEvents;
     public readonly array $config;
     public function __construct(array $config)
     {
@@ -65,6 +67,7 @@ final class Container
         $this->operations=new OperationsService($this->db);
         $this->intelligence=new OperationsIntelligence($this->db,new ConsistencyChecker($this->db));
         $this->investigations=new InvestigationService($this->db);
+        $this->demoEvents=new DemoEvents($this->db);
         $this->timeline=new CustomerTimeline($this->db);
         $this->billing=new BillingService($this->db,$this->outbox,$config['PAYMENT_DRIVER'],$config,$this->timeline);
         $this->wallet=new Wallet($this->db);
@@ -73,6 +76,8 @@ final class Container
         $this->billing->setTopups($this->topups);
         $this->promocodes=new PromoCodeService($this->db,$this->outbox,$this->wallet);
         $this->referrals=new ReferralService($this->db,$this->outbox,$this->wallet,$config);
+        $this->creators=new CreatorService($this->db);
+        $this->billing->setCreators($this->creators);
         $this->gifts=new GiftService($this->db,$this->outbox,$this->wallet,$config);
         $this->autoPurchase=new AutoPurchaseService($this->db,$this->outbox,$this->wallet,$this->carts,$this->billing,$this->gifts);
         $this->trials=new TrialService($this->db,$this->outbox,$this->wallet,$config);

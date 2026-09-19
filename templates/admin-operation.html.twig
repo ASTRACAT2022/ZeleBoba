@@ -1,4 +1,116 @@
-{% extends 'base.html.twig' %}{% block title %}Операция{% endblock %}{% block content %}<header><div><p class="eyebrow">ОПЕРАЦИЯ</p><h1>{{ operation.type }}</h1><p class="muted">{{ operation.id }} · {{ operation.correlation_id }}</p></div><a class="button light" href="/admin/operations">← Все операции</a></header>{% include '_admin-nav.html.twig' %}
-<section class="panel detail"><p><strong>Статус:</strong> <span class="badge {{ operation.status == 'success' ? 'fulfilled' : (operation.status == 'failed' ? 'canceled' : 'pending') }}">{{ operation.status }}</span></p><p>Trace: <code>{{ operation.trace_id }}</code></p><p>Order: {{ operation.order_id ?? '—' }} · Payment: {{ operation.provider_payment_id ?? operation.payment_id ?? '—' }} · Subscription: {{ operation.subscription_id ?? '—' }}</p></section>
-<section class="panel detail"><h2>Ход операции</h2><ol class="customer-timeline">{% for e in operation.events %}<li><time>{{ e.occurred_at|date('d.m.Y H:i:s') }}</time><span><strong>{{ e.status == 'success' ? '✅' : (e.status == 'failed' ? '❌' : '⚠') }} {{ e.message }}</strong><br><small>{{ e.type }}</small></span></li>{% endfor %}</ol></section>
-<section class="panel detail"><h2>Очередь событий</h2>{% if operation.outbox %}<table><thead><tr><th>Событие</th><th>Статус</th><th>Попытки</th><th>Ошибка</th></tr></thead><tbody>{% for job in operation.outbox %}<tr><td>{{ job.topic }}</td><td>{{ job.status }}</td><td>{{ job.attempts }}</td><td>{{ job.last_error ?? '—' }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="muted">Событий в очереди нет.</p>{% endif %}</section>{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Операция{% endblock %}{% block content %}
+<header><div><p class="eyebrow">ОПЕРАЦИЯ</p><h1>{{ operation.id }}</h1><p class="muted">{{ operation.type }} · {{ operation.status == 'success' ? 'Успешно' : (operation.status == 'failed' ? 'Ошибка' : 'В процессе') }}</p></div>
+<a class="button light" href="/admin/operations">← Все операции</a></header>
+{% include '_admin-nav.html.twig' %}
+<section class="panel detail op-card">
+<div class="op-header">
+<div class="op-title-block">
+<span class="op-icon">{{ operation.status == 'success' ? '✓' : (operation.status == 'failed' ? '✕' : '◷') }}</span>
+<div>
+<h2>{{ operation.type }}</h2>
+<p class="op-amount">{{ operation.amount_minor ? (operation.amount_minor / 100)|round(0, 'floor') ~ ' ₽' : '' }}</p>
+<p class="op-client">{{ operation.email ?? ('TG ' ~ operation.telegram_id) }}</p>
+</div>
+</div>
+<div class="op-actions">
+<button class="button small" data-copy="{{ operation.trace_id }}">Копировать Trace ID</button>
+<button class="button small" data-copy="{{ operation.id }}">Копировать ID</button>
+{% if operation.subscription_id %}<a class="button small" href="/admin/subscriptions/{{ operation.subscription_id }}">Подписка</a>{% endif %}
+{% if operation.invoice_id %}<a class="button small" href="/admin/operations/{{ operation.invoice_id }}">Счёт</a>{% endif %}
+{% if operation.order_id %}<a class="button small" href="/admin/orders/{{ operation.order_id }}">Заказ</a>{% endif %}
+</div>
+</div>
+<div class="metadata-grid">
+<div class="meta-item"><span class="meta-label">CLIENT</span><span class="meta-value">{{ operation.email ?? ('TG ' ~ operation.telegram_id) }}</span></div>
+{% if operation.invoice_id %}<div class="meta-item"><span class="meta-label">INVOICE</span><span class="meta-value">#{{ operation.invoice_id }}</span></div>{% endif %}
+{% if operation.transaction_id %}<div class="meta-item"><span class="meta-label">TRANSACTION</span><span class="meta-value">#{{ operation.transaction_id }}</span></div>{% endif %}
+{% if operation.provider %}<div class="meta-item"><span class="meta-label">PROVIDER</span><span class="meta-value">{{ operation.provider }}</span></div>{% endif %}
+<div class="meta-item"><span class="meta-label">TRACE ID</span><span class="meta-value mono">{{ operation.trace_id|slice(0, 12) }}…</span></div>
+<div class="meta-item"><span class="meta-label">STATUS</span><span class="meta-value"><span class="badge {{ operation.status == 'success' ? 'fulfilled' : (operation.status == 'failed' ? 'canceled' : 'pending') }}">{{ operation.status }}</span></span></div>
+{% if operation.duration_ms %}<div class="meta-item"><span class="meta-label">DURATION</span><span class="meta-value">{{ operation.duration_ms }} ms</span></div>{% endif %}
+</div>
+{% if supportSummary %}
+<div class="support-summary">
+<h3>Support Summary</h3>
+<div class="support-grid">
+<div class="support-item {{ supportSummary.payment.status == 'success' ? 'ok' : (supportSummary.payment.status == 'failed' ? 'fail' : 'pending') }}"><small>PAYMENT</small><strong>{{ supportSummary.payment.status ?? '—' }}</strong></div>
+<div class="support-item {{ supportSummary.invoice.status == 'success' ? 'ok' : (supportSummary.invoice.status == 'failed' ? 'fail' : 'pending') }}"><small>INVOICE</small><strong>{{ supportSummary.invoice.status ?? '—' }}</strong></div>
+<div class="support-item {{ supportSummary.subscription.status == 'success' ? 'ok' : (supportSummary.subscription.status == 'failed' ? 'fail' : 'pending') }}"><small>SUBSCRIPTION</small><strong>{{ supportSummary.subscription.status ?? '—' }}</strong></div>
+<div class="support-item {{ supportSummary.provisioning.status == 'success' ? 'ok' : (supportSummary.provisioning.status == 'failed' ? 'fail' : 'pending') }}"><small>PROVISIONING</small><strong>{{ supportSummary.provisioning.status ?? '—' }}</strong></div>
+<div class="support-item {{ supportSummary.notification.status == 'success' ? 'ok' : 'fail' }}"><small>NOTIFICATION</small><strong>{{ supportSummary.notification.status ?? '—' }}</strong></div>
+</div>
+{% if supportSummary.problem %}<div class="problem-box"><strong>Problem:</strong> {{ supportSummary.problem.name ?? supportSummary.problem.error_message ?? 'Unknown' }}
+{% if supportSummary.last_retry %}<br><small>Last retry: {{ (supportSummary.last_retry.finished_at ?? supportSummary.last_retry.started_at)|date('H:i:s') }}</small>{% endif %}</div>{% endif %}
+</div>
+{% endif %}
+</section>
+<section class="panel detail">
+<div class="section-heading"><h2>Event Timeline</h2></div>
+{% set steps = operation.steps ?? [] %}
+{% if steps %}<div class="timeline-container">{{ _self.step_list(steps) }}</div>
+{% else %}<ol class="customer-timeline">
+{% for e in operation.events %}<li>
+<time>{{ e.occurred_at|date('d.m.Y H:i:s') }}</time>
+<span><strong>{{ e.status == 'success' ? '✓' : (e.status == 'failed' ? '✕' : '⚠') }} {{ e.message }}</strong><br><small>{{ e.type }}</small></span>
+</li>{% endfor %}
+</ol>{% endif %}
+</section>
+{% if operation.retries|length %}
+<section class="panel detail">
+<div class="section-heading"><h2>Retries</h2></div>
+<table><thead><tr><th>Attempt</th><th>HTTP</th><th>Duration</th><th>Error</th><th>Time</th></tr></thead><tbody>
+{% for r in operation.retries %}<tr><td>{{ r.attempt }}</td><td>{{ r.http_status ?? '—' }}</td><td>{{ r.duration_ms ?? '—' }} ms</td><td>{{ r.error_code ?? r.error_message ?? '—' }}</td><td>{{ (r.finished_at ?? r.started_at)|date('H:i:s') }}</td></tr>{% endfor %}
+</tbody></table>
+</section>
+{% endif %}
+<section class="panel detail">
+<div class="section-heading"><h2>Details</h2></div>
+<p><strong>Started:</strong> {{ (operation.started_at|date('d.m.Y H:i:s')) ?? '—' }}</p>
+<p><strong>Finished:</strong> {{ (operation.completed_at|date('d.m.Y H:i:s')) ?? '—' }}</p>
+<p><strong>Trace:</strong> <code>{{ operation.trace_id }}</code></p>
+<p><strong>Correlation:</strong> <code>{{ operation.correlation_id }}</code></p>
+{% if operation.last_error %}<p><strong>Last Error:</strong> <code>{{ operation.last_error }}</code></p>{% endif %}
+{% if operation.metadata %}<details><summary>Metadata</summary><pre class="json-viewer">{{ operation.metadata|json_encode(constant('JSON_PRETTY_PRINT')) }}</pre></details>{% endif %}
+</section>
+</section>
+{% endblock %}
+{% block javascript %}
+<script>
+document.querySelectorAll('[data-copy]').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    navigator.clipboard.writeText(btn.dataset.copy).then(function(){
+      var orig=btn.textContent; btn.textContent='Copied!'; setTimeout(function(){btn.textContent=orig},1500);
+    });
+  });
+});
+function toggleStep(el){
+  var details=el.parentElement.querySelector('.step-details');
+  if(details){details.style.display=details.style.display==='none'?'block':'none';}
+}
+</script>
+{% endblock %}
+{% macro step_list(steps) %}
+{% for step in steps %}
+<div class="timeline-step {{ step.status }}">
+<div class="step-dot"></div>
+<div class="step-content">
+<div class="step-header" onclick="toggleStep(this)">
+<span class="step-icon">{{ step.status == 'success' ? '✓' : (step.status == 'failed' ? '✕' : (step.status == 'processing' ? '◷' : '○')) }}</span>
+<span class="step-name">{{ step.name }}</span>
+<span class="step-duration">{{ step.duration_ms ? step.duration_ms ~ ' ms' : '' }}</span>
+<span class="step-time">{{ (step.started_at|date('H:i:s')) ?? '' }}</span>
+</div>
+<div class="step-details" style="display:none">
+{% if step.http_method %}<p><strong>Request:</strong> {{ step.http_method }} {{ step.http_url ?? '' }}</p>{% endif %}
+{% if step.http_status %}<p><strong>HTTP Status:</strong> {{ step.http_status }}</p>{% endif %}
+{% if step.error_code %}<p><strong>Error:</strong> {{ step.error_code }} — {{ step.error_message ?? '' }}</p>{% endif %}
+{% if step.attempt and step.max_attempts %}<p><strong>Attempt:</strong> {{ step.attempt }} / {{ step.max_attempts }}</p>{% endif %}
+{% if step.category %}<p><strong>Category:</strong> {{ step.category }}</p>{% endif %}
+{% if step.request_metadata != '{}' %}<details><summary>Request</summary><pre class="json-viewer">{{ step.request_metadata|json_encode(constant('JSON_PRETTY_PRINT')) }}</pre></details>{% endif %}
+{% if step.response_metadata != '{}' %}<details><summary>Response</summary><pre class="json-viewer">{{ step.response_metadata|json_encode(constant('JSON_PRETTY_PRINT')) }}</pre></details>{% endif %}
+</div>
+{% if step.children|length %}<div class="step-children">{{ _self.step_list(step.children) }}</div>{% endif %}
+</div>
+</div>
+{% endfor %}
+{% endmacro %}

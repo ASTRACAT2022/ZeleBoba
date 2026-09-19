@@ -17,6 +17,12 @@ final class Reconciler
         if(!$taken)return 0;
         try{
             $money=(new \App\Observability\ConsistencyChecker($db))->run();
+            // Some operational tests/tools construct a minimal Container.
+            // `isset` is safe for an uninitialized typed property.
+            if (isset($this->app->creators)) {
+                $this->app->creators->releaseDue();
+                $this->app->creators->reconcile('scheduler');
+            }
             if($money['status']!=='ok') error_log(json_encode(['event'=>'financial.drift','count'=>$money['count']]));
             $after='';$bucket=intdiv(time(),300);
             // Only retry providers that can be verified with the credentials

@@ -1,3 +1,30 @@
-{% extends 'base.html.twig' %}{% block title %}Операции{% endblock %}{% block content %}<header><div><p class="eyebrow">ОПЕРАЦИОННЫЙ ЦЕНТР</p><h1>Операции.</h1><p class="muted">Полная цепочка платежей, подписок, очередей и выдачи VPN.</p></div></header>{% include '_admin-nav.html.twig' %}
-<section class="panel detail"><form method="get" class="row-form"><label>Поиск<input name="q" value="{{ q }}" placeholder="Платёж, заказ, подписка, пользователь, Telegram, связь…"></label><label>Операция<select name="type"><option value="">Все</option>{% for value,label in {'payment.apply':'Зачисление платежа','subscription.renew':'Продление подписки','provisioning.retry':'Повтор выдачи VPN','reconciliation.subscription':'Сверка подписки','wallet.debit':'Списание баланса'} %}<option value="{{ value }}" {{ type == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label><label>Статус<select name="status"><option value="">Все</option>{% for value,label in {'success':'Успешно','processing':'В процессе','warning':'Требует внимания','failed':'Ошибка'} %}<option value="{{ value }}" {{ status == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label><label>Период<select name="period">{% for value,label in {'today':'Сегодня','24h':'24 часа','7d':'7 дней','30d':'30 дней'} %}<option value="{{ value }}" {{ period == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label><button class="button small">Найти</button></form></section>
-<section class="panel detail"><h2>Операции</h2>{% if operations %}<table><thead><tr><th>Операция</th><th>Статус</th><th>Пользователь</th><th>Связанные объекты</th><th>Время</th></tr></thead><tbody>{% for o in operations %}<tr><td><a href="/admin/operations/{{ o.id }}">{{ o.type }}</a><br><small>{{ o.correlation_id }}</small></td><td><span class="badge {{ o.status == 'success' ? 'fulfilled' : (o.status == 'failed' ? 'canceled' : 'pending') }}">{{ o.status }}</span></td><td>{{ o.email ?? (o.telegram_id ? 'TG ' ~ o.telegram_id : o.user_id|slice(0,8)) }}</td><td><small>{{ o.payment_id ?? o.order_id ?? o.subscription_id ?? '—' }}</small></td><td>{{ o.started_at|date('d.m.Y H:i:s') }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="muted">Операций по этому запросу нет.</p>{% endif %}</section>{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Operations{% endblock %}{% block content %}
+<header><div><p class="eyebrow">OPERATIONAL CENTER</p><h1>Operations</h1><p class="muted">Payments, subscriptions, orders, and provisioning.</p></div></header>
+{% include '_admin-nav.html.twig' %}
+<section class="panel detail">
+<form method="get" class="row-form">
+<label>Search<input name="q" value="{{ q }}" placeholder="Payment, order, subscription, user, email, invoice, trace…"></label>
+<label>Type<select name="type"><option value="">All</option>{% for value,label in {'payment':'Payment','invoice':'Invoice','subscription':'Subscription','provisioning':'Provisioning','webhook':'Webhook','email':'Email','authentication':'Auth','cron':'Cron','system':'System'} %}<option value="{{ value }}" {{ type == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Status<select name="status"><option value="">All</option>{% for value,label in {'success':'Success','processing':'Processing','failed':'Failed','pending':'Pending','retrying':'Retrying'} %}<option value="{{ value }}" {{ status == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Client<input name="client" value="{{ client }}" placeholder="Email or user ID"></label>
+<label>Period<select name="period"><option value="today" {{ period == 'today' ? 'selected' : '' }}>Today</option><option value="24h" {{ period == '24h' ? 'selected' : '' }}>24h</option><option value="7d" {{ period == '7d' ? 'selected' : '' }}>7 days</option><option value="30d" {{ period == '30d' ? 'selected' : '' }}>30 days</option></select></label>
+<button class="button small">Search</button>
+</form>
+</section>
+<section class="panel detail">
+<h2>Operations</h2>
+{% if operations %}<table><thead><tr><th>Time</th><th>Operation</th><th>Status</th><th>Client</th><th>Related</th><th>Provider</th><th>Duration</th></tr></thead><tbody>
+{% for o in operations %}<tr>
+<td>{{ (o.started_at|date('d.m.Y H:i')) }}</td>
+<td><a href="/admin/operations/{{ o.id }}">{{ o.type }}</a><br><small class="mono">{{ o.correlation_id|slice(0,10) }}…</small></td>
+<td><span class="badge {{ o.status == 'success' ? 'fulfilled' : (o.status == 'failed' ? 'canceled' : 'pending') }}">{{ o.status }}</span></td>
+<td>{{ o.email ?? ('TG ' ~ o.telegram_id) }}</td>
+<td><small>{{ o.payment_id ?? o.order_id ?? o.subscription_id ?? o.invoice_id ?? '—' }}</small></td>
+<td>{{ o.provider ?? '—' }}</td>
+<td>{{ o.duration_ms ? o.duration_ms ~ ' ms' : '—' }}</td>
+</tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="muted">No operations found.</p>{% endif %}
+</section>
+</section>
+{% endblock %}

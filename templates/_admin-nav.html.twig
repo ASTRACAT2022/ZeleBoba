@@ -11,6 +11,9 @@
         <a href="/admin/operations" class="admin-nav-card {{ path starts with '/admin/operations' ? 'selected' : '' }}">
             <span class="admin-nav-icon">⌘</span><span><strong>Операции</strong><small>Платежи, заказы и расследования</small></span>
         </a>
+        <a href="/admin/events" class="admin-nav-card {{ path == '/admin/events' ? 'selected' : '' }}">
+            <span class="admin-nav-icon">⏱</span><span><strong>Events</strong><small>Event timeline и трассировка</small></span>
+        </a>
         <a href="/admin/provisioning" class="admin-nav-card {{ path == '/admin/provisioning' ? 'selected' : '' }}">
             <span class="admin-nav-icon">↻</span><span><strong>Выдача VPN</strong><small>Очередь и синхронизация Remnawave</small></span>
         </a>
@@ -27,6 +30,7 @@
         <a href="/admin/users">Клиенты</a>
         <a href="/admin/plans">Тарифы</a>
         <a href="/admin/reports">Отчёты</a>
+        <a href="/admin/creators" class="{{ path starts with '/admin/creators' ? 'selected' : '' }}">Creators</a>
         <a href="/admin/monitoring">Мониторинг</a>
         <a href="/admin/investigations" class="{{ path starts with '/admin/investigations' ? 'selected' : '' }}">Расследования</a>
         <a href="/admin/intelligence" class="{{ path == '/admin/intelligence' ? 'selected' : '' }}">Контроль системы</a>

@@ -1,0 +1,1 @@
+ALTER TABLE creators ADD COLUMN attribution_days INTEGER NOT NULL DEFAULT 30 CHECK(attribution_days BETWEEN 1 AND 365);

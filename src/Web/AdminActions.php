@@ -25,6 +25,11 @@ trait AdminActions
             return $this->render('admin-sync',['report'=>$report]);
         }
         if($handler==='admin-readiness')return $this->render('readiness',['checks'=>Readiness::report($this->app)]);
+        if($handler==='admin-creators')return $this->render('admin-creators',['creators'=>$db->all("SELECT c.*,COALESCE((SELECT SUM(amount_minor) FROM creator_ledger l WHERE l.creator_id=c.id),0) earned FROM creators c ORDER BY c.created_at DESC")]);
+        if($handler==='admin-creators-reconcile'){
+            if($this->request->isMethod('POST')) {$this->app->creators->reconcile($uid); return new RedirectResponse('/admin/creators/reconciliation',303);}
+            return $this->render('admin-creators-reconciliation',['last'=>$db->one('SELECT * FROM creator_reconciliation_runs ORDER BY started_at DESC LIMIT 1'),'missing'=>$db->all("SELECT p.id,p.amount_minor,p.paid_at FROM payments p JOIN creator_attributions a ON a.user_id=p.user_id LEFT JOIN creator_commissions c ON c.payment_id=p.id WHERE p.status='succeeded' AND c.id IS NULL LIMIT 100")]);
+        }
         if($handler==='admin-plans')return $this->render('admin-plans',['plans'=>$db->all('SELECT * FROM plans ORDER BY active DESC,price_minor')]);
         if($handler==='admin-plan-save'){
             $name=trim($input->get('name',''));$price=filter_var($input->get('price_minor'),FILTER_VALIDATE_INT);$days=$input->getInt('duration_days');$devices=$input->getInt('devices');$traffic=filter_var($input->get('traffic_gb'),FILTER_VALIDATE_INT);$squad=trim($input->get('squad_uuid',''));
@@ -45,7 +50,13 @@ trait AdminActions
             $query=$this->request->query->get('q','');
             return $this->render('admin-users',['users'=>$this->app->userAdmin->search($query),'query'=>$query]);
         }
-        if($handler==='admin-user')return $this->render('admin-user',['profile'=>$this->app->userAdmin->profile($id),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name'),'sub_removed'=>$this->request->query->has('sub_removed')]);
+        if($handler==='admin-user')return $this->render('admin-user',['profile'=>$this->app->userAdmin->profile($id),'creator'=>$this->app->creators->profile($id),'plans'=>$db->all('SELECT id,name FROM plans ORDER BY name'),'sub_removed'=>$this->request->query->has('sub_removed'),'recentActivity'=>$this->app->operations->recentActivity($id,10)]);
+        if($handler==='admin-user-creator'){
+            $this->app->creators->activate($id,$input->all(),$uid); return new RedirectResponse('/admin/users/'.$id,303);
+        }
+        if($handler==='admin-user-creator-suspend'){
+            $this->app->creators->suspend($id,$uid); return new RedirectResponse('/admin/users/'.$id,303);
+        }
         if($handler==='admin-user-balance'){
             $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
                 if ($amount===false || $amount < -1000000 || $amount > 1000000) throw new BillingError('Некорректная сумма.');
@@ -157,11 +168,28 @@ trait AdminActions
         if($handler==='admin-operations'){
             $period=$this->request->query->get('period','7d');
             $since=match($period){'today'=>strtotime('today UTC'),'24h'=>time()-86400,'30d'=>time()-30*86400,'7d'=>time()-7*86400,default=>0};
-            return $this->render('admin-operations',['operations'=>$this->app->operations->search(trim($this->request->query->get('q','')),$this->request->query->get('type',''),$this->request->query->get('status',''),$since),'q'=>$this->request->query->get('q',''),'type'=>$this->request->query->get('type',''),'status'=>$this->request->query->get('status',''),'period'=>$period]);
+            $query=trim($this->request->query->get('q',''));
+            $type=$this->request->query->get('type','');
+            $status=$this->request->query->get('status','');
+            $client=$this->request->query->get('client','');
+            $invoice=$this->request->query->get('invoice','');
+            $service=$this->request->query->get('service','');
+            $provider=$this->request->query->get('provider','');
+            $httpStatus=$this->request->query->get('http_status','');
+            return $this->render('admin-operations',['operations'=>$this->app->operations->search($query,$type,$status,$since,$client,$invoice,$service,$provider,$httpStatus,$period),'q'=>$query,'type'=>$type,'status'=>$status,'period'=>$period,'client'=>$client,'invoice'=>$invoice,'service'=>$service,'provider'=>$provider,'httpStatus'=>$httpStatus]);
+        }
+        if($handler==='admin-events'){
+            $query=trim($this->request->query->get('q',''));
+            $status=$this->request->query->get('status','');
+            $type=$this->request->query->get('type','');
+            $client=$this->request->query->get('client','');
+            $period=$this->request->query->get('period','7d');
+            return $this->render('admin-events',['operations'=>$this->app->operations->search($query,$type,$status,0,$client,'','','','','period'),'q'=>$query,'status'=>$status,'type'=>$type,'client'=>$client,'period'=>$period]);
         }
         if($handler==='admin-operation'){
             $operation=$this->app->operations->detail($id); if(!$operation) throw new BillingError('Операция не найдена.');
-            return $this->render('admin-operation',['operation'=>$operation]);
+            $supportSummary=$this->app->operations->supportSummary($id);
+            return $this->render('admin-operation',['operation'=>$operation,'supportSummary'=>$supportSummary]);
         }
         if($handler==='admin-provisioning')return $this->render('admin-provisioning',['accounts'=>$db->all("SELECT p.*,s.expires_at,s.lifecycle_status,u.email,u.telegram_id FROM provisioning_accounts p JOIN subscriptions s ON s.id=p.subscription_id JOIN users u ON u.id=s.user_id ORDER BY CASE p.state WHEN 'failed' THEN 0 WHEN 'retry' THEN 1 ELSE 2 END,p.updated_at DESC LIMIT 200")]);
         if($handler==='admin-provisioning-retry'){
