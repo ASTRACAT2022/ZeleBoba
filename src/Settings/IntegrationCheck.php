@@ -43,12 +43,14 @@ final class IntegrationCheck
                 // scheme the provider uses, and that the API host is reachable — without
                 // creating a real payment.
                 $merchant=(string)$c['PLATEGA_MERCHANT_ID']; $secret=(string)$c['PLATEGA_SECRET'];
+                $base=rtrim((string)($c['PLATEGA_API_BASE']??'https://api.platega.com'),'/');
+                if($base==='')throw new BillingError('Заполните API-адрес Platega.');
                 $probe=['merchant_id'=>$merchant];
                 $expected=hash_hmac('sha256', json_encode($probe, JSON_UNESCAPED_UNICODE), $secret);
                 $recomputed=$expected; // same inputs => identical; guards against config swap
                 if(!hash_equals($expected,$recomputed)||$expected==='')throw new BillingError('Секрет Platega не дал валидной подписи.');
                 try {
-                    $r=$http->request('GET','https://api.platega.com/',['max_duration'=>8])->getStatusCode();
+                    $r=$http->request('GET',$base.'/',['max_duration'=>8])->getStatusCode();
                     if($r>=500)throw new BillingError('API Platega недоступен (' . $r . ').');
                 } catch (\Throwable $e) { throw new BillingError('API Platega недоступен: ' . $e->getMessage()); }
             }elseif($name==='freekassa'){
@@ -82,7 +84,7 @@ final class IntegrationCheck
     }
     public static function fingerprint(array $config,string $name):string
     {
-        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_API_BASE'],'platega'=>['APP_ENV','PLATEGA_MERCHANT_ID','PLATEGA_SECRET'],'freekassa'=>['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2','FREEKASSA_PAYMENT_ID'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
+        $keys=match($name){'telegram'=>['APP_URL','TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_USERNAME','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_API_BASE'],'platega'=>['APP_ENV','PLATEGA_MERCHANT_ID','PLATEGA_SECRET','PLATEGA_API_BASE'],'freekassa'=>['FREEKASSA_SHOP_ID','FREEKASSA_API_KEY','FREEKASSA_SECRET2','FREEKASSA_PAYMENT_ID'],'remnawave'=>['REMNAWAVE_URL','REMNAWAVE_TOKEN','REMNAWAVE_SQUAD_UUID'],default=>[]};
         return hash('sha256',json_encode(array_intersect_key($config,array_flip($keys)),JSON_THROW_ON_ERROR));
     }
 }

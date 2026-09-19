@@ -19,10 +19,11 @@ final class PlategaProvider extends AbstractProvider
     {
         $merchant = (string)($this->config['PLATEGA_MERCHANT_ID'] ?? '');
         $secret = (string)($this->config['PLATEGA_SECRET'] ?? '');
-        if ($merchant === '' || $secret === '') throw new BillingError('Platega не настроен.');
+        $base = rtrim((string)($this->config['PLATEGA_API_BASE'] ?? 'https://api.platega.com'), '/');
+        if ($merchant === '' || $secret === '' || $base === '') throw new BillingError('Platega не настроен.');
         $data['merchant_id'] = $merchant;
         $data['signature'] = hash_hmac('sha256', json_encode($data, JSON_UNESCAPED_UNICODE), $secret);
-        $resp = $this->json('POST', 'https://api.platega.com/v1/'.$endpoint, ['json' => $data]);
+        $resp = $this->json('POST', $base.'/v1/'.$endpoint, ['json' => $data]);
         if (($resp['status'] ?? '') !== 'success' && ($resp['success'] ?? false) !== true) throw new BillingError('Platega: '.($resp['message'] ?? 'API error'));
         return $resp['data'] ?? $resp;
     }
