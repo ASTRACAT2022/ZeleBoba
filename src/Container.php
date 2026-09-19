@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace App;
-use App\Infrastructure\{Database,Outbox,Worker,SecretRedactor,KillSwitch,CircuitBreaker,RateLimiter,WebhookGuard,OptimisticLock,WorkerHeartbeat};
+use App\Infrastructure\{Database,Outbox,Worker,SecretRedactor,KillSwitch,CircuitBreaker,RateLimiter,WebhookGuard,OptimisticLock,WorkerHeartbeat,FourEyes};
 use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,CreatorService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline};
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
@@ -41,6 +41,7 @@ final class Container
     public readonly WebhookGuard $webhookGuard;
     public readonly OptimisticLock $optimisticLock;
     public readonly WorkerHeartbeat $heartbeat;
+    public readonly FourEyes $fourEyes;
     public readonly UserAdminService $userAdmin;
     public readonly CompensationService $compensations;
     public readonly CustomerTimeline $timeline;
@@ -104,6 +105,7 @@ final class Container
         $this->webhookGuard=new WebhookGuard($this->db);
         $this->optimisticLock=new OptimisticLock($this->db);
         $this->heartbeat=new WorkerHeartbeat($this->db);
+        $this->fourEyes=new \App\Infrastructure\FourEyes($this->db);
         $this->compensations=new CompensationService($this->db,$this->outbox,$this->wallet);
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);

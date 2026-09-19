@@ -225,6 +225,22 @@ trait AdminActions
         if($handler==='admin-why-not-renewed')return $this->render('admin-why-not-renewed',$this->app->investigations->whyNotRenewed($id));
         if($handler==='admin-flags')return $this->render('admin-flags',['flags'=>(new \App\Observability\FeatureFlags($db))->all()]);
         if($handler==='admin-flag-save'){(new \App\Observability\FeatureFlags($db))->set($input->get('name',''),$input->get('enabled')==='1',$input->getInt('rollout',100),$uid);$this->app->billing->audit($uid,'feature_flag.updated',$input->get('name',''));return new RedirectResponse('/admin/flags',303);}
+        if($handler==='admin-switches')return $this->render('admin-switches',['data'=>$this->app->killSwitch->all(),'breakers'=>array_map(fn($name)=>$this->app->circuitBreaker->state($name),['freekassa_api','remnawave_api'])]);
+        if($handler==='admin-switch-save'){
+            $name=$input->get('name','');
+            if($name==='__safe_mode__'){$this->app->killSwitch->setSafeMode($input->get('enabled')==='1',$uid,$input->get('reason',''));}
+            else{$this->app->killSwitch->set($name,$input->get('enabled')==='1',$uid,$input->get('reason',''));}
+            $this->app->billing->audit($uid,'kill_switch.updated',$name);return new RedirectResponse('/admin/switches',303);
+        }
+        if($handler==='admin-breaker-reset'){$this->app->circuitBreaker->reset($input->get('name',''));$this->app->billing->audit($uid,'circuit_breaker.reset',$input->get('name',''));return new RedirectResponse('/admin/switches',303);}
+        if($handler==='admin-approvals')return $this->render('admin-approvals',['data'=>['pending'=>$this->app->fourEyes->pending(),'history'=>$this->app->fourEyes->history()]]);
+        if($handler==='admin-approval-decision'){
+            $decision=$input->get('decision','');$actor=$this->user['email']??'admin';
+            if($decision==='approve')$this->app->fourEyes->approve($id,$actor);
+            elseif($decision==='reject')$this->app->fourEyes->reject($id,$actor);
+            else throw new \App\Billing\BillingError('Недопустимое решение.');
+            $this->app->billing->audit($uid,'approval.' . $decision,$id);return new RedirectResponse('/admin/approvals',303);
+        }
         if($handler==='admin-incidents')return $this->render('admin-incidents',['incidents'=>(new \App\Observability\IncidentService($db))->list()]);
         if($handler==='admin-incident-create'){(new \App\Observability\IncidentService($db))->create($input->get('title',''),$uid);return new RedirectResponse('/admin/incidents',303);}
         if($handler==='admin-monitoring-clear'){
