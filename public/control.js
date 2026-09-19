@@ -1,9 +1,11 @@
 (() => {
   const items = [
-    ['Операции', '/admin/operations'], ['Контроль системы', '/admin/intelligence'],
-    ['Выдача VPN', '/admin/provisioning'], ['Переключатели', '/admin/flags'],
-    ['Инциденты', '/admin/incidents'], ['Клиенты', '/admin/users'], ['Тарифы', '/admin/plans'],
-    ['Мониторинг', '/admin/monitoring'], ['Журнал действий', '/admin/audit']
+    ['Обзор', '/admin'], ['Операции', '/admin/operations'], ['Events', '/admin/events'],
+    ['Контроль системы', '/admin/intelligence'], ['Выдача VPN', '/admin/provisioning'],
+    ['Переключатели', '/admin/flags'], ['Инциденты', '/admin/incidents'],
+    ['Клиенты', '/admin/users'], ['Тарифы', '/admin/plans'], ['Промокоды', '/admin/promocodes'],
+    ['Отчёты', '/admin/reports'], ['Creators', '/admin/creators'], ['Мониторинг', '/admin/monitoring'],
+    ['Расследования', '/admin/investigations'], ['Журнал действий', '/admin/audit'], ['Настройки', '/admin/config']
   ];
   const dialog = document.createElement('dialog');
   dialog.className = 'command-palette';
