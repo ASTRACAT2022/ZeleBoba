@@ -467,7 +467,9 @@ final class Telegram
         $keyboard=[];
         foreach($subs as $s){
             if($s['status']==='active' && (int)$s['expires_at']>time()){
-                $keyboard[]= [['text'=>((int)($s['auto_renew']??0)===1?'Выключить автопродление ':'Включить автопродление ').$s['plan_name'],'callback_data'=>'autorenew:'.$s['id']]];
+                $row=[['text'=>'Продлить '.$s['plan_name'],'callback_data'=>'renew:'.$s['id']]];
+                $row[]=['text'=>((int)($s['auto_renew']??0)===1?'Выключить автопродление ':'Включить автопродление'),'callback_data'=>'autorenew:'.$s['id']];
+                $keyboard[]=$row;
             }
         }
         $keyboard[]= [['text'=>'Меню','callback_data'=>'menu:main']];
@@ -565,6 +567,26 @@ final class Telegram
                 $updated=$this->billing->setAutoRenew($user['id'],$subId,((int)($sub['auto_renew']??0)!==1));
                 $this->reply($updateId,$tg,((int)$updated['auto_renew']===1?'Автопродление включено. Списание около '.gmdate('d.m.Y',(int)$updated['renew_at']).'.':'Автопродление выключено.'),$this->mainMenu());
             } catch (BillingError $e) { $this->reply($updateId,$tg,$e->getMessage(),$this->mainMenu()); }
+            return;
+        }
+        if(str_starts_with($data,'renew:')){
+            $subId=substr($data,6);
+            if(!preg_match('/^[a-f0-9]{32}$/D',$subId)){ $this->reply($updateId,$tg,'Подписка не найдена.',$this->mainMenu()); return; }
+            $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=? AND user_id=?',[$subId,$user['id']]);
+            if(!$sub){ $this->reply($updateId,$tg,'Подписка не найдена.',$this->mainMenu()); return; }
+            if($sub['status']!=='active' || (int)$sub['expires_at']<=time()){ $this->reply($updateId,$tg,'Продлить можно только активную подписку.',$this->mainMenu()); return; }
+            $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$sub['plan_id']]);
+            if(!$plan){ $this->reply($updateId,$tg,'Тариф подписки больше недоступен.',$this->mainMenu()); return; }
+            try {
+                $order=$this->billing->order($user['id'],$plan['id'],'renew:'.$subId.':'.$updateId,null,'8.8.8.8',$subId,null);
+            } catch (BillingError $e) { $this->reply($updateId,$tg,$e->getMessage(),$this->mainMenu()); return; }
+            if($order['provider']==='demo'){
+                try { $this->billing->settle($order['id'],'demo','demo_'.$order['id'],(int)$order['price_minor'],$order['currency']); } catch (BillingError) {}
+                $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$order['id']]);
+            } else {
+                $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$order['id']]);
+            }
+            $this->reply($updateId,$tg,'Продление подписки «'.$sub['plan_name'].'» (срок будет добавлен к текущему).\n'.$this->orderText($order)."\nКабинет: ".rtrim($this->appUrl,'/').'/orders/'.$order['id'],$this->orderKeyboard($order));
             return;
         }
     }
