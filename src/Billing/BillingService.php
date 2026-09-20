@@ -100,7 +100,10 @@ final class BillingService
             $renewSub=$this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
             // Record the purchase transaction for analytics (wallet history).
             $type = $renewSub ? 'subscription_renewal' : 'subscription_purchase';
-            if ($paymentId!=='balance_'.$orderId) $this->db->execute(
+            // Wallet debits already write the authoritative transaction. Do
+            // not create a second history debit merely because the internal
+            // payment id carries the order suffix.
+            if (!str_starts_with($paymentId,'balance_')) $this->db->execute(
                 'INSERT INTO transactions(id,seq,user_id,type,amount_kopeks,description,payment_method,external_id,is_completed,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)',
                 [Database::id(), $this->nextTxSeq(), $order['user_id'], $type, -$amount, 'Оплата заказа: '.$order['plan_name'], $provider, $paymentId, $now, $now]
             );
@@ -109,7 +112,7 @@ final class BillingService
                 $this->db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$op['correlation_id'],'extend:'.$renewSub['id'].':'.$orderId]);
                 $this->db->execute('UPDATE operations SET subscription_id=? WHERE id=?',[$renewSub['id'],$op['id']]);
                 $operations->event($op['id'],'subscription.extended','success','Subscription extended',['subscription_id'=>$renewSub['id'],'metadata'=>['expires_at_before'=>(int)$renewSub['expires_at'],'expires_at_after'=>$newExpiry]]);
-                $this->db->execute('UPDATE subscriptions SET renew_order_id=NULL,renew_at=?,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?',[(int)$renewSub['auto_renew']===1?$newExpiry-max(1,min(14,(int)($this->config['AUTORENEW_DAYS_BEFORE']??3)))*86400:null,$renewSub['id']]);
+                $this->db->execute('UPDATE subscriptions SET renew_order_id=NULL,renew_at=?,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?',[(int)$renewSub['auto_renew']===1?$this->renewAt($newExpiry,(int)$order['duration_days']):null,$renewSub['id']]);
                 $this->audit('provider:'.$provider,'subscription.renewed',$renewSub['id']);
                 $this->timeline?->record($order['user_id'], 'subscription.renewed', ['subscription_id'=>$renewSub['id'], 'expires_at'=>$newExpiry], $now);
             } else {
@@ -185,9 +188,7 @@ final class BillingService
                 if (($this->config['AUTORENEW_ENABLED']??'0')!=='1') throw new BillingError('Автопродление отключено администратором.');
                 $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$sub['plan_id']]);
                 if (!$plan) throw new BillingError('Тариф подписки больше недоступен.');
-                $daysBefore=max(1,min(14,(int)($this->config['AUTORENEW_DAYS_BEFORE']??3)));
-                $renewAt=(int)$sub['expires_at']-$daysBefore*86400;
-                if ($renewAt<time()) $renewAt=time()+60;
+                $renewAt=$this->renewAt((int)$sub['expires_at'],(int)$plan['duration_days']);
                 $this->db->execute('UPDATE subscriptions SET auto_renew=1,renew_plan_id=?,renew_price_minor=?,renew_at=?,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?',[$plan['id'],(int)$plan['price_minor'],$renewAt,$subscriptionId]);
                 $this->audit($userId,'subscription.autorenew_on',$subscriptionId);
             } else {
@@ -204,5 +205,64 @@ final class BillingService
     private function nextTxSeq(): int
     {
         return (int)($this->db->one('SELECT COALESCE(MAX(seq),0)+1 AS s FROM transactions')['s'] ?? 1);
+    }
+
+    /**
+     * Atomically renew a due subscription from the customer's internal
+     * balance. The subscription row is the single concurrency gate and the
+     * generated order id is reused as the wallet/payment idempotency anchor.
+     * Returning false means it remains scheduled (for example, insufficient
+     * funds), never that the intent was forgotten.
+     */
+    public function autoRenewFromBalance(string $subscriptionId): bool
+    {
+        return $this->db->transaction(function() use($subscriptionId) {
+            $now=time();
+            $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$subscriptionId]);
+            if (!$sub || (int)$sub['auto_renew']!==1 || $sub['status']!=='active' || (int)$sub['expires_at']<=$now || $sub['renew_order_id']!==null || (int)($sub['renew_at']??0)>$now) return false;
+            $planId=(string)($sub['renew_plan_id']??$sub['plan_id']);
+            $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
+            if (!$plan) {
+                $this->db->execute('UPDATE subscriptions SET renew_failed_at=?,renew_at=? WHERE id=?',[$now,min((int)$sub['expires_at'],$now+3600),$subscriptionId]);
+                $this->audit('system','subscription.autorenew_plan_unavailable',$subscriptionId);
+                return false;
+            }
+            $price=(int)($sub['renew_price_minor']??0);
+            if ($price<=0) $price=(int)$plan['price_minor'];
+            $user=$this->db->one('SELECT * FROM users WHERE id=? AND disabled=0'.$this->db->lock(),[$sub['user_id']]);
+            if (!$user || (int)$user['balance_kopeks']<$price) {
+                // Lack of funds is expected and recoverable. Do not consume a
+                // permanent retry budget: a subsequent topup wakes this job.
+                $this->db->execute('UPDATE subscriptions SET renew_failed_at=?,renew_at=? WHERE id=?',[$now,min((int)$sub['expires_at'],$now+3600),$subscriptionId]);
+                $this->audit('system','subscription.autorenew_waiting_balance',$subscriptionId);
+                return false;
+            }
+            $original=$this->db->one('SELECT * FROM orders WHERE id=?',[$sub['order_id']]);
+            if (!$original) throw new BillingError('Не найден исходный заказ подписки.');
+            $orderId=Database::id();
+            $key='autorenew-balance:'.$subscriptionId.':'.(int)$sub['expires_at'];
+            $version=$this->db->one('SELECT id FROM plan_versions WHERE plan_id=? ORDER BY version_number DESC LIMIT 1',[$planId]);
+            $this->db->execute("INSERT INTO orders(id,user_id,plan_id,plan_version_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)",[
+                $orderId,$sub['user_id'],$planId,$version['id']??null,$key,$price,$plan['currency'],$plan['name'],$plan['duration_days'],$plan['traffic_bytes'],$plan['devices'],$original['provider'],$now,
+            ]);
+            $this->db->execute('UPDATE orders SET provision_driver=?,squad_uuid=?,provider_account=?,receipt_email=?,receipt_enabled=?,vat_code=?,tax_system=?,client_ip=?,return_url=? WHERE id=?',[
+                $original['provision_driver'],$original['squad_uuid'],$original['provider_account'],$original['receipt_email'],$original['receipt_enabled'],$original['vat_code'],$original['tax_system'],$original['client_ip'],$original['return_url'],$orderId,
+            ]);
+            $this->db->execute('UPDATE subscriptions SET renew_order_id=?,renew_at=NULL WHERE id=?',[$orderId,$subscriptionId]);
+            (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_renewal','Автопродление: '.$plan['name'],'balance',$orderId);
+            $this->settle($orderId,$original['provider'],'balance_'.$orderId,$price,$plan['currency']);
+            $this->audit('system','subscription.autorenew_debited',$subscriptionId);
+            return true;
+        });
+    }
+
+    /** Schedule short plans safely: a one-day plan renews roughly 8h early,
+     * never immediately after the prior successful renewal. */
+    private function renewAt(int $expiresAt,int $durationDays): int
+    {
+        $period=max(1,$durationDays)*86400;
+        $configured=max(1,min(14,(int)($this->config['AUTORENEW_DAYS_BEFORE']??3)))*86400;
+        $lead=min($configured,max(300,intdiv($period,3)));
+        return max(time()+60,$expiresAt-$lead);
     }
 }

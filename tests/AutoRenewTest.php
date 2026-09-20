@@ -85,6 +85,51 @@ final class AutoRenewTest extends TestCase
         (new Reconciler($container))->run();
         self::assertCount(0,$db->all("SELECT * FROM outbox WHERE topic='subscription.renew'"));
     }
+
+    public function testWalletAutoRenewIsAtomicAndDailyPlanDoesNotLoop(): void
+    {
+        [$db,$billing]=$this->setupBilling();
+        $db->execute("UPDATE plans SET duration_days=1,price_minor=19900 WHERE id='p'");
+        $order=$billing->order('u','p','daily-autorenew-order');
+        $billing->settle($order['id'],'demo','demo_'.$order['id'],19900,'RUB');
+        $sub=$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$order['id']]);
+        $db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',expires_at=? WHERE id=?",[time()+86400,$sub['id']]);
+        $enabled=$billing->setAutoRenew('u',$sub['id'],true);
+        self::assertGreaterThan(time()+60,(int)$enabled['renew_at']);
+        self::assertLessThan((int)$enabled['expires_at'],(int)$enabled['renew_at']);
+        (new \App\Billing\Wallet($db))->credit('u',19900,'manual_adjust','test funds');
+        $db->execute('UPDATE subscriptions SET renew_at=? WHERE id=?',[time()-1,$sub['id']]);
+
+        self::assertTrue($billing->autoRenewFromBalance($sub['id']));
+        $renewed=$db->one('SELECT * FROM subscriptions WHERE id=?',[$sub['id']]);
+        self::assertGreaterThan(time()+86400,(int)$renewed['expires_at']);
+        self::assertGreaterThan(time()+60,(int)$renewed['renew_at']);
+        self::assertSame(0,(new \App\Billing\Wallet($db))->balance('u')['balance_kopeks']);
+        self::assertCount(1,$db->all("SELECT id FROM orders WHERE idempotency_key LIKE 'autorenew-balance:%'"));
+        self::assertFalse($billing->autoRenewFromBalance($sub['id']));
+        self::assertCount(1,$db->all("SELECT id FROM orders WHERE idempotency_key LIKE 'autorenew-balance:%'"));
+    }
+
+    public function testWaitingRenewalWakesAfterBalanceTopup(): void
+    {
+        [$db,$billing,$config]=$this->setupBilling();
+        $order=$billing->order('u','p','balance-wake-order');
+        $billing->settle($order['id'],'demo','demo_'.$order['id'],19900,'RUB');
+        $sub=$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$order['id']]);
+        $db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',expires_at=? WHERE id=?",[time()+86400,$sub['id']]);
+        $billing->setAutoRenew('u',$sub['id'],true);
+        $db->execute('UPDATE subscriptions SET renew_at=? WHERE id=?',[time()-1,$sub['id']]);
+        $payments=new Payments($db,$billing,new MockHttpClient(),$config);
+        $worker=new Worker($db,new Outbox($db),$payments,new DemoProvisioner(),new MockHttpClient(),'',true,'https://astracattg.netlify.app',null,null,null,null,null,null,'demo',null,null,$billing);
+
+        $worker->handle('subscription.renew',['subscription_id'=>$sub['id']]);
+        self::assertSame(0,(int)$db->one("SELECT COUNT(*) n FROM orders WHERE idempotency_key LIKE 'autorenew-balance:%'")['n']);
+        (new \App\Billing\Wallet($db))->credit('u',19900,'manual_adjust','topup simulation');
+        $worker->handle('topup.after',['user_id'=>'u']);
+        self::assertSame(1,(int)$db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.renew'")['n']);
+        while($db->one("SELECT id FROM outbox WHERE topic='subscription.renew' AND status='pending'")!==null) (new Outbox($db))->runOne($worker->handle(...));
+        self::assertSame(0,(new \App\Billing\Wallet($db))->balance('u')['balance_kopeks']);
+    }
     public function testWebToggleAndBotToggle(): void
     {
         $config=['APP_ENV'=>'test','PURCHASES_ENABLED'=>'1','APP_URL'=>'https://cabinet.example','DATABASE_DSN'=>'sqlite::memory:','DATABASE_USER'=>'','DATABASE_PASSWORD'=>'','PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo','AUTORENEW_ENABLED'=>'1','AUTORENEW_DAYS_BEFORE'=>'3','AUTORENEW_MAX_FAILS'=>'3','YOOKASSA_SHOP_ID'=>'','YOOKASSA_SECRET'=>'','FREEKASSA_SHOP_ID'=>'','FREEKASSA_API_KEY'=>'','FREEKASSA_SECRET2'=>'','FREEKASSA_PAYMENT_ID'=>'44','REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>'','TELEGRAM_BOT_TOKEN'=>'123456:abcdefghijklmnopqrstuvwxyz','TELEGRAM_BOT_USERNAME'=>'example_bot','TELEGRAM_WEBHOOK_SECRET'=>str_repeat('s',32),'TELEGRAM_API_BASE'=>'https://astracattg.netlify.app'];

@@ -27,7 +27,11 @@ final class SubscriptionService
     {
         $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$subscriptionId]);
         if (!$sub) throw new \RuntimeException('Subscription not found');
-        $months=(int)($this->db->one('SELECT duration_months FROM plans WHERE id=?',[$order['plan_id']])['duration_months'] ?? 0);
+        // An order is a product snapshot. A later plan edit must not turn a
+        // paid renewal from calendar-month billing into a day-based period.
+        $months=(int)($order['plan_version_id']!==null
+            ? ($this->db->one('SELECT duration_months FROM plan_versions WHERE id=?',[$order['plan_version_id']])['duration_months'] ?? 0)
+            : ($this->db->one('SELECT duration_months FROM plans WHERE id=?',[$order['plan_id']])['duration_months'] ?? 0));
         $expires=$this->expiryAfter(max($now,(int)$sub['expires_at']), (int)$order['duration_days'], $months);
         $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',lifecycle_status='active',updated_at=?,version=version+1 WHERE id=?",[$expires,$now,$subscriptionId]);
         $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[

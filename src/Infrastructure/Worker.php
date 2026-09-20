@@ -2,12 +2,12 @@
 declare(strict_types=1);
 namespace App\Infrastructure;
 use App\Integration\{Payments,Provisioner,PaymentService};
-use App\Billing\{TopupService,CustomerTimeline};
+use App\Billing\{TopupService,CustomerTimeline,BillingService};
 use App\Observability\OperationsService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null, private ?DurableWorkflow $workflows=null) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null, private ?DurableWorkflow $workflows=null, private ?BillingService $billing=null) {}
     public function handle(string $topic,array $payload): void
     {
         $span=Telemetry::start('billing.outbox.process',['messaging.operation'=>'process','messaging.destination.name'=>$topic]);
@@ -71,6 +71,18 @@ final class Worker
     private function topupAfter(string $userId): void
     {
         if ($this->autoPurchase) $this->autoPurchase->afterTopup($userId);
+        // A successful topup is the fastest safe wake-up signal for a renewal
+        // that was waiting for balance. Row-level locking in BillingService
+        // makes this harmless if the scheduler wakes it simultaneously.
+        if ($this->billing) {
+            foreach($this->db->all("SELECT id FROM subscriptions WHERE user_id=? AND auto_renew=1 AND status='active' AND renew_order_id IS NULL AND expires_at>? AND (renew_at<=? OR renew_failed_at IS NOT NULL)",[$userId,time(),time()]) as $sub) {
+                // A balance topup is an explicit retry signal, so make a
+                // previously backoff-scheduled insufficient-funds renewal due
+                // now. The renewal transaction still verifies every guard.
+                $this->db->execute('UPDATE subscriptions SET renew_at=? WHERE id=? AND renew_order_id IS NULL',[time(),$sub['id']]);
+                $this->outbox->enqueue('subscription.renew','renew:'.$sub['id'].':'.intdiv(time(),60),['subscription_id'=>$sub['id']]);
+            }
+        }
     }
     private function referralTopup(string $userId, int $amountKopeks): void
     {
@@ -198,6 +210,10 @@ final class Worker
     }
     private function renew(string $id): void
     {
+        if ($this->billing) {
+            $this->billing->autoRenewFromBalance($id);
+            return;
+        }
         $s=$this->db->one('SELECT * FROM subscriptions WHERE id=?',[$id]);
         if (!$s || (int)$s['auto_renew']!==1 || $s['status']!=='active' || (int)$s['expires_at']<=time()) return;
         if ($s['renew_order_id']) return;

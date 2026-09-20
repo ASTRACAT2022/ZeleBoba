@@ -122,7 +122,7 @@ final class Container
         $this->paymentService=new PaymentService($this->db,$this->billing,$http,$config,$this->providers,new PaymentEventStore($this->db),$this->webhookGuard,$this->mailer,new PaymentAttemptStore($this->db));
         $tgBase=rtrim($config['TELEGRAM_API_BASE']??'https://astracattg.netlify.app','/');
         if ($tgBase==='') $tgBase='https://astracattg.netlify.app';
-        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID'],$this->circuitBreaker),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations,$config['PROVISION_DRIVER'],$this->timeline,$this->workflows);
+        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID'],$this->circuitBreaker),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations,$config['PROVISION_DRIVER'],$this->timeline,$this->workflows,$this->billing);
         $this->auth=new Auth($this->db);$this->mfa=new Mfa($this->db,$this->settings->vault);
         $this->telegramLogin=new TelegramLogin($this->db,$this->auth);
         $this->telegram=new Telegram($this->db,$this->outbox,$this->billing,$config['APP_URL'],$this->telegramLogin,$tgBase,$http);

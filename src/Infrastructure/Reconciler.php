@@ -164,8 +164,11 @@ final class Reconciler
             $autoEnabled=$db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
             if (!$autoEnabled || $autoEnabled['value']==='1') {
                 $maxFails=(int)($db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_MAX_FAILS'")['value']??3);
-                $rows=$db->all("SELECT id,expires_at,renew_fail_count FROM subscriptions WHERE auto_renew=1 AND status='active' AND expires_at>? AND renew_at IS NOT NULL AND renew_at<=? AND (renew_order_id IS NULL OR renew_order_id='') AND renew_fail_count<? LIMIT 100",[time(),time(),$maxFails]);
-                $db->transaction(function()use($rows){foreach($rows as $r)$this->app->outbox->enqueue('subscription.renew','renew:'.$r['id'].':'.$r['expires_at'].':'.$r['renew_fail_count'],['subscription_id'=>$r['id']]);});
+                $rows=$db->all("SELECT id,expires_at FROM subscriptions WHERE auto_renew=1 AND status='active' AND expires_at>? AND renew_at IS NOT NULL AND renew_at<=? AND (renew_order_id IS NULL OR renew_order_id='') AND renew_fail_count<? LIMIT 100",[time(),time(),$maxFails]);
+                // Insufficient wallet balance is a normal, recoverable state:
+                // do not exhaust a retry counter that would prevent a later
+                // topup from renewing the subscription.
+                $db->transaction(function()use($rows){foreach($rows as $r)$this->app->outbox->enqueue('subscription.renew','renew:'.$r['id'].':'.intdiv(time(),60),['subscription_id'=>$r['id']]);});
                 // Handle failed renewal orders: if renew_order is canceled/expired, schedule retry
                 $failed=$db->all("SELECT s.id,s.renew_order_id,s.renew_fail_count FROM subscriptions s JOIN orders o ON o.id=s.renew_order_id WHERE s.auto_renew=1 AND s.status='active' AND o.status='canceled' LIMIT 100");
                 foreach($failed as $f){
