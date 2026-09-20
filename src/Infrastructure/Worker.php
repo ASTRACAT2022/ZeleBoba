@@ -15,7 +15,7 @@ final class Worker
             match ($topic) {
                 'payment.create'=>$this->paymentService?$this->paymentService->createOrder($payload['order_id']):$this->payments->create($payload['order_id']),
                 'payment.verify'=>$this->paymentService?$this->paymentService->verify($payload['payment_id'],$payload['provider']??null):$this->payments->refresh($payload['payment_id']),
-                'payment.event.process'=>$this->paymentService?->processEvent($payload['event_id']) ?? throw new \RuntimeException('Payment event processor unavailable'),
+                'payment.event.process'=>$this->paymentService===null ? throw new \RuntimeException('Payment event processor unavailable') : $this->paymentService->processEvent($payload['event_id']),
                 'topup.create'=>$this->topupCreate($payload['topup_id']),
                 'topup.after'=>$this->topupAfter($payload['user_id']),
                 'referral.topup'=>isset($payload['topup_id'])?$this->referrals?->processSettledTopup($payload['topup_id']):$this->referralTopup($payload['user_id'],(int)($payload['amount_kopeks']??0)),
