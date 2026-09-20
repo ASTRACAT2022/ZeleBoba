@@ -107,3 +107,59 @@ TOTP: SHA-1, 30 секунд, 6 цифр, окно ±1 шаг с блокиро�
 В заказ добавлены provision_driver, squad_uuid, provider_account, receipt_email, receipt_enabled, vat_code, tax_system и return_url. Это snapshots: повтор checkout не зависит от последующих изменений конфигурации. Remnawave и магазин нельзя незаметно заменить через обычную форму настроек. Ключи можно ротировать, но миграция identities — отдельная операция.
 
 Runtime PostgreSQL отделён от владельца. Скрипт backup и интеграционный restore-test проверяют восстановление БД вместе с ключом. Конкретные пределы нагрузки, SLO, мониторинг и live-контракты требуют проверки на целевой инфраструктуре.
+
+## Как работает биллинг (полная картина)
+
+### Стек и процессы
+- **PHP 8.4+, Symfony 7.4 LTS** (HttpClient/HttpFoundation/Routing), **Twig**, **PDO + PostgreSQL 17**. UI — серверный HTML/Twig, без SPA, покупка работает без JS.
+- 4 PHP-контейнера: `app` (FPM, веб/кабинет/админка), `worker` (outbox-джобы), `scheduler` (Reconciler по таймеру), `bot` (Telegram long-polling/webhook). Все читают одну PostgreSQL `billing` и общий outbox. Nginx отдаёт статику из `public/`, PHP — из `/app/src`.
+- Все зависимости собираются вручную в `Container.php` (не Symfony DI). Конфиг = `Settings::DEFAULTS` + env + переопределения из `app_settings` (секреты шифруются XChaCha20-Poly1305, master key в отдельном файле).
+
+### Поток покупки (полный путь)
+1. **Кабинет/Telegram → BillingService::order()** (HTTP-контроллеры и бот вызывают доменный сервис; в боте нет своего расчёта цены). В одной транзакции: валидация kill-switch (`PURCHASES_ENABLED`, `purchaseErrors`), idempotency-ключ `user_id+key`, снимок тарифа в заказ (`orders` + `order_items`), снапшот версии тарифа, `provider_account`, `return_url`, `receipt_*`. Сразу ставится `payment.create` в outbox.
+2. **Worker: `payment.create`** → `PaymentService::createOrder()` → провайдер (Platega: `POST /v2/transaction/process` с `X-MerchantId`+`X-Secret`) → сохраняет `provider_payment_id`+`checkout_url`. Пользователь платит на `pay.platega.io`.
+3. **Уведомление провайдера** (webhook) приходит на `/webhooks/{provider}`:
+   - `WebhookGuard::claim()` — replay/tamper detection (sha256 payload, UNIQUE(provider, id), mismatch ⇒ tamper).
+   - `PaymentEventStore::receive()` — durable inbox: вставляет `payment_events` (ack только после фикса), ставит `payment.event.process` в outbox. Webhook ≠ команда: settlement всегда через авторитетную проверку.
+4. **Worker: `payment.event.process`** → `PaymentService::processEvent()` → `PaymentEventStore::claim()` (lease/блокировка) → если статус `canceled` — short-circuit (помечает заказы/topups отменёнными, ничего не списывает) → иначе `PaymentService::verify()`.
+5. **`PaymentService::verify(payment_id)`** — авторитетная проверка у провайдера (`PlategaProvider::verify()` ⇨ `GET /transaction/{id}`, Platega возвращает `paymentDetails.amount` gross, `comission`; net = amount − comission). Возвращает `paid/canceled/pending` + net-копейки + привязку.
+6. **Settlement → `BillingService::settle()`** — атомарно в одной транзакции (pg_advisory_xact_lock по `provider:payment_id`):
+   - проверка привязки (заказ=провайдер, сумма net=price_minor, currency, `provider_payment_id` совпадает, не «уже использован», не «принадлежит другому заказу», заказ `pending`);
+   - `payment_receipts` (UNIQUE provider+payment_id, один платёж = один заказ) + `payments` (UNIQUE provider+provider_payment_id) + две противоположные `ledger_entries` (двойная запись, нулевая сумма) + `orders→paid` + подписка (renewal ⇒ `extend()` существующей; новая ⇒ insert `subscriptions` + `provisioning_accounts` + `subscription.provision` в outbox) + `transactions` + аудит + timeline.
+   - **Идемпотентно**: повторный verify/ретрай не создаёт вторую подписку (UNIQUE + advisory lock + payment_receipts).
+7. **Worker: `subscription.provision`** → `RemnawaveProvisioner` (или demo). Успех ⇒ `subscriptions→active`, `remote_id`. Детерминированный username, GET-перед-таймаутом.
+8. **`subscriptions.expires_at`** — единственный бизнес-срок. Оплата закрепляет права независимо от Remnawave: простой выдачи не отменяет оплату (только продление срока через отдельную компенсацию).
+
+### Wallet / topups / бонусы
+- `TopupService` — пополнение баланса (allowlist провайдеров, idempotency, settle по net аналогично заказу). `Wallet` — баланс из approved минус applied.
+- `AutoPurchaseService` — автопокупка после пополнения. `PromoCodeService`, `CartService`, `GiftService`, `TrialService`, `ReferralService` (партнёрские комиссии), `CreatorService` (комиссия создателя-контента, отдельный ledger), `ContestService`/`PollService`/`CampaignService` — промо.
+- `SubscriptionService` — `extend()` (продление от max(now, expires_at)+дней), `expiryAfter()` (календарные месяцы с ограничением последним днём), авто-renew через Reconciler.
+
+### Очередь (outbox) — сердце надёжности
+- `Outbox` — durable-очередь в PostgreSQL. `FOR UPDATE SKIP LOCKED` раздаёт разным workers разные задания. Lease 120с + lock_token (чужой lease не завершишь). **at-least-once**: повторы безопасны благодаря идемпотентности денег.
+- Retry: exp-boosted backoff + jitter, 8 попыток → `dead` (админ может повторить из панели). `JobDeferred` (safe mode/пауза) — не тратит попытки.
+- Приоритеты: `payment.verify`/`payment.event.process`=100, `payment.create`/`topup.create`=90, provisioning=80, telegram=60, broadcast=10.
+- Payload шифруется (enc:) и очищается после done.
+
+### Reconciler (scheduler, каждую минуту) — самовосстановление
+- Advisory-lease (один scheduler). Запускает `ConsistencyChecker` (drift payments/ledger/order-статус; не-деструктивно, пишет в `consistency_checks`).
+- **Re-verify pending-заказов/topups с `provider_payment_id`** — если webhook потерян, тут подберёт.
+- Requeue stale `payment_events` (истёкший lease), повторная выдая `subscription.provision`/`extend` для stuck/retry, авто-renew, Remnawave sync (раз в час, `reconciliation.auto_heal`), self-heal expiry (`status/lifecycle_status` → expired), авто-close устаревших operational_cases, flush mail, чистка устаревших sessions/rate_limits/outbox(done>30д).
+
+### Защита/стейки (security & monetary)
+- **KillSwitch**: safe mode (`SAFE_MODE`) замораживает всю финансовую поверхность; kill-switches `global_purchases`, `provider.{id}`, `remnawave_provision`, `financial_freeze`. `assertCanPurchase/Provision/Withdraw`.
+- **CircuitBreaker**: вокруг интеграций — при падении провайдера размыкается, не сыпет ретраи в мёртвый API.
+- **RateLimiter** (фиксированное окно), **WebhookGuard** (replay/tamper), **SecretRedactor** (не пишем токены/URL в логи).
+- **Четыре глаза (FourEyes)** + **RBAC + Permissions + OptimisticLock** + **audit_log** (неизменяемый) — административные изменения.
+- **Identity**: Argon2id, серверные сессии, TelegramLogin (browser challenge + magic-link, токены только SHA-256, HttpOnly), MFA (TOTP окно ±1, recovery-коды, step-up), rate limiting на вход.
+- **Двухфазное подтверждение платежа**: webhook (inbox) → авторитетный verify у провайдера → settle. Никогда не доверяем браузеру/вебхуку суммы.
+- **Net-сумма (Platega)**: для сверки и settle используется `paymentDetails.amount − comission` (net), что совпадает с суммой заказа. Gross читать нельзя — комиссия ~9% ломает сверку.
+- **Защита «оплатил, но не выдано» (delivery_gap)**: `ConsistencyChecker::deliveryGaps()` находит succeeded-платежи, чей заказ не paid/fulfilled; Reconciler поднимает видимую dedup-операцию `payment.delivery_gap` (failed, «Клиент заплатил, но услуга не выдана — зачислите вручную»). Сейчас по решению оператора — только алерт, без авто-дозачисления/возврата.
+
+### Критические инварианты (подтверждены fault-аудитами)
+- Двойной/параллельный settle ⇒ 1 платёж + 1 подписка.
+- Неверная сумма/валюта/провайдер ⇒ отклонение, заказ остаётся pending.
+- Повтор webhook / реплей / таймаут ⇒ идемпотентно.
+- Один платёж провайдера нельзя привязать к двум заказам/подпискам.
+- Reconciliation-дрейф самовосстанавливается; ledger/audit нередактируемы.
+<!-- project: path:/home/openclaw/.openclaw/.openclaw/workspace -->
