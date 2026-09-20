@@ -71,7 +71,7 @@ final class CircuitBreaker
     public function state(string $name): array
     {
         return $this->db->one('SELECT * FROM circuit_breakers WHERE name=?', [$name])
-            ?? ['name' => $name, 'state' => $this->CLOSED, 'failures' => 0, 'opened_at' => null, 'last_success' => null, 'last_failure' => null, 'updated_at' => 0];
+            ?? ['name' => $name, 'state' => self::CLOSED, 'failures' => 0, 'opened_at' => null, 'last_success' => null, 'last_failure' => null, 'updated_at' => 0];
     }
 
     public function reset(string $name): void
@@ -83,7 +83,7 @@ final class CircuitBreaker
     {
         $this->db->execute(
             'INSERT INTO circuit_breakers(name,state,failures,opened_at,last_success,last_failure,updated_at) VALUES(?,?,0,NULL,NULL,NULL,?) ON CONFLICT DO NOTHING',
-            [$name, $this->CLOSED, time()]
+            [$name, self::CLOSED, time()]
         );
     }
 }

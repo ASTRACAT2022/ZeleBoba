@@ -4,7 +4,7 @@ namespace App\Integration;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class RemnawaveProvisioner implements Provisioner
 {
-    public function __construct(private HttpClientInterface $http, private string $baseUrl, private string $token, private string $squad) {}
+    public function __construct(private HttpClientInterface $http, private string $baseUrl, private string $token, private string $squad, private ?\App\Infrastructure\CircuitBreaker $breaker = null) {}
     public function provision(array $subscription): array
     {
         $squad=($subscription['squad_uuid']??'')!==''?$subscription['squad_uuid']:$this->squad;
@@ -120,6 +120,16 @@ final class RemnawaveProvisioner implements Provisioner
     {
         $options=['auth_bearer'=>$this->token,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0];
         if ($body!==null) $options['json']=$body;
-        return $this->http->request($method,rtrim($this->baseUrl,'/').$path,$options);
+        if ($this->breaker !== null && !$this->breaker->allow('remnawave_api')) {
+            throw new \App\Billing\BillingError('Сервис временно недоступен (Remnawave). Попробуйте позже.');
+        }
+        try {
+            $r = $this->http->request($method,rtrim($this->baseUrl,'/').$path,$options);
+            $this->breaker?->success('remnawave_api');
+            return $r;
+        } catch (\Throwable $e) {
+            $this->breaker?->failure('remnawave_api');
+            throw $e;
+        }
     }
 }

@@ -43,7 +43,7 @@ final class TopupService
             if (!$topup || $topup['provider'] !== $provider || (int)$topup['amount_kopeks'] !== $amount || $topup['currency'] !== $currency) throw new BillingError('Платёж не соответствует пополнению.');
             if ($paymentId==='' || strlen($paymentId)>100 || ($topup['provider_payment_id']!==null && $topup['provider_payment_id']!==$paymentId)) throw new BillingError('Несовпадение платежа пополнения.');
             if ($this->db->one('SELECT order_id FROM payment_receipts WHERE provider=? AND payment_id=?',[$provider,$paymentId])) throw new BillingError('Платёж уже использован для заказа.');
-            if ($topup['status'] !== 'pending') return;
+            if (!\App\Infrastructure\StateMachine::can('topup', (string)$topup['status'], 'paid')) return;
             $dup = $this->db->one('SELECT id FROM topups WHERE provider_payment_id=? AND id<>?', [$paymentId, $topupId]);
             if ($dup) throw new BillingError('Платёж уже принадлежит другому пополнению.');
             $user=$this->db->one('SELECT has_made_first_topup FROM users WHERE id=?'.$this->db->lock(),[$topup['user_id']]);

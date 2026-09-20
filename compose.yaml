@@ -46,28 +46,24 @@ services:
       DATABASE_USER: billing_owner
       DATABASE_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD}
     command: ["sh", "-c", "php bin/console db:migrate && php bin/console db:grant-runtime"]
+  # Single all-in-one container: php-fpm (web) + outbox worker + reconcile
+  # scheduler + telegram long-poll supervised by infra/merge-entrypoint.sh.
+  # nginx reaches FPM via the `app` network alias on fastcgi_pass app:9000.
   app:
     <<: *app
-    # Billing moved to Blesta — ZeleBoba web/worker disabled (kept in 'legacy' profile).
-    profiles: [legacy]
-  worker:
-    <<: *app
-    profiles: [legacy]
-    command: ["php", "bin/console", "worker:run"]
+    command: ["sh", "/app/infra/merge-entrypoint.sh"]
+    environment:
+      DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
+      DATABASE_USER: billing
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      APP_URL: ${APP_URL:?Set APP_URL in .env}
+      APP_ENV: ${APP_ENV:-prod}
+      RECONCILE_SECONDS: "60"
     healthcheck:
-      test: ["CMD", "php", "bin/console", "app:health", "worker"]
-  bot:
-    <<: *app
-    image: zeleboba-bot-mysql:20260914
-    command: ["php", "bin/console", "telegram:poll"]
-    healthcheck:
-      test: ["CMD", "php", "bin/console", "app:health", "telegram"]
-  scheduler:
-    <<: *app
-    profiles: [legacy]
-    command: ["sh", "-c", "while true; do php bin/console billing:reconcile; sleep 60; done"]
-    healthcheck:
-      test: ["CMD", "php", "bin/console", "app:health", "scheduler"]
+      test: ["CMD-SHELL", "php bin/console app:health && php bin/console app:health worker && php bin/console app:health scheduler && php bin/console app:health telegram"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
   web:
     profiles: [legacy]
     image: nginx:1.28-bookworm@sha256:552e7481ca93ffccd046aa658dbbed22caefbc09c66fa7cd247cbb90b8a5c609

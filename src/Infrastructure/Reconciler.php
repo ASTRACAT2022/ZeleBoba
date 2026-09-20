@@ -56,6 +56,51 @@ final class Reconciler
                     }
                 }
             }
+            // Breaker-open alert (read-only monitor — no money mutation). An
+            // OPEN circuit breaker means an upstream (payment provider or
+            // Remnawave) is failing and fail-fast is short-circuiting calls.
+            // Surface each open breaker as a deduplicated Ops operation so the
+            // operator is notified of the outage, not only via /admin/switches.
+            if (isset($this->app->operations) && isset($this->app->circuitBreaker)) {
+                $open = $this->app->db->all("SELECT name,state,failures,opened_at FROM circuit_breakers WHERE state<>'closed' ORDER BY name");
+                foreach ($open as $b) {
+                    $ops = $this->app->operations;
+                    $name = (string)$b['name'];
+                    $op = $ops->start('upstream.breaker_open', ['metadata' => [
+                        'breaker' => $name,
+                        'state'   => (string)$b['state'],
+                        'failures'=> (int)$b['failures'],
+                        'opened_at'=> (int)$b['opened_at'],
+                    ]], 'breaker-open:'.$name);
+                    if (!$op['existing']) {
+                        $statusMsg = $name==='remnawave_api' ? 'Remnawave' : ('платежный провайдер «'.str_replace('_api','',$name).'»');
+                        $ops->event($op['id'], 'upstream.breaker_open.detected', 'failed',
+                            'Circuit breaker «'.$name.'» открыт ('.(string)$b['state'].', failures='.(int)$b['failures']
+                            .'). Upstream '.$statusMsg.' недоступен — вызовы отклоняются fail-fast. Проверьте сервис и сбросьте breaker в /admin/switches.',
+                            ['metadata' => ['failures' => (int)$b['failures']]]);
+                        $ops->complete($op['id'], 'failed', 'Ожидает проверки оператора');
+                    }
+                }
+                // Auto-resolve: when a breaker has returned to closed, resolve any
+                // still-open breaker_open operation so stale failed alerts do not
+                // accumulate. Matches only not-completed ops for that breaker.
+                $resolved = $this->app->db->all(
+                    "SELECT o.id,o.correlation_id FROM operations o WHERE o.type='upstream.breaker_open' AND o.status IN ('processing','failed') AND o.correlation_id LIKE 'breaker-open:%'"
+                );
+                $closed = $this->app->db->all("SELECT name FROM circuit_breakers WHERE state='closed'");
+                $closedSet = [];
+                foreach ($closed as $c) $closedSet[(string)$c['name']] = true;
+                foreach ($resolved as $ro) {
+                    $bname = substr($ro['correlation_id'], strlen('breaker-open:'));
+                    if (isset($closedSet[$bname])) {
+                        $ops = $this->app->operations;
+                        $ops->event($ro['id'], 'upstream.breaker_open.resolved', 'success',
+                            'Circuit breaker «'.$bname.'» вернулся в closed — сервис восстановлен.',
+                            ['metadata' => ['breaker' => $bname]]);
+                        $ops->complete($ro['id'], 'success', 'Breaker закрылся');
+                    }
+                }
+            }
             $after='';$bucket=intdiv(time(),300);
             // Only retry providers that can be verified with the credentials
             // currently installed. Retrying demo or incomplete integrations
@@ -98,6 +143,19 @@ final class Reconciler
                 $topic=$account['remote_id']===null?'subscription.provision':'subscription.extend';
                 $this->app->outbox->enqueue($topic,'reconcile-account:'.$account['subscription_id'].':'.intdiv(time(),300),['subscription_id'=>$account['subscription_id']]);
             }
+            // §7.2 protection: the worst-case enqueue-gap is an order committed
+            // as paid whose subscription was never created (settle() crashed
+            // between the UPDATE orders and the INSERT subscriptions, both of
+            // which live in the same tx — so this should not happen; if it
+            // does, no subscription.provision job exists to re-run). Such an
+            // order is money received with no service. Surface each one as a
+            // visible, deduplicated operation (read-only, no money mutation) so
+            // an operator credits/settles manually — same philosophy as
+            // payment.delivery_gap. Also re-enqueue provisioning for paid
+            // orders whose subscription is created but never left pending
+            // (safe recovery: Worker::provision is idempotent via the
+            // deterministic zb_<sub> username).
+            $this->reconcilePaidNoSubscription($db);
             // Auto-renew: enqueue renew jobs for subscriptions near expiry
             $autoEnabled=$db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
             if (!$autoEnabled || $autoEnabled['value']==='1') {
@@ -164,4 +222,58 @@ final class Reconciler
         }finally{$db->execute("DELETE FROM advisory_leases WHERE name='reconcile' AND token=?",[$token]);}
     }
     public static function heartbeat(Database $db,string $name):void{$db->execute('INSERT INTO runtime_heartbeats VALUES(?,?) ON CONFLICT(name) DO UPDATE SET seen_at=excluded.seen_at',[$name,time()]);}
+    /**
+     * §7.2 proactive protection for the worst-case enqueue-gap: an order
+     * committed as paid whose subscription was never created (settle() would
+     * crash between UPDATE orders and INSERT subscriptions, both of which live
+     * in the same tx — so this should not happen; if it does there is no
+     * subscription.provision job to re-run). Money received with no service:
+     * surface each one as a deduplicated, read-only operation so an operator
+     * credits/settles manually — same philosophy as payment.delivery_gap.
+     * Also re-enqueue provisioning for paid orders whose subscription was
+     * created but never left pending (safe recovery: Worker::provision is
+     * idempotent via the deterministic zb_<sub> username). This is NOT covered
+     * by OperationsIntelligence::invariants(true), which only runs on an admin
+     * manual click (/admin/intelligence); here it runs every reconcile tick.
+     */
+    private function reconcilePaidNoSubscription(Database $db): void
+    {
+        if (!isset($this->app->operations) || !isset($this->app->outbox)) return;
+        $paidNoSub=$db->all(
+            "SELECT o.id AS order_id,o.user_id,o.provider,o.plan_id,o.price_minor,o.status,o.paid_at FROM orders o
+             WHERE o.status IN ('paid') AND o.paid_at IS NOT NULL
+               AND EXISTS (SELECT 1 FROM payments p WHERE p.order_id=o.id AND p.status='succeeded')
+               AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.order_id=o.id)
+             ORDER BY o.paid_at LIMIT 50"
+        );
+        foreach ($paidNoSub as $g) {
+            $ops=$this->app->operations;
+            $op=$ops->start('payment.paid_no_subscription',[
+                'user_id'=>$g['user_id'],
+                'order_id'=>$g['order_id'],
+                'metadata'=>['provider'=>$g['provider'],'plan_id'=>$g['plan_id'],'amount_minor'=>(int)$g['price_minor'],'status'=>$g['status']],
+            ],'paid-no-subscription:'.$g['order_id']);
+            if ($op['existing']) continue;
+            $dec=\App\Integration\Payment\AbstractProvider::decimal((int)$g['price_minor']);
+            $ops->event($op['id'],'payment.paid_no_subscription.detected','failed',
+                'Клиент заплатил ('.$dec.' ₽), но подписка НЕ создана (заказ '.substr($g['order_id'],0,8).'). Разрыв commit/enqueue — зачислите вручную и/или выдайте доступ.',
+                ['metadata'=>['amount_minor'=>(int)$g['price_minor']]]);
+            $ops->complete($op['id'],'failed','Ожидает ручного зачисления');
+            if ($this->app->mailer !== null) {
+                $adm=$db->one("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL ORDER BY created_at LIMIT 1")['email']??'';
+                if ($adm!=='') { try { $this->app->mailer->queue($adm,'[ASTRACAT] Paid order without subscription: '.substr($g['order_id'],0,8),'Клиент заплатил, но подписка НЕ создана. Разрыв enqueue. Проверьте в Ops (/admin/operations).'); } catch (\Throwable) {} }
+            }
+        }
+        // Paid order whose sub exists but never left pending => re-enqueue provision.
+        $paidSubPending=$db->all(
+            "SELECT s.id AS sub_id,o.id AS order_id FROM orders o
+             JOIN subscriptions s ON s.order_id=o.id
+             WHERE o.status='paid' AND s.lifecycle_status IN ('pending')
+               AND s.remote_id IS NULL AND s.expires_at>?
+             ORDER BY o.paid_at LIMIT 100",[time()]
+        );
+        foreach ($paidSubPending as $ps) {
+            $this->app->outbox->enqueue('subscription.provision','reconcile-paid-pending:'.$ps['sub_id'].':'.intdiv(time(),300),['subscription_id'=>$ps['sub_id']]);
+        }
+    }
 }

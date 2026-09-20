@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace App\Integration;
 use App\Billing\{BillingError,BillingService};
 use App\Infrastructure\Database;
+use App\Infrastructure\WebhookGuard;
 use App\Integration\Payment\ProviderRegistry;
 use App\Payments\PaymentEventStore;
 use App\Observability\OperationsService;
@@ -21,6 +22,8 @@ final class PaymentService
         private array $config,
         private ProviderRegistry $registry,
         private ?PaymentEventStore $events=null,
+        private ?WebhookGuard $webhookGuard=null,
+        private ?\App\Integration\Mailer $mailer=null,
     ) {}
     public function registry(): ProviderRegistry { return $this->registry; }
     /** Create checkout for an order. Returns [payment_id, checkout_url]. */
@@ -68,8 +71,8 @@ final class PaymentService
         $params=[$paymentId,$paymentId];
         $scope=$providerId!==null?' AND provider=?':'';
         if ($providerId!==null) $params[]=$providerId;
-        $orders=$this->db->all("SELECT * FROM orders WHERE (provider_payment_id=? OR (provider='freekassa' AND id=?))".$scope,$params);
-        $topups=$this->db->all("SELECT * FROM topups WHERE (provider_payment_id=? OR (provider='freekassa' AND id=?))".$scope,$params);
+        $orders=$this->db->all("SELECT * FROM orders WHERE provider_payment_id=? OR id=?".$scope,$params);
+        $topups=$this->db->all("SELECT * FROM topups WHERE provider_payment_id=? OR id=?".$scope,$params);
         if (count($orders)+count($topups)>1) throw new BillingError('Неоднозначная привязка платежа.');
         $entity=$orders[0]??$topups[0]??null;
         $providerId??=$entity['provider']??null;
@@ -78,7 +81,7 @@ final class PaymentService
         if (!in_array($result['status']??'',['paid','canceled'],true)) return;
         $metadata=$result['metadata']??[];
         // Recover a checkout that succeeded remotely before its id was stored locally.
-        if (!$entity && in_array($providerId,['yookassa','freekassa'],true)) {
+        if (!$entity && in_array($providerId,['yookassa'],true)) {
             $orderId=$metadata['order_id']??$metadata['merchant_order_id']??'';
             $topupId=$metadata['topup_id']??$metadata['merchant_order_id']??'';
             $order=$this->db->one('SELECT * FROM orders WHERE id=? AND provider=?',[$orderId,$providerId]);
@@ -96,12 +99,12 @@ final class PaymentService
         // Platega tx returns no orderId, so an empty metadata id must not reject
         // a topup/order whose provider_payment_id already equals the payment.
         $boundById = ($entity['provider_payment_id'] ?? null) === (string)$paymentId;
-        $expected = $providerId === 'freekassa' ? ($metadata['merchant_order_id'] ?? null) : ($metadata[$isOrder ? 'order_id' : 'topup_id'] ?? null);
+        $expected = $metadata[$isOrder ? 'order_id' : 'topup_id'] ?? null;
         if (!$boundById
-            && in_array($providerId, ['yookassa', 'platega', 'freekassa'], true)
+            && in_array($providerId, ['yookassa', 'platega'], true)
             && $expected !== $entity['id']) throw new BillingError('Платёж относится к другому заказу.');
         if ($providerId==='cryptobot' && ($metadata['payload']??'')!==($isOrder?'order:':'topup:').$entity['id']) throw new BillingError('CryptoBot: неверная привязка счёта.');
-        $account=match($providerId){'yookassa'=>($this->config['YOOKASSA_SHOP_ID']??''),'platega'=>($this->config['PLATEGA_MERCHANT_ID']??''),'freekassa'=>($this->config['FREEKASSA_SHOP_ID']??''),default=>''};
+        $account=match($providerId){'yookassa'=>($this->config['YOOKASSA_SHOP_ID']??''),'platega'=>($this->config['PLATEGA_MERCHANT_ID']??''),default=>''};
         if (isset($entity['provider_account']) && $entity['provider_account']!=='' && $entity['provider_account']!==$account) throw new BillingError('Несовпадение магазина.');
         $actualId=$result['payment_id']??'';
         if (!is_string($actualId) || $actualId==='' || strlen($actualId)>100 || ($entity['provider_payment_id']!==null && $entity['provider_payment_id']!==$actualId)) throw new BillingError('Несовпадение платежа.');
@@ -137,8 +140,63 @@ final class PaymentService
             // are committed. The provider API remains authoritative for settlement.
             $this->db->transaction(function () use ($paymentId,$providerId,$status,$result) {
                 $eventId=(string)($result['event_id'] ?? ($paymentId.':'.$status));
+                // Tamper guard (only defense in depth since Platega webhooks
+                // carry no HMAC/timestamp): same provider_event_id but changed
+                // payload content is a tamper attempt. WebhookGuard::claim()
+                // returns 'new' | 'duplicate'(same payload, already processed)
+                // | 'same_payload'(not yet processed) and THROWS on an id reuse
+                // with different content — that exception is caught below and
+                // surfaced without touching money.
+                if ($this->webhookGuard !== null) {
+                    try {
+                        $claim = $this->webhookGuard->claim($providerId, $eventId, $result);
+                    } catch (\RuntimeException $e) {
+                        // Tamper: same event id, different payload. Log and raise
+                        // an Ops alarm (read-only) but acknowledge the webhook so
+                        // an attacker can't force a 500-loop; money is untouched.
+                        error_log('webhook.tamper '.$providerId.'/'.$eventId.' '.$e->getMessage());
+                        try {
+                            $ops=(new OperationsService($this->db));
+                            $corr='webhook-tamper:'.$providerId.':'.$eventId;
+                            $op=$ops->start('webhook.tamper',['metadata'=>['provider'=>$providerId,'event_id'=>$eventId]],$corr);
+                            if(!$op['existing']){
+                                $ops->event($op['id'],'webhook.tamper.detected','failed','Webhook payload mismatch (same id, different content) for '.$providerId.'/'.substr($eventId,0,40).' — possible tamper.',['metadata'=>['provider'=>$providerId,'event_id'=>$eventId]]);
+                                $ops->complete($op['id'],'failed','Проверить руками');
+                                // Deliver a human-visible alert through the working
+                                // SMTP pipeline (queue -> Reconciler flushQueue -> send).
+                                if ($this->mailer !== null) {
+                                    $adminEmail=$this->db->one("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL ORDER BY created_at LIMIT 1")['email']??'';
+                                    if ($adminEmail !== '') {
+                                        try {
+                                            $this->mailer->queue($adminEmail,
+                                                '[ASTRACAT] Webhook tamper: '.$providerId,
+                                                'Webhook payload mismatch (same id, different content) for '.$providerId.'/'.substr($eventId,0,40).'<br>Событие помечено processed=2 (tamper). Проверьте, не идёт ли атака на вебхуки.'
+                                            );
+                                        } catch (\Throwable) {}
+                                    }
+                                }
+                            }
+                        } catch (\Throwable) {}
+                        return;
+                    }
+                    if ($claim === 'duplicate') {
+                        return; // same payload, already processed => benign replay
+                    }
+                }
                 $id=$this->events?->receive($providerId,$eventId,$paymentId,$result,true) ?? '';
                 if ($id!=='') {
+                    // Replay guard: if this event was already fully processed, a
+                    // repeated delivery of the same provId/eventId is a benign
+                    // duplicate (or a replay) — ack it but do NOT re-enqueue a
+                    // second outbox command, or settlement state could be
+                    // re-evaluated on the same event. Only first-seen (not yet
+                    // processed) events spawn a processing job.
+                    $already = $this->db->one(
+                        "SELECT status FROM payment_events WHERE id=?", [$id]
+                    );
+                    if ($already !== null && $already['status'] === 'processed') {
+                        return; // benign replay/duplicate: already handled
+                    }
                     $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
                         Database::id(),'payment.event.process','payment-event:'.$id,json_encode(['event_id'=>$id],JSON_THROW_ON_ERROR),100,time(),time(),$id
                     ]);

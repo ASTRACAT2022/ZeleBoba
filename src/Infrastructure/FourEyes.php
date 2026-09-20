@@ -70,15 +70,25 @@ final class FourEyes
     }
 
     /**
-     * Enforce four-eyes: if the action is sensitive AND the actor is the sole
-     * admin (no second reviewer available), enqueue and halt — the action cannot
-     * proceed until a second operator approves. Returns null when enqueued.
+     * Enforce four-eyes: for a sensitive action that is NOT exclusively owned
+     * by a single operator, require a second reviewer.
+     *
+     * Solo-admin simplification (ТЗ «FourEyes»): when exactly one admin exists
+     * in the system, there is no possible second reviewer — enqueueing a
+     * pending approval would deadlock the action forever (nobody can approve
+     * the requester's own request, approve() rejects actor==reviewer). In that
+     * case the sole admin IS the second pair of eyes, so the action proceeds
+     * directly and returns null; the fact that it was gated is still recorded
+     * in the audit trail by the caller. When two or more admins exist, the
+     * strict gate applies (enqueue + halt).
      */
     public function guard(string $action, string $actor, array $payload, string $reason = ''): ?string
     {
         if (!$this->requiresApproval($action)) return null;
-        // If there is genuinely only one admin, we still enqueue so the action
-        // is gated — safer to block than to allow unilateral irreversible change.
+        $admins = $this->db->one("SELECT count(*) c FROM users WHERE role='admin'")['c'] ?? 0;
+        // Sole admin: no second reviewer possible -> proceed (no deadlock).
+        if ((int)$admins <= 1) return null;
+        // Two or more admins: enforce strict four-eyes (requester != reviewer).
         return $this->request($action, $actor, $payload, $reason);
     }
 

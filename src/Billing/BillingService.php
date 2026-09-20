@@ -76,7 +76,7 @@ final class BillingService
                 if ($receipt['order_id']!==$orderId) throw new BillingError('Платёж уже принадлежит другому заказу.');
                 return;
             }
-            if ($order['status']!=='pending') throw new BillingError('Заказ уже обработан.');
+            if (!\App\Infrastructure\StateMachine::can('order', (string)$order['status'], 'paid')) throw new BillingError('Заказ уже обработан.');
             $now=time();
             $this->db->execute('INSERT INTO payment_receipts VALUES(?,?,?,?,?,?)',[$provider,$paymentId,$orderId,$amount,$currency,$now]);
             $this->db->execute("INSERT INTO payments(id,order_id,user_id,provider,provider_payment_id,amount_minor,currency,status,created_at,paid_at) VALUES(?,?,?,?,?,?,?,'succeeded',?,?) ON CONFLICT(provider,provider_payment_id) DO NOTHING",[
