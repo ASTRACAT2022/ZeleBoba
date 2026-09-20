@@ -121,3 +121,9 @@ img{max-width:100%;height:auto}
 .button{min-height:44px;padding-top:10px;padding-bottom:10px}
 input,select{min-height:44px;padding-top:10px;padding-bottom:10px}
 @media(max-width:650px){footer{align-items:flex-start;flex-direction:column;gap:4px}.row-form label{min-width:min(100%,200px)}.section-heading{align-items:flex-start}.section-heading>.button{width:100%}}
+
+/* Cancel/stop action (Отказаться от подписки) — clear dismissive styling */
+.button.danger{background:transparent;color:#c0392b;border:1.5px solid rgba(192,57,43,.55);border-radius:999px;font-weight:600}
+.button.danger:hover{background:rgba(192,57,43,.1);border-color:#c0392b}
+html[data-theme="dark"] .button.danger{color:#ff8a80;border-color:rgba(255,138,128,.5)}
+html[data-theme="dark"] .button.danger:hover{background:rgba(255,138,128,.12);border-color:#ff8a80}

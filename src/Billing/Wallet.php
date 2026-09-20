@@ -5,7 +5,7 @@ use App\Infrastructure\Database;
 final class Wallet
 {
     public const TYPES = [
-        'balance_topup','subscription_purchase','subscription_renewal','trial_conversion',
+        'balance_topup','subscription_purchase','subscription_renewal','subscription_daily','trial_conversion',
         'referral_reward','referral_withdrawal','traffic_topup','device_addon',
         'gift_purchase','promo_credit','manual_adjust','refund',
     ];

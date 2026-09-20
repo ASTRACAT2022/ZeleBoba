@@ -169,6 +169,9 @@ final class Reconciler
                 // do not exhaust a retry counter that would prevent a later
                 // topup from renewing the subscription.
                 $db->transaction(function()use($rows){foreach($rows as $r)$this->app->outbox->enqueue('subscription.renew','renew:'.$r['id'].':'.intdiv(time(),60),['subscription_id'=>$r['id']]);});
+                // Daily auto-charge: wake daily-priced active subs whose period has elapsed.
+                $daily=$db->all("SELECT s.id FROM subscriptions s JOIN plans p ON p.id=COALESCE(s.renew_plan_id,s.plan_id) WHERE s.auto_renew=1 AND s.status='active' AND s.expires_at>? AND (s.last_daily_charge_at IS NULL OR s.last_daily_charge_at + p.duration_days*86400 <= ?) AND p.duration_days<=1 LIMIT 200",[time(),time()]);
+                $db->transaction(function()use($daily){foreach($daily as $r)$this->app->outbox->enqueue('subscription.daily','daily:'.$r['id'].':'.intdiv(time(),3600),['subscription_id'=>$r['id']]);});
                 // Handle failed renewal orders: if renew_order is canceled/expired, schedule retry
                 $failed=$db->all("SELECT s.id,s.renew_order_id,s.renew_fail_count FROM subscriptions s JOIN orders o ON o.id=s.renew_order_id WHERE s.auto_renew=1 AND s.status='active' AND o.status='canceled' LIMIT 100");
                 foreach($failed as $f){

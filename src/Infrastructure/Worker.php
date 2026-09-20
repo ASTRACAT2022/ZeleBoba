@@ -22,6 +22,7 @@ final class Worker
                 'subscription.provision'=>$this->provision($payload['subscription_id']),
                 'subscription.extend'=>$this->extend($payload['subscription_id'],$payload['order_id']??null),
                 'subscription.renew'=>$this->renew($payload['subscription_id']),
+                'subscription.daily'=>$this->dailyCharge($payload['subscription_id']),
                 'subscription.traffic'=>$this->traffic($payload['subscription_id'],(int)($payload['traffic_gb']??0)),
                 'subscription.devices'=>$this->devices($payload['subscription_id'],(int)($payload['devices']??0)),
                 'gift.create'=>$this->giftCreate($payload),
@@ -208,10 +209,22 @@ final class Worker
         $op=$this->db->one('SELECT id FROM operations WHERE subscription_id=? ORDER BY started_at DESC LIMIT 1',[$subscriptionId]);
         if($op)(new OperationsService($this->db))->event($op['id'],$type,$status,$message,['subscription_id'=>$subscriptionId,'metadata'=>$metadata]);
     }
+    /** Clean daily auto-charge for daily-priced tariffs (see BillingService::dailyChargeFromBalance). */
+    private function dailyCharge(string $subscriptionId): void
+    {
+        if ($this->billing) {
+            $this->billing->dailyChargeFromBalance($subscriptionId);
+            return;
+        }
+        // Without BillingService wiring nothing safe can be done here; the
+        // subscription simply stays in grace until reconciliation enqueues again.
+        $this->db->execute('UPDATE subscriptions SET renew_failed_at=?,renew_at=? WHERE id=? AND auto_renew=1 AND status=\'active\'',[time(),time()+3600,$subscriptionId]);
+    }
     private function renew(string $id): void
     {
         if ($this->billing) {
             $this->billing->autoRenewFromBalance($id);
+
             return;
         }
         $s=$this->db->one('SELECT * FROM subscriptions WHERE id=?',[$id]);

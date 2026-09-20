@@ -121,6 +121,12 @@ final class BillingService
                 $months=(int)($this->db->one('SELECT duration_months FROM plans WHERE id=?',[$order['plan_id']])['duration_months'] ?? 0);
                 $expiry=(new SubscriptionService($this->db,$this->outbox))->expiryAfter($now,(int)$order['duration_days'],$months);
                 $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,?,?,'provisioning',?,?,?,?,?,?,'pending',?,?,?)",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
+                // Daily-priced tariffs auto-enable the daily charge: while the
+                // wallet covers the daily price the subscription renews itself.
+                if ((int)$order['duration_days']<=1 && ($this->config['AUTORENEW_ENABLED']??'0')==='1') {
+                    $this->db->execute('UPDATE subscriptions SET auto_renew=1,renew_plan_id=?,renew_price_minor=?,last_daily_charge_at=? WHERE id=? AND status=\'provisioning\'',[$order['plan_id'],(int)$order['price_minor'],$now,$sub]);
+                    $this->timeline?->record($order['user_id'], 'subscription.daily_auto_enabled', ['subscription_id'=>$sub,'plan_id'=>$order['plan_id']], $now);
+                }
                 $this->db->execute('UPDATE operations SET subscription_id=? WHERE id=?',[$sub,$op['id']]);
                 $operations->event($op['id'],'subscription.created','success','Subscription created',['subscription_id'=>$sub,'metadata'=>['expires_at_after'=>$expiry]]);
                 $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,state,created_at,updated_at) VALUES(?,?,?,'pending',?,?)",[Database::id(),$sub,$order['provision_driver']??'demo',$now,$now]);
@@ -248,13 +254,65 @@ final class BillingService
             $this->db->execute('UPDATE orders SET provision_driver=?,squad_uuid=?,provider_account=?,receipt_email=?,receipt_enabled=?,vat_code=?,tax_system=?,client_ip=?,return_url=? WHERE id=?',[
                 $original['provision_driver'],$original['squad_uuid'],$original['provider_account'],$original['receipt_email'],$original['receipt_enabled'],$original['vat_code'],$original['tax_system'],$original['client_ip'],$original['return_url'],$orderId,
             ]);
-            $this->db->execute('UPDATE subscriptions SET renew_order_id=?,renew_at=NULL WHERE id=?',[$orderId,$subscriptionId]);
-            (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_renewal','Автопродление: '.$plan['name'],'balance',$orderId);
-            $this->settle($orderId,$original['provider'],'balance_'.$orderId,$price,$plan['currency']);
+            $this->debitRenewal($sub,$plan,$price,$orderId,$original['provider']);
             $this->audit('system','subscription.autorenew_debited',$subscriptionId);
             return true;
         });
     }
+
+    /**
+     * Clean daily auto-charge for daily-priced tariffs (e.g. "Сутки 4₽").
+     * While the subscription is active and the customer opted in (auto_renew=1),
+     * it debits the plan price from the wallet exactly once per period
+     * (period = duration_days*86400; 1 day for the daily tariff) and extends
+     * expires_at by one period. `last_daily_charge_at` is the dedup/idempotency
+     * gate, so a concurrent or duplicate job can never double-debit.
+     *
+     * No renewal orders, no provider calls, no retry counters - the charge is a
+     * plain wallet debit that keeps the existing subscription alive. If the
+     * balance is short it stays in grace and simply retries next period
+     * (nothing is lost, nothing is charged, nothing is cancelled).
+     * Returning false means "not due / no charge now", never that intent was lost.
+     */
+    public function dailyChargeFromBalance(string $subscriptionId): bool
+    {
+        return $this->db->transaction(function() use($subscriptionId) {
+            $now=time();
+            $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$subscriptionId]);
+            if (!$sub || (int)$sub['auto_renew']!==1 || $sub['status']!=='active') return false;
+            $planId=(string)($sub['renew_plan_id']??$sub['plan_id']);
+            $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
+            if (!$plan) return false;
+            $price=(int)($sub['renew_price_minor']??0);
+            if ($price<=0) $price=(int)$plan['price_minor'];
+            $period=max(1,(int)$plan['duration_days'])*86400;
+            $last=(int)($sub['last_daily_charge_at']??0);
+            // Not due yet: charge at most once per period.
+            if ($last>0 && $now-$last<$period) return false;
+            $user=$this->db->one('SELECT * FROM users WHERE id=? AND disabled=0'.$this->db->lock(),[$sub['user_id']]);
+            if (!$user || (int)$user['balance_kopeks']<$price) {
+                // In grace: never charge, never cancel. A later topup will wake
+                // this job and it will be charged the next run it is due.
+                $this->audit('system','subscription.daily_waiting_balance',$subscriptionId);
+                return false;
+            }
+            // Extend from now (never stack onto a stale anchor), keep paid time.
+            $anchor=max($now,(int)$sub['expires_at']);
+            $newExpiry=$anchor+$period;
+            $this->db->execute('UPDATE subscriptions SET expires_at=?,last_daily_charge_at=?,renew_failed_at=NULL WHERE id=?',[$newExpiry,$now,$subscriptionId]);
+            $txId=Database::id();
+            (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_daily','Ежедневное автосписание: '.$plan['name'],'balance',$txId);
+            $this->audit('system','subscription.daily_debited',$subscriptionId);
+            return true;
+        });
+    }
+
+    private function debitRenewal(array $sub,array $plan,int $price,string $orderId,string $provider): void
+    {
+        (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_renewal','Автопродление: '.$plan['name'],'balance',$orderId);
+        $this->settle($orderId,$provider,'balance_'.$orderId,$price,$plan['currency']);
+    }
+
 
     /** Schedule short plans safely: a one-day plan renews roughly 8h early,
      * never immediately after the prior successful renewal. $daysBefore, if
