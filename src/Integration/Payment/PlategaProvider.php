@@ -179,10 +179,19 @@ final class PlategaProvider extends AbstractProvider
             throw $e;
         }
         $status = strtoupper((string)($res['status'] ?? ''));
+        // Platega returns paymentDetails.amount in RUB rubles (gross) with a
+        // separate `comission` field; the merchant-receivable (net) amount =
+        // paymentDetails.amount - comission. ZeleBoba settles against the order
+        // amount (net), so report the NET amount back in kopeks. Without this, a
+        // customer charge of 199.00 + 9% commission (216.91) was read as 21691
+        // kopeks vs the order's 19900 -> settle() rejected "Платёж не
+        // соответствует заказу" and the Reconciler re-verified forever.
+        $amountRub = (float)($res['paymentDetails']['amount'] ?? 0);
+        $commission = (float)($res['comission'] ?? 0);
+        $netRub = max(0.0, $amountRub - $commission);
         return [
             'status' => $status === 'CONFIRMED' ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED', 'CANCELED'], true) ? 'canceled' : 'pending'),
-            // Platega returns paymentDetails.amount in RUB rubles; convert back to kopeks.
-            'amount_kopeks' => (int)round(((float)($res['paymentDetails']['amount'] ?? 0)) * 100),
+            'amount_kopeks' => (int)round($netRub * 100),
             'currency' => (string)($res['paymentDetails']['currency'] ?? 'RUB'),
             'payment_id' => (string)($res['id'] ?? $res['transactionId'] ?? $paymentId),
             'metadata' => ['order_id' => (string)($res['orderId'] ?? ''), 'topup_id' => (string)($res['orderId'] ?? '')],
