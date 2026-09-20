@@ -220,13 +220,14 @@ final class Worker
         // Check global autorenew toggle
         $enabled=$this->db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
         if ($enabled && $enabled['value']==='0') return;
-        // Check max fails
-        $maxFails=(int)($this->db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_MAX_FAILS'")['value']??3);
-        if ((int)$s['renew_fail_count']>=$maxFails) return;
         $planId=$s['renew_plan_id']??$this->db->one('SELECT plan_id FROM orders WHERE id=?',[$s['order_id']])['plan_id']??null;
         if (!$planId) return;
         $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
         if (!$plan) return;
+        // Check max fails (per-plan override wins over global)
+        $globalMaxFails=(int)($this->db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_MAX_FAILS'")['value']??3);
+        $maxFails=(isset($plan['autorenew_max_fails']) && (int)$plan['autorenew_max_fails']>0)?(int)$plan['autorenew_max_fails']:$globalMaxFails;
+        if ((int)$s['renew_fail_count']>=$maxFails) return;
         $user=$this->db->one('SELECT * FROM users WHERE id=?',[$s['user_id']]);
         if (!$user || (int)$user['disabled']===1) return;
         $email=$user['email']?:($user['telegram_id']?$user['telegram_id'].'@telegram.org':null);

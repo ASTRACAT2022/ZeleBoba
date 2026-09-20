@@ -188,7 +188,7 @@ final class BillingService
                 if (($this->config['AUTORENEW_ENABLED']??'0')!=='1') throw new BillingError('Автопродление отключено администратором.');
                 $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$sub['plan_id']]);
                 if (!$plan) throw new BillingError('Тариф подписки больше недоступен.');
-                $renewAt=$this->renewAt((int)$sub['expires_at'],(int)$plan['duration_days']);
+                $renewAt=$this->renewAt((int)$sub['expires_at'],(int)$plan['duration_days'],isset($plan['autorenew_days_before'])?(int)$plan['autorenew_days_before']:null);
                 $this->db->execute('UPDATE subscriptions SET auto_renew=1,renew_plan_id=?,renew_price_minor=?,renew_at=?,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?',[$plan['id'],(int)$plan['price_minor'],$renewAt,$subscriptionId]);
                 $this->audit($userId,'subscription.autorenew_on',$subscriptionId);
             } else {
@@ -257,11 +257,15 @@ final class BillingService
     }
 
     /** Schedule short plans safely: a one-day plan renews roughly 8h early,
-     * never immediately after the prior successful renewal. */
-    private function renewAt(int $expiresAt,int $durationDays): int
+     * never immediately after the prior successful renewal. $daysBefore, if
+     * non-null, overrides the global AUTORENEW_DAYS_BEFORE for this plan.
+     */
+    private function renewAt(int $expiresAt,int $durationDays,?int $daysBefore=null): int
     {
         $period=max(1,$durationDays)*86400;
-        $configured=max(1,min(14,(int)($this->config['AUTORENEW_DAYS_BEFORE']??3)))*86400;
+        $global=(int)($this->config['AUTORENEW_DAYS_BEFORE']??3);
+        $configured=($daysBefore!==null && $daysBefore>0)?$daysBefore:$global;
+        $configured=max(1,min(14,$configured))*86400;
         $lead=min($configured,max(300,intdiv($period,3)));
         return max(time()+60,$expiresAt-$lead);
     }

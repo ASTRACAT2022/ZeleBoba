@@ -33,10 +33,13 @@ trait AdminActions
         if($handler==='admin-plans')return $this->render('admin-plans',['plans'=>$db->all('SELECT * FROM plans ORDER BY active DESC,price_minor')]);
         if($handler==='admin-plan-save'){
             $name=trim($input->get('name',''));$price=filter_var($input->get('price_minor'),FILTER_VALIDATE_INT);$days=$input->getInt('duration_days');$devices=$input->getInt('devices');$traffic=filter_var($input->get('traffic_gb'),FILTER_VALIDATE_INT);$squad=trim($input->get('squad_uuid',''));
-            if(!$name||mb_strlen($name)>100||$price<100||$price>100000000||$days<1||$days>3650||$devices<0||$devices>20||$traffic===false||$traffic<0||$traffic>100000||($squad!==''&&!preg_match('/^[0-9a-f-]{36}$/iD',$squad)))throw new BillingError('Проверьте параметры тарифа. Цена указывается в копейках.');
-            $db->transaction(function()use($db,$input,$name,$price,$days,$devices,$traffic,$squad,$id,$uid){
+            // Optional per-tariff auto-renew tuning; empty string means "use global default" (NULL).
+            $adbg=$input->get('autorenew_days_before','');$adb=($adbg==='')?null:(int)$adbg;
+            $amfg=$input->get('autorenew_max_fails','');$amf=($amfg==='')?null:(int)$amfg;
+            if(!$name||mb_strlen($name)>100||$price<100||$price>100000000||$days<1||$days>3650||$devices<0||$devices>20||$traffic===false||$traffic<0||$traffic>100000||($squad!==''&&!preg_match('/^[0-9a-f-]{36}$/iD',$squad))||($adb!==null&&($adb<1||$adb>14))||($amf!==null&&($amf<1||$amf>10)))throw new BillingError('Проверьте параметры тарифа. Цена указывается в копейках.');
+            $db->transaction(function()use($db,$input,$name,$price,$days,$devices,$traffic,$squad,$adb,$amf,$id,$uid){
                 if(!$db->one('SELECT id FROM plans WHERE id=?'.$db->lock(),[$id]))throw new BillingError('Тариф не найден.');
-                $db->execute('UPDATE plans SET name=?,price_minor=?,duration_days=?,devices=?,traffic_bytes=?,squad_uuid=?,active=? WHERE id=?',[$name,$price,$days,$devices,$traffic*1073741824,$squad,$input->get('active')==='1'?1:0,$id]);
+                $db->execute('UPDATE plans SET name=?,price_minor=?,duration_days=?,devices=?,traffic_bytes=?,squad_uuid=?,autorenew_days_before=?,autorenew_max_fails=?,active=? WHERE id=?',[$name,$price,$days,$devices,$traffic*1073741824,$squad,$adb,$amf,$input->get('active')==='1'?1:0,$id]);
                 // Product changes create a new immutable version. Existing orders
                 // and subscriptions remain pinned to their previous version.
                 $next=(int)($db->one('SELECT COALESCE(MAX(version_number),0) v FROM plan_versions WHERE plan_id=?',[$id])['v']??0)+1;

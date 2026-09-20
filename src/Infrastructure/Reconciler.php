@@ -164,7 +164,7 @@ final class Reconciler
             $autoEnabled=$db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
             if (!$autoEnabled || $autoEnabled['value']==='1') {
                 $maxFails=(int)($db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_MAX_FAILS'")['value']??3);
-                $rows=$db->all("SELECT id,expires_at FROM subscriptions WHERE auto_renew=1 AND status='active' AND expires_at>? AND renew_at IS NOT NULL AND renew_at<=? AND (renew_order_id IS NULL OR renew_order_id='') AND renew_fail_count<? LIMIT 100",[time(),time(),$maxFails]);
+                $rows=$db->all("SELECT s.id,expires_at FROM subscriptions s JOIN plans p ON p.id=COALESCE(s.renew_plan_id,s.plan_id) WHERE s.auto_renew=1 AND s.status='active' AND s.expires_at>? AND s.renew_at IS NOT NULL AND s.renew_at<=? AND (s.renew_order_id IS NULL OR s.renew_order_id='') AND s.renew_fail_count < COALESCE(NULLIF(p.autorenew_max_fails,0),?) LIMIT 100",[time(),time(),$maxFails]);
                 // Insufficient wallet balance is a normal, recoverable state:
                 // do not exhaust a retry counter that would prevent a later
                 // topup from renewing the subscription.
@@ -175,7 +175,9 @@ final class Reconciler
                     $db->transaction(function()use($f,$maxFails){
                         $fresh=$this->app->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->app->db->lock(),[$f['id']]);
                         if(!$fresh || $fresh['renew_order_id']!==$f['renew_order_id']) return;
-                        if((int)$fresh['renew_fail_count']>=$maxFails) return;
+                        $prow=$this->app->db->one('SELECT autorenew_max_fails FROM plans WHERE id=?',[($fresh['renew_plan_id']??$fresh['plan_id'])]);
+                        $eff=(isset($prow['autorenew_max_fails']) && (int)$prow['autorenew_max_fails']>0)?(int)$prow['autorenew_max_fails']:$maxFails;
+                        if((int)$fresh['renew_fail_count']>=$eff) return;
                         $this->app->db->execute('UPDATE subscriptions SET renew_order_id=NULL,renew_failed_at=?,renew_fail_count=renew_fail_count+1,renew_at=? WHERE id=?',[time(),time()+3600,$f['id']]);
                     });
                 }
