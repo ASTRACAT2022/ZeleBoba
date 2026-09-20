@@ -229,7 +229,28 @@ final class PaymentService
                 if($op){$operations->event($op['id'],'payment.canceled','success','Canceled payment, nothing to settle');$operations->complete($op['id']);}
                 return;
             }
-            $this->verify((string)$event['payment_id'],(string)$event['provider'],$correlation);
+            $pid=(string)$event['payment_id'];
+            // Orphan event: the webhook references a payment that matches no
+            // local order/topup AND carries no order_id/topup_id in its own
+            // metadata. There is nothing to settle (no money moves), so ack it
+            // and do NOT call the provider verify() — a bogus/orphan payment id
+            // makes Platega return non-2xx and the worker retries 8 times,
+            // poisoning the queue (see dead job 52580200). Same philosophy as
+            // the canceled branch above.
+            $hasLocalRef = $this->db->one("SELECT 1 FROM payments WHERE (provider=? AND provider_payment_id=?) OR id=? LIMIT 1",[$event['provider'],$pid,$pid])
+                ?? $this->db->one("SELECT 1 FROM orders WHERE id=? OR provider_payment_id=? LIMIT 1",[$pid,$pid])
+                ?? $this->db->one("SELECT 1 FROM topups WHERE id=? OR provider_payment_id=? LIMIT 1",[$pid,$pid]);
+            if ($hasLocalRef===null) {
+                $json=is_string($payload)?json_decode($payload,true):[];
+                $meta=$json['metadata']??[];
+                $metaRef=(string)($meta['order_id']??'') !== '' || (string)($meta['topup_id']??'') !== '';
+                if (!$metaRef) {
+                    if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
+                    if($op){$operations->event($op['id'],'payment.orphan_ack','success','Orphan payment event (no local order/topup), nothing to settle');$operations->complete($op['id']);}
+                    return;
+                }
+            }
+            $this->verify($pid,$event['provider'],$correlation);
             if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
             if($op){$operations->event($op['id'],'payment.verified','success','Payment verified with provider');$operations->complete($op['id']);}
         } catch (\Throwable $e) {
