@@ -34,11 +34,11 @@ html[data-theme="dark"]{color-scheme:dark;--ink:#e7f0eb;--muted:#a9bbb2;--line:#
 .op-amount{font-size:28px;font-weight:650;margin:4px 0;letter-spacing:-1px;font-variant-numeric:tabular-nums}
 .op-client{color:var(--muted);font-size:14px;margin:0}
 .op-actions{display:flex;gap:8px;flex-wrap:wrap}
-.metadata-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin:20px 0;padding:16px;background:#fff;border:1px solid var(--line);border-radius:10px}
-.meta-item{display:flex;flex-direction:column;gap:4px}
+.metadata-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:20px 0;padding:16px;background:#fff;border:1px solid var(--line);border-radius:10px}
+.meta-item{display:flex;flex-direction:column;gap:4px;min-width:0}
 .meta-label{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
-.meta-value{font-size:14px;font-weight:500}
-.meta-value.mono{font-family:monospace;font-size:13px;color:var(--ink)}
+.meta-value{font-size:14px;font-weight:500;overflow-wrap:anywhere;word-break:break-word}
+.meta-value.mono{font-family:monospace;font-size:13px;color:var(--ink);overflow-wrap:anywhere;word-break:break-all}
 
 /* Support Summary */
 .support-summary{margin-top:20px;padding:16px;background:#fff;border:1px solid var(--line);border-radius:10px}
