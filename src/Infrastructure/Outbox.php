@@ -68,6 +68,14 @@ final class Outbox
                 time()+max(1,$e->delaySeconds),$job['id'],$job['lock_token']
             ]);
             if($operation)$operations->event($operation['id'],'outbox.deferred','processing','Outbox job deferred by operational control',['metadata'=>['topic'=>$job['topic']]]);
+        } catch (JobPermanentFailure $e) {
+            // Terminal, non-recoverable failure (e.g. Telegram permanently
+            // refuses a chat). Dead-letter now without spending retry budget so
+            // a mass broadcast of undeliverable recipients never clogs the
+            // queue or stalls the worker. This is an expected outcome (blocked
+            // chat), not an anomaly worth a job.failed alert.
+            $this->db->execute("UPDATE outbox SET status='dead',available_at=?,locked_until=NULL,last_error=? WHERE id=? AND lock_token=?", [time(), 'permanent:'.get_class($e), $job['id'], $job['lock_token']]);
+            if ($operation) $operations->event($operation['id'], 'outbox.dead', 'warning', 'Outbox job permanently failed', ['metadata' => ['topic' => $job['topic'], 'error_class' => get_class($e)]]);
         } catch (\Throwable $e) {
             $attempt = (int)$job['attempts']+1;
             // Never persist raw HTTP errors: they may contain tokens or subscription URLs.

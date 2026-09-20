@@ -5,6 +5,7 @@ use App\Integration\{Payments,Provisioner,PaymentService};
 use App\Billing\{TopupService,CustomerTimeline,BillingService};
 use App\Observability\OperationsService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 final class Worker
 {
     public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null, private ?DurableWorkflow $workflows=null, private ?BillingService $billing=null) {}
@@ -57,9 +58,18 @@ final class Worker
         try {
             $this->send(['chat_id' => $chatId, 'text' => $text]);
             if ($this->broadcasts) $this->broadcasts->markSent($id, true);
-        } catch (\Throwable) {
+        } catch (JobPermanentFailure $e) {
+            // Bot blocked / chat not found / user deactivated: retrying can
+            // never deliver. Count as failed and let the queue dead-letter it
+            // right away so a mass broadcast of dead chats doesn't stall the
+            // worker or pile up retries.
             if ($this->broadcasts) $this->broadcasts->markSent($id, false);
-            throw new \RuntimeException('Broadcast send failed');
+            throw $e;
+        } catch (\Throwable $e) {
+            // Transient (429 rate-limit, 5xx, network/timeout): count once for
+            // the progress bar and keep the existing retry/backoff path.
+            if ($this->broadcasts) $this->broadcasts->markSent($id, false);
+            throw new \RuntimeException('Broadcast send failed', 0, $e);
         }
     }
     private function topupCreate(string $id): void
@@ -271,8 +281,27 @@ final class Worker
     private function send(array $payload): void
     {
         if (!$this->botToken) throw new \RuntimeException('Telegram is not configured');
-        $result=$this->http->request('POST',rtrim($this->telegramApiBase,'/').'/bot'.$this->botToken.'/sendMessage',['json'=>$payload,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray();
-        if (!($result['ok']??false)) throw new \RuntimeException('Telegram rejected message');
+        try {
+            $resp = $this->http->request('POST', rtrim($this->telegramApiBase, '/').'/bot'.$this->botToken.'/sendMessage', ['json' => $payload, 'timeout' => 10, 'max_duration' => 20, 'max_redirects' => 0]);
+            // Inspect the body without throwing on HTTP status: a blocked chat
+            // (403/400) is a permanent denial and must not be retried. Only
+            // truly transient failures (429/5xx/network/timeout) should retry.
+            $status = $resp->getStatusCode();
+            $result = $resp->toArray(false);
+        } catch (TransportExceptionInterface $e) {
+            // Network-level failure (timeout, connection reset, DNS): transient.
+            throw new \RuntimeException('Telegram network failure', 0, $e);
+        }
+        if (!($result['ok'] ?? false)) {
+            $code = (int)($result['error_code'] ?? $status);
+            if (in_array($code, [400, 403, 404], true)) {
+                // Bot blocked / chat not found / user deactivated / can't
+                // initiate conversation: permanent, terminal. Skip retries.
+                throw new JobPermanentFailure('Telegram permanently refused ('.$code.'): '.($result['description'] ?? ''));
+            }
+            // 429 rate-limit, 5xx, or unexpected: transient, keep backoff.
+            throw new \RuntimeException('Telegram rejected message ('.$code.')');
+        }
         $user = $this->db->one('SELECT id FROM users WHERE telegram_id=?', [(string)($payload['chat_id'] ?? '')]);
         if ($user) $this->timeline?->record($user['id'], 'telegram.notification_delivered', []);
     }
