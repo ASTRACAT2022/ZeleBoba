@@ -39,6 +39,13 @@ html[data-theme="dark"]{color-scheme:dark;--ink:#e7f0eb;--muted:#a9bbb2;--line:#
 .meta-label{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
 .meta-value{font-size:14px;font-weight:500;overflow-wrap:anywhere;word-break:break-word}
 .meta-value.mono{font-family:monospace;font-size:13px;color:var(--ink);overflow-wrap:anywhere;word-break:break-all}
+html[data-theme="dark"] .metadata-grid,html[data-theme="dark"] .support-summary{background:#1a2520;border-color:var(--line)}
+html[data-theme="dark"] .meta-label{color:#9db3a6}
+html[data-theme="dark"] .meta-value,html[data-theme="dark"] .meta-value.mono{color:#e7f0eb}
+html[data-theme="dark"] .support-summary .support-item{background:#24352c;border-color:var(--line)}
+html[data-theme="dark"] .op-icon{background:#1f3a2c;color:#9fe5be}
+html[data-theme="dark"] .op-icon.fail{background:#3a2622;color:#f2a9a0}
+html[data-theme="dark"] .op-icon.process{background:#3a311d;color:#f0ce6b}
 
 /* Support Summary */
 .support-summary{margin-top:20px;padding:16px;background:#fff;border:1px solid var(--line);border-radius:10px}
