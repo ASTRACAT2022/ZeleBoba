@@ -70,12 +70,13 @@ final class Outbox
             if($operation)$operations->event($operation['id'],'outbox.deferred','processing','Outbox job deferred by operational control',['metadata'=>['topic'=>$job['topic']]]);
         } catch (JobPermanentFailure $e) {
             // Terminal, non-recoverable failure (e.g. Telegram permanently
-            // refuses a chat). Dead-letter now without spending retry budget so
-            // a mass broadcast of undeliverable recipients never clogs the
-            // queue or stalls the worker. This is an expected outcome (blocked
-            // chat), not an anomaly worth a job.failed alert.
-            $this->db->execute("UPDATE outbox SET status='dead',available_at=?,locked_until=NULL,last_error=? WHERE id=? AND lock_token=?", [time(), 'permanent:'.get_class($e), $job['id'], $job['lock_token']]);
-            if ($operation) $operations->event($operation['id'], 'outbox.dead', 'warning', 'Outbox job permanently failed', ['metadata' => ['topic' => $job['topic'], 'error_class' => get_class($e)]]);
+            // refuses a chat). Resolve the job as done so it leaves the live
+            // queue and stops flagging "Workers need attention": the outcome
+            // is already recorded by the handler (e.g. broadcast failed_count)
+            // and retrying would never deliver. Keep a permanent: marker for
+            // diagnostics. available_at stays NOT NULL (already set).
+            $this->db->execute("UPDATE outbox SET status='done',locked_until=NULL,last_error=?,payload='{}' WHERE id=? AND lock_token=?", ['permanent:'.get_class($e), $job['id'], $job['lock_token']]);
+            if ($operation) $operations->event($operation['id'], 'outbox.done', 'success', 'Outbox job permanently failed (expected)', ['metadata' => ['topic' => $job['topic'], 'error_class' => get_class($e)]]);
         } catch (\Throwable $e) {
             $attempt = (int)$job['attempts']+1;
             // Never persist raw HTTP errors: they may contain tokens or subscription URLs.
