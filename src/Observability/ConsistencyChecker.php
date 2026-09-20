@@ -13,13 +13,27 @@ final class ConsistencyChecker {
   if ($this->creatorTablesExist()) {
    $creatorDrift=$this->db->all("SELECT c.id FROM creator_commissions c LEFT JOIN creator_ledger l ON l.commission_id=c.id AND l.entry_type='commission' AND l.amount_minor=c.commission_minor GROUP BY c.id HAVING COUNT(l.id)<>1 UNION SELECT l.id FROM creator_ledger l LEFT JOIN creator_commissions c ON c.id=l.commission_id WHERE l.entry_type='commission' AND c.id IS NULL UNION SELECT c.id FROM creator_commissions c LEFT JOIN creator_ledger l ON l.creator_id=c.creator_id AND l.entry_type='reversal' AND l.metadata LIKE '%' || c.id || '%' WHERE c.status='reversed' GROUP BY c.id HAVING COUNT(l.id)<>1");
   }
-  $details=['critical_payment_drift'=>array_column($missing,'id'),'critical_creator_drift'=>array_column($creatorDrift,'id')];$status=($missing||$creatorDrift)?'critical':'ok';
+  $workflowDrift=[];$provisioningDrift=[];
+  if($this->tableExists('workflows')) {
+   $workflowDrift=$this->db->all("SELECT o.id FROM orders o LEFT JOIN workflows w ON w.workflow_type='subscription_fulfillment' AND w.entity_type='order' AND w.entity_id=o.id WHERE o.status='paid' AND o.paid_at IS NOT NULL AND o.created_at>=? AND w.id IS NULL",[$this->workflowCutover()]);
+   $provisioningDrift=$this->db->all("SELECT p.id FROM provisioning_operations p LEFT JOIN subscriptions s ON s.id=p.subscription_id WHERE p.status='succeeded' AND (p.actual_state IS NULL OR s.id IS NULL)");
+  }
+  $details=['critical_payment_drift'=>array_column($missing,'id'),'critical_creator_drift'=>array_column($creatorDrift,'id'),'paid_without_workflow'=>array_column($workflowDrift,'id'),'provisioning_without_actual_state'=>array_column($provisioningDrift,'id')];$status=($missing||$creatorDrift||$workflowDrift||$provisioningDrift)?'critical':'ok';
   $this->db->execute('INSERT INTO consistency_checks(id,kind,status,details,checked_at) VALUES(?,?,?,?,?)',[Database::id(),'money',$status,json_encode($details,JSON_THROW_ON_ERROR),time()]);
-  return ['status'=>$status,'count'=>count($missing)+count($creatorDrift),'details'=>$details];
+  return ['status'=>$status,'count'=>count($missing)+count($creatorDrift)+count($workflowDrift)+count($provisioningDrift),'details'=>$details];
  }
  private function creatorTablesExist():bool {
   if($this->db->postgres())return (bool)($this->db->one("SELECT to_regclass('creator_commissions') name")['name']??null);
   return $this->db->one("SELECT name FROM sqlite_master WHERE type='table' AND name='creator_commissions'")!==null;
+ }
+ private function tableExists(string $table):bool {
+  if($this->db->postgres())return (bool)($this->db->one("SELECT to_regclass(?) name",[$table])['name']??null);
+  return $this->db->one("SELECT name FROM sqlite_master WHERE type='table' AND name=?",[$table])!==null;
+ }
+ /** Workflows are additive; never flag historical orders before their first row. */
+ private function workflowCutover():int {
+  $row=$this->db->one("SELECT MIN(created_at) started FROM workflows");
+  return (int)($row['started']??PHP_INT_MAX);
  }
 
  /**

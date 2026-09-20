@@ -54,7 +54,21 @@ final class Database
                 if ($this->one('SELECT version FROM migrations WHERE version = ?', [basename($path)])) continue;
                 $sql = file_get_contents($path);
                 // SQLite cannot DROP/ADD constraints: strip PostgreSQL-only blocks.
-                if (!$pg) $sql = preg_replace('/-- \[PG\]\R.*?-- \[\/PG\]\R/s', '', $sql);
+                if (!$pg) {
+                    $sql = preg_replace('/-- \[PG\]\R.*?-- \[\/PG\]\R/s', '', $sql);
+                    // Keep additive migrations portable to the development
+                    // SQLite backend. PostgreSQL accepts IF NOT EXISTS on ADD
+                    // COLUMN, while SQLite (used by the test suite) does not.
+                    $sql = str_replace('ADD COLUMN IF NOT EXISTS', 'ADD COLUMN', $sql);
+                    // 020_billing_core already introduced this column for
+                    // SQLite before 029 made versioning idempotent in PG.
+                    if (basename($path)==='029_protection_framework.sql') {
+                        $sql = preg_replace('/^ALTER TABLE subscriptions\s+ADD COLUMN version .*;\s*$/m', '', $sql);
+                    }
+                    $sql = preg_replace('/extract\(epoch from now\(\)\)::bigint/', '0', $sql);
+                    $sql = preg_replace('/^GRANT .*;\s*$/m', '', $sql);
+                    $sql = preg_replace('/^ALTER DEFAULT PRIVILEGES .*;\s*$/m', '', $sql);
+                }
                 $this->pdo->exec($sql);
                 $this->execute('INSERT INTO migrations VALUES (?, ?)', [basename($path), time()]);
             }

@@ -7,7 +7,7 @@ use App\Observability\OperationsService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null, private ?DurableWorkflow $workflows=null) {}
     public function handle(string $topic,array $payload): void
     {
         $span=Telemetry::start('billing.outbox.process',['messaging.operation'=>'process','messaging.destination.name'=>$topic]);
@@ -112,17 +112,36 @@ final class Worker
         if($this->provisioningPaused()) throw new JobDeferred($this->provisioningDelay());
         $flag=$this->db->one("SELECT enabled FROM feature_flags WHERE name='provisioning.enabled'");
         if($flag && (int)$flag['enabled']===0) throw new \RuntimeException('Provisioning disabled by kill switch');
+        $lease=$this->workflows?->claimActivation($id,gethostname().':'.getmypid());
+        // Legacy subscriptions have no operation row yet and remain supported.
+        if ($this->workflows!==null && $this->db->one("SELECT id FROM provisioning_operations WHERE subscription_id=? AND operation_type='activate'",[$id]) && !$lease) return;
         $s=$this->subscription($id);
+        // Covers a crash after the local activation transaction committed but
+        // before the workflow row was marked complete.
+        if ($s && $s['remote_id']!==null && $s['status']==='active') {
+            $this->workflows?->succeeded($id,['remote_id'=>$s['remote_id'],'subscription_url'=>$s['subscription_url']]);
+            return;
+        }
         if (!$s || !in_array($s['status'],['provisioning','active','trial'],true) || $s['remote_id']!==null || (int)$s['expires_at']<=time()) return;
         $this->db->execute("UPDATE provisioning_accounts SET state='processing',updated_at=? WHERE subscription_id=? AND provider=?",[time(),$id,$s['provision_driver']]);
         $this->operationEvent($id,'provisioning.started','processing','Provisioning job started');
         $this->timeline?->record($s['user_id'], 'vpn.provisioning_started', ['subscription_id'=>$id]);
         if($s['provision_driver']==='demo' && !$this->allowDemo) throw new \RuntimeException('Demo provisioning forbidden');
-        $remote=$s['provision_driver']==='demo'?(new \App\Integration\DemoProvisioner())->provision($s):$this->provisioner->provision($s);
+        try {
+            $remote=$s['provision_driver']==='demo'?(new \App\Integration\DemoProvisioner())->provision($s):$this->provisioner->provision($s);
+        } catch (\Throwable $e) {
+            // The request may have reached Remnawave even if its response did
+            // not. Preserve UNKNOWN and let the next leased run verify the
+            // deterministic remote identity instead of treating it as failure.
+            $this->workflows?->unknown($id,$e);
+            throw $e;
+        }
         $this->db->transaction(function () use ($s,$remote,$id) {
             $changed=$this->db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',remote_id=?,subscription_url=?,updated_at=?,version=version+1 WHERE id=? AND status IN ('provisioning','active','trial') AND remote_id IS NULL",[$remote['id'],$remote['url'],time(),$id]);
             if (!$changed) return;
-            $this->db->execute("UPDATE orders SET status='fulfilled',workflow_status='fulfilled' WHERE id=?",[$s['order_id']]);
+            // Provisioning may finish after an operator cancellation/refund.
+            // Never overwrite a terminal order state from an asynchronous job.
+            $this->db->execute("UPDATE orders SET status='fulfilled',workflow_status='fulfilled' WHERE id=? AND status='paid'",[$s['order_id']]);
             $this->db->execute("UPDATE provisioning_accounts SET external_user_id=?,state='active',last_synced_at=?,last_error=NULL,updated_at=? WHERE subscription_id=? AND provider=?",[$remote['id'],time(),time(),$id,$s['provision_driver']]);
             $this->operationEvent($id,'provisioning.completed','success','Provisioning ACTIVE');
             $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
@@ -130,6 +149,7 @@ final class Worker
             $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
             if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','activated:'.$id,['chat_id'=>$user['telegram_id'],'text'=>'Подписка готова. Откройте веб-кабинет или отправьте /status.']);
         });
+        $this->workflows?->succeeded($id,['remote_id'=>$remote['id'],'subscription_url'=>$remote['url']]);
     }
     private function extend(string $id, ?string $orderId=null): void
     {

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace App\Billing;
-use App\Infrastructure\{Database,Outbox};
+use App\Infrastructure\{Database,Outbox,DurableWorkflow};
 use App\Subscriptions\SubscriptionService;
 use App\Observability\OperationsService;
 final class BillingService
@@ -121,7 +121,13 @@ final class BillingService
                 $this->db->execute('UPDATE operations SET subscription_id=? WHERE id=?',[$sub,$op['id']]);
                 $operations->event($op['id'],'subscription.created','success','Subscription created',['subscription_id'=>$sub,'metadata'=>['expires_at_after'=>$expiry]]);
                 $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,state,created_at,updated_at) VALUES(?,?,?,'pending',?,?)",[Database::id(),$sub,$order['provision_driver']??'demo',$now,$now]);
-                $this->outbox->enqueue('subscription.provision','provision:'.$sub,['subscription_id'=>$sub]);
+                // The workflow, provisioning intent and delivery command are in
+                // this very same payment transaction. A lost queue/worker can
+                // therefore be recovered from PostgreSQL without guessing.
+                (new DurableWorkflow($this->db,$this->outbox))->startFulfillment($orderId,$sub,[
+                    'expires_at'=>$expiry,'traffic_limit_bytes'=>(int)$order['traffic_bytes'],
+                    'device_limit'=>(int)$order['devices'],'provider'=>$order['provision_driver']??'demo',
+                ],$op['correlation_id']);
                 $this->db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$op['correlation_id'],'provision:'.$sub]);
             }
             $this->audit('provider:'.$provider,'payment.settled',$orderId);

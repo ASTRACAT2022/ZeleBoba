@@ -28,8 +28,26 @@ final class BillingCoreArchitectureTest extends TestCase
         $billing->settle($order['id'],'demo','architecture-payment',19900,'RUB');
         self::assertSame(1,(int)$this->db->one('SELECT count(*) AS n FROM payments')['n']);
         self::assertSame(1,(int)$this->db->one('SELECT count(*) AS n FROM provisioning_accounts WHERE state="pending"')['n']);
+        self::assertSame('fulfillment_required',$this->db->one('SELECT state FROM workflows')['state']);
+        self::assertSame('pending',$this->db->one('SELECT status FROM provisioning_operations')['status']);
+        self::assertSame(1,(int)$this->db->one("SELECT count(*) AS n FROM outbox WHERE topic='subscription.provision'")['n']);
         $billing->settle($order['id'],'demo','architecture-payment',19900,'RUB');
         self::assertSame(1,(int)$this->db->one('SELECT count(*) AS n FROM subscriptions')['n']);
+    }
+
+    public function testRecoveryRecreatesDeliveryButNotBusinessIntent(): void
+    {
+        $user=(new Auth($this->db))->register('recovery@example.test','correct horse battery staple');
+        $this->db->execute("INSERT INTO plans(id,name,price_minor,currency,duration_days,traffic_bytes,devices,active,duration_months) VALUES('recover','Monthly',19900,'RUB',30,0,1,1,1)");
+        $outbox=new Outbox($this->db); $billing=new BillingService($this->db,$outbox,'demo');
+        $order=$billing->order($user,'recover','recovery-order-key');
+        $billing->settle($order['id'],'demo','recovery-payment',19900,'RUB');
+        $subscription=$this->db->one('SELECT id FROM subscriptions WHERE order_id=?',[$order['id']]);
+        $this->db->execute("UPDATE outbox SET status='done' WHERE topic='subscription.provision'");
+        (new \App\Infrastructure\DurableWorkflow($this->db,$outbox))->recover();
+        self::assertSame(1,(int)$this->db->one('SELECT COUNT(*) n FROM provisioning_operations')['n']);
+        self::assertSame(1,(int)$this->db->one('SELECT COUNT(*) n FROM subscriptions WHERE id=?',[$subscription['id']])['n']);
+        self::assertGreaterThanOrEqual(1,(int)$this->db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.provision' AND status='pending'")['n']);
     }
     public function testCalendarMonthIsNotThirtyDays(): void
     {

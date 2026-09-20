@@ -2,10 +2,11 @@
 declare(strict_types=1);
 namespace App\Integration;
 use App\Billing\{BillingError,BillingService};
-use App\Infrastructure\Database;
+use App\Infrastructure\{Database,JobDeferred};
 use App\Infrastructure\WebhookGuard;
 use App\Integration\Payment\ProviderRegistry;
 use App\Payments\PaymentEventStore;
+use App\Payments\PaymentAttemptStore;
 use App\Observability\OperationsService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 /**
@@ -24,6 +25,7 @@ final class PaymentService
         private ?PaymentEventStore $events=null,
         private ?WebhookGuard $webhookGuard=null,
         private ?\App\Integration\Mailer $mailer=null,
+        private ?PaymentAttemptStore $attempts=null,
     ) {}
     public function registry(): ProviderRegistry { return $this->registry; }
     /** Create checkout for an order. Returns [payment_id, checkout_url]. */
@@ -31,16 +33,30 @@ final class PaymentService
     {
         $order = $this->db->one('SELECT * FROM orders WHERE id=?', [$orderId]);
         if (!$order || $order['status'] !== 'pending' || $order['checkout_url']) return ['payment_id' => $order['provider_payment_id'] ?? '', 'checkout_url' => $order['checkout_url'] ?? ''];
+        $attempt=$this->attempts?->begin('order',$order);
+        if ($attempt && !($attempt['created']??false)) {
+            if (!empty($attempt['provider_payment_id']) && !empty($attempt['checkout_url'])) {
+                // A prior worker owns this durable attempt and completed the
+                // provider call. Restore the legacy projection if needed.
+                $this->db->execute('UPDATE orders SET provider_payment_id=?,checkout_url=? WHERE id=? AND checkout_url IS NULL',[$attempt['provider_payment_id'],$attempt['checkout_url'],$orderId]);
+                return ['payment_id'=>$attempt['provider_payment_id'],'checkout_url'=>$attempt['checkout_url']];
+            }
+            // Do not issue a second mutating provider request while its result
+            // is unknown. Recovery/verification must resolve the first intent.
+            throw new JobDeferred(60);
+        }
         if ($order['provider'] === 'demo') {
             if (($this->config['APP_ENV'] ?? 'dev') === 'prod') throw new BillingError('Демоплатёж запрещён.');
             $this->db->execute('UPDATE orders SET provider_payment_id=?,checkout_url=? WHERE id=?',['demo_'.$orderId,'/orders/'.$orderId,$orderId]);
+            if($attempt)$this->attempts->attached($attempt['id'],'demo_'.$orderId,'/orders/'.$orderId);
             return ['payment_id' => 'demo_'.$orderId, 'checkout_url' => '/orders/'.$orderId];
         }
         $this->requireCheckoutSupport($order['provider']);
         $provider = $this->registry->get($order['provider']);
         $user = $this->db->one('SELECT * FROM users WHERE id=?', [$order['user_id']]);
-        $result = $provider->createOrder($order, $user ?? []);
+        try {$result = $provider->createOrder($order, $user ?? []);} catch (\Throwable $e) { if($attempt)$this->attempts->unknown($attempt['id'],$e); throw $e; }
         $this->db->execute('UPDATE orders SET provider_payment_id=?,checkout_url=? WHERE id=? AND (provider_payment_id IS NULL OR provider_payment_id=?)', [$result['payment_id'], $result['checkout_url'], $orderId, $result['payment_id']]);
+        if($attempt)$this->attempts->attached($attempt['id'],$result['payment_id'],$result['checkout_url']);
         return $result;
     }
     /** Create checkout for a topup. Returns [payment_id, checkout_url]. */
@@ -48,16 +64,26 @@ final class PaymentService
     {
         $topup = $this->db->one('SELECT * FROM topups WHERE id=?', [$topupId]);
         if (!$topup || $topup['status'] !== 'pending' || $topup['checkout_url']) return ['payment_id' => $topup['provider_payment_id'] ?? '', 'checkout_url' => $topup['checkout_url'] ?? ''];
+        $attempt=$this->attempts?->begin('topup',$topup);
+        if ($attempt && !($attempt['created']??false)) {
+            if (!empty($attempt['provider_payment_id']) && !empty($attempt['checkout_url'])) {
+                $this->db->execute('UPDATE topups SET provider_payment_id=?,checkout_url=? WHERE id=? AND checkout_url IS NULL',[$attempt['provider_payment_id'],$attempt['checkout_url'],$topupId]);
+                return ['payment_id'=>$attempt['provider_payment_id'],'checkout_url'=>$attempt['checkout_url']];
+            }
+            throw new JobDeferred(60);
+        }
         if ($topup['provider'] === 'demo') {
             if (($this->config['APP_ENV'] ?? 'dev') === 'prod') throw new BillingError('Демоплатёж запрещён.');
             $this->db->execute('UPDATE topups SET provider_payment_id=?,checkout_url=? WHERE id=?',['demo_'.$topupId,'/balance/topup/'.$topupId,$topupId]);
+            if($attempt)$this->attempts->attached($attempt['id'],'demo_'.$topupId,'/balance/topup/'.$topupId);
             return ['payment_id' => 'demo_'.$topupId, 'checkout_url' => '/balance/topup/'.$topupId];
         }
         $this->requireCheckoutSupport($topup['provider']);
         $provider = $this->registry->get($topup['provider']);
         $user = $this->db->one('SELECT * FROM users WHERE id=?', [$topup['user_id']]);
-        $result = $provider->createTopup($topup, $user ?? []);
+        try {$result = $provider->createTopup($topup, $user ?? []);} catch (\Throwable $e) { if($attempt)$this->attempts->unknown($attempt['id'],$e); throw $e; }
         $this->db->execute('UPDATE topups SET provider_payment_id=?,checkout_url=? WHERE id=? AND (provider_payment_id IS NULL OR provider_payment_id=?)', [$result['payment_id'], $result['checkout_url'], $topupId, $result['payment_id']]);
+        if($attempt)$this->attempts->attached($attempt['id'],$result['payment_id'],$result['checkout_url']);
         return $result;
     }
     private function requireCheckoutSupport(string $provider): void
@@ -69,10 +95,13 @@ final class PaymentService
     {
         if ($paymentId==='' || strlen($paymentId)>100) throw new BillingError('Некорректный платёж.');
         $params=[$paymentId,$paymentId];
+        // Keep the provider restriction around *both* lookup alternatives.
+        // Without parentheses SQL applies AND only to `id=?`, allowing a
+        // colliding provider_payment_id from another provider to be selected.
         $scope=$providerId!==null?' AND provider=?':'';
         if ($providerId!==null) $params[]=$providerId;
-        $orders=$this->db->all("SELECT * FROM orders WHERE provider_payment_id=? OR id=?".$scope,$params);
-        $topups=$this->db->all("SELECT * FROM topups WHERE provider_payment_id=? OR id=?".$scope,$params);
+        $orders=$this->db->all("SELECT * FROM orders WHERE (provider_payment_id=? OR id=?)".$scope,$params);
+        $topups=$this->db->all("SELECT * FROM topups WHERE (provider_payment_id=? OR id=?)".$scope,$params);
         if (count($orders)+count($topups)>1) throw new BillingError('Неоднозначная привязка платежа.');
         $entity=$orders[0]??$topups[0]??null;
         $providerId??=$entity['provider']??null;
@@ -112,9 +141,11 @@ final class PaymentService
             if (($this->config['APP_ENV']??'dev')==='prod' && !empty($result['test'])) throw new BillingError('Тестовый платёж запрещён в production.');
             if ($isOrder) $this->billing->settle($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency'],$correlationId);
             else $this->billing->settleTopup($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency']);
+            $this->attempts?->completed($providerId,$actualId,'paid');
         } elseif (($result['status']??'')==='canceled') {
             $table=$isOrder?'orders':'topups';
             $this->db->execute("UPDATE ".$table." SET status='canceled' WHERE id=? AND provider=? AND status='pending'",[$entity['id'],$providerId]);
+            $this->attempts?->completed($providerId,$actualId,'canceled');
         }
     }
     /** Handle a provider webhook. Returns true if the webhook was ours. */
@@ -138,7 +169,7 @@ final class PaymentService
         if (in_array($status,['paid','canceled'],true)) {
             // Acknowledge only after a durable inbox row and its outbox command
             // are committed. The provider API remains authoritative for settlement.
-            $this->db->transaction(function () use ($paymentId,$providerId,$status,$result) {
+            $this->db->transaction(function () use ($paymentId,$providerId,$status,$result,$request) {
                 $eventId=(string)($result['event_id'] ?? ($paymentId.':'.$status));
                 // Tamper guard (only defense in depth since Platega webhooks
                 // carry no HMAC/timestamp): same provider_event_id but changed
@@ -183,7 +214,7 @@ final class PaymentService
                         return; // same payload, already processed => benign replay
                     }
                 }
-                $id=$this->events?->receive($providerId,$eventId,$paymentId,$result,true) ?? '';
+                $id=$this->events?->receive($providerId,$eventId,$paymentId,$result,true,$this->webhookHeaders($request)) ?? '';
                 if ($id!=='') {
                     // Replay guard: if this event was already fully processed, a
                     // repeated delivery of the same provId/eventId is a benign
@@ -223,8 +254,10 @@ final class PaymentService
             // closed txs, which otherwise poisons the worker with retry jobs).
             if ($payloadStatus==='canceled') {
                 $pid=(string)$event['payment_id'];
-                $this->db->execute("UPDATE orders SET status='canceled' WHERE provider_payment_id=? OR (provider=? AND id=?)",[$pid,$event['provider'],$pid]);
-                $this->db->execute("UPDATE topups SET status='canceled' WHERE provider_payment_id=? OR (provider=? AND id=?)",[$pid,$event['provider'],$pid]);
+                // A provider event must never cancel another provider's
+                // similarly named payment, nor revive/overwrite terminal rows.
+                $this->db->execute("UPDATE orders SET status='canceled' WHERE provider=? AND (provider_payment_id=? OR id=?) AND status='pending'",[$event['provider'],$pid,$pid]);
+                $this->db->execute("UPDATE topups SET status='canceled' WHERE provider=? AND (provider_payment_id=? OR id=?) AND status='pending'",[$event['provider'],$pid,$pid]);
                 if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
                 if($op){$operations->event($op['id'],'payment.canceled','success','Canceled payment, nothing to settle');$operations->complete($op['id']);}
                 return;
@@ -237,9 +270,9 @@ final class PaymentService
             // makes Platega return non-2xx and the worker retries 8 times,
             // poisoning the queue (see dead job 52580200). Same philosophy as
             // the canceled branch above.
-            $hasLocalRef = $this->db->one("SELECT 1 FROM payments WHERE (provider=? AND provider_payment_id=?) OR id=? LIMIT 1",[$event['provider'],$pid,$pid])
-                ?? $this->db->one("SELECT 1 FROM orders WHERE id=? OR provider_payment_id=? LIMIT 1",[$pid,$pid])
-                ?? $this->db->one("SELECT 1 FROM topups WHERE id=? OR provider_payment_id=? LIMIT 1",[$pid,$pid]);
+            $hasLocalRef = $this->db->one("SELECT 1 FROM payments WHERE provider=? AND (provider_payment_id=? OR id=?) LIMIT 1",[$event['provider'],$pid,$pid])
+                ?? $this->db->one("SELECT 1 FROM orders WHERE provider=? AND (id=? OR provider_payment_id=?) LIMIT 1",[$event['provider'],$pid,$pid])
+                ?? $this->db->one("SELECT 1 FROM topups WHERE provider=? AND (id=? OR provider_payment_id=?) LIMIT 1",[$event['provider'],$pid,$pid]);
             if ($hasLocalRef===null) {
                 $json=is_string($payload)?json_decode($payload,true):[];
                 $meta=$json['metadata']??[];
@@ -262,6 +295,11 @@ final class PaymentService
     /** Reconciliation recovery for inbox events whose outbox delivery died or lease expired. */
     public function requeueStaleEvents(int $limit=100): int
     {
+        // Unknown checkout creation is deliberately never replayed: the
+        // provider might have accepted the original request. Surface stale
+        // outcomes for manual reconciliation instead of silently deferring
+        // them forever.
+        $this->attempts?->escalateUnknown(900,$limit);
         $now=time();
         $rows=$this->db->all("SELECT id FROM payment_events WHERE signature_valid=1 AND ((status IN ('pending','retry') AND COALESCE(next_attempt_at,received_at)<=?) OR (status='processing' AND locked_until<=?)) ORDER BY received_at LIMIT ?",[$now,$now,$limit]);
         $bucket=intdiv($now,300);
@@ -275,5 +313,14 @@ final class PaymentService
         $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING', [
             Database::id(), 'payment.verify', 'verify:'.$providerId.':'.$paymentId.':'.$status.':'.intdiv(time(),60), json_encode(['payment_id' => $paymentId,'provider'=>$providerId], JSON_THROW_ON_ERROR), 100, time(), time(),
         ]);
+    }
+
+    /** Evidence only: never retain Authorization, cookies, or provider secrets. */
+    private function webhookHeaders(\Symfony\Component\HttpFoundation\Request $request): array
+    {
+        $allowed=['content-type','x-request-id','x-signature','x-signature-sha256','x-webhook-id'];
+        $headers=[];
+        foreach($allowed as $name) if($request->headers->has($name)) $headers[$name]=$request->headers->all($name);
+        return $headers;
     }
 }

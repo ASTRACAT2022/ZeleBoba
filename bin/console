@@ -28,6 +28,13 @@ $cli->add((new Command('worker:run'))->setDescription('Process transactional out
 $cli->add((new Command('billing:reconcile'))->setDescription('Recheck pending provider payments and expire local subscriptions')->setCode(function(InputInterface $i,OutputInterface $o) use($c){
     $result=(new \App\Infrastructure\Reconciler($c))->run();$o->writeln('Reconciliation queued.');return $result;
 }));
+$cli->add((new Command('billing:recover'))->setDescription('Recreate delivery commands from durable payment and fulfillment state')->addOption('limit',null,InputOption::VALUE_REQUIRED,'Maximum workflows',100)->setCode(function(InputInterface $i,OutputInterface $o) use($c){
+    $limit=max(1,min(1000,(int)$i->getOption('limit')));
+    $events=$c->paymentService->requeueStaleEvents($limit);
+    $workflows=$c->workflows->recover($limit);
+    $o->writeln('Recovered inbox events: '.$events.', fulfillment workflows: '.$workflows);
+    return 0;
+}));
 $cli->add((new Command('billing:audit'))->setDescription('Check ledger and paid order invariants')->setCode(function(InputInterface $i,OutputInterface $o) use($c){
     $errors=$c->db->all("SELECT o.id FROM orders o LEFT JOIN ledger_entries l ON l.order_id=o.id WHERE o.status IN ('paid','fulfilled') GROUP BY o.id HAVING COUNT(l.id)<>2 OR SUM(l.amount_minor)<>0");
     $missing=$c->db->all("SELECT o.id FROM orders o LEFT JOIN subscriptions s ON s.order_id=o.id LEFT JOIN payment_receipts p ON p.order_id=o.id WHERE o.status IN ('paid','fulfilled') AND (s.id IS NULL OR p.order_id IS NULL)");
