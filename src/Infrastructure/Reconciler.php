@@ -25,6 +25,37 @@ final class Reconciler
             }
             if (isset($this->app->paymentService)) $this->app->paymentService->requeueStaleEvents();
             if($money['status']!=='ok') error_log(json_encode(['event'=>'financial.drift','count'=>$money['count']]));
+            // Paid-but-not-delivered protection (alert only — no money mutation):
+            // a succeeded payment whose order is not paid/fulfilled means the
+            // customer paid but the service was never issued. Surface each such
+            // order as a visible, deduplicated operation so it is not silently
+            // lost in dead jobs. Mark failed/critical so it shows as a problem
+            // awaiting manual crediting. Uses a dedicated ConsistencyChecker
+            // instance since Container does not expose one as a property.
+            if (isset($this->app->operations)) {
+                $gaps = (new \App\Observability\ConsistencyChecker($this->app->db))->deliveryGaps();
+                foreach ($gaps as $gap) {
+                    $ops = $this->app->operations;
+                    $op = $ops->start('payment.delivery_gap', [
+                        'user_id'  => $gap['user_id'],
+                        'order_id' => $gap['order_id'],
+                        'metadata' => [
+                            'provider'            => $gap['provider'],
+                            'provider_payment_id' => $gap['provider_payment_id'],
+                            'amount_minor'        => $gap['amount_minor'],
+                            'order_status'        => $gap['status'],
+                        ],
+                    ], 'delivery-gap:'.$gap['order_id']);
+                    if (!$op['existing']) {
+                        $ops->event($op['id'], 'payment.delivery_gap.detected', 'failed',
+                            'Клиент заплатил, но услуга не выдана (заказ '.substr($gap['order_id'],0,8)
+                            .', '.\App\Integration\Payment\AbstractProvider::decimal($gap['amount_minor']).' ₽, провайдер '.$gap['provider']
+                            .'). Проверьте и зачислите вручную в Ops.',
+                            ['metadata' => ['amount_minor' => $gap['amount_minor']]]);
+                        $ops->complete($op['id'], 'failed', 'Ожидает ручного зачисления');
+                    }
+                }
+            }
             $after='';$bucket=intdiv(time(),300);
             // Only retry providers that can be verified with the credentials
             // currently installed. Retrying demo or incomplete integrations

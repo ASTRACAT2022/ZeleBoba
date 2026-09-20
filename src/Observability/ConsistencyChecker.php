@@ -21,4 +21,27 @@ final class ConsistencyChecker {
   if($this->db->postgres())return (bool)($this->db->one("SELECT to_regclass('creator_commissions') name")['name']??null);
   return $this->db->one("SELECT name FROM sqlite_master WHERE type='table' AND name='creator_commissions'")!==null;
  }
+
+ /**
+  * Paid-but-not-delivered: succeeded payments whose order is not yet
+  * paid/fulfilled. Non-destructive — returns the rows so a caller can
+  * surface them as an operator alert (no money mutation here).
+  *
+  * @return array{order_id:string,user_id:string,payment_id?:string,amount_minor:int,provider?:string,status?:string}
+  */
+ public function deliveryGaps(): array {
+  $rows=$this->db->all(
+    "SELECT DISTINCT o.id AS order_id,o.user_id,o.provider,o.status,o.provider_payment_id,
+            p.id AS payment,
+            COALESCE(p.amount_minor,o.price_minor) AS amount_minor
+     FROM payments p JOIN orders o ON o.id=p.order_id
+     WHERE p.status='succeeded' AND o.status NOT IN ('paid','fulfilled') ORDER BY o.id"
+  );
+  return array_map(fn($r)=>[
+    'order_id'=>$r['order_id'],'user_id'=>$r['user_id'],
+    'provider'=>$r['provider'],'status'=>$r['status'],
+    'provider_payment_id'=>$r['provider_payment_id']??null,
+    'amount_minor'=>(int)$r['amount_minor'],
+  ],$rows);
+ }
 }
