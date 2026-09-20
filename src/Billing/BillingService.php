@@ -309,6 +309,12 @@ final class BillingService
 
     private function debitRenewal(array $sub,array $plan,int $price,string $orderId,string $provider): void
     {
+        // Link the renewal order to the subscription BEFORE settle(): settle()
+        // branches on subscriptions.renew_order_id to decide renewal-vs-purchase,
+        // so a wallet renewal must set it or settle() would create a NEW
+        // duplicate subscription instead of extending the existing one.
+        // (Regression fixed: was dropped in 946b17f.)
+        $this->db->execute('UPDATE subscriptions SET renew_order_id=?,renew_at=NULL WHERE id=?',[$orderId,$sub['id']]);
         (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_renewal','Автопродление: '.$plan['name'],'balance',$orderId);
         $this->settle($orderId,$provider,'balance_'.$orderId,$price,$plan['currency']);
     }

@@ -52,11 +52,12 @@ if((int)$balAfter2!==(int)$balAfter1)$fail.="FAIL double debit on 2nd call\n";
 if($fail){echo "=== RESULT: FAIL ===\n$fail";exit(2);}
 echo "=== RESULT: PASS — баланс 5000→4600 (ровно 400к=4₽), 1 списание, заказ paid, продлён на ~1 день, идемпотентно ===\n";
 
-// cleanup (FK order, same as autorenew_faulttest.php)
+// cleanup (FK order: children before parents; provisioning_* before operations)
 $oid=$paid[0]['id'];
-$db->execute('DELETE FROM operation_events WHERE operation_id IN (SELECT id FROM operations WHERE order_id=? OR subscription_id=? OR correlation_id LIKE ?)',[$oid,$subId,'%'.$origOrderId.'%']);
-$db->execute('DELETE FROM operations WHERE order_id=? OR subscription_id=?',[$oid,$subId]);
-$db->execute('DELETE FROM operations WHERE order_id=? OR user_id=?',[$oid,$uid]);
+$db->execute('DELETE FROM provisioning_operations WHERE subscription_id=?',[$subId]);
+$db->execute('DELETE FROM provisioning_accounts WHERE subscription_id=?',[$subId]);
+$db->execute('DELETE FROM operation_events WHERE operation_id IN (SELECT id FROM operations WHERE order_id=? OR subscription_id=? OR user_id=?)',[$oid,$subId,$uid]);
+$db->execute('DELETE FROM operations WHERE order_id=? OR subscription_id=? OR user_id=?',[$oid,$subId,$uid]);
 $db->execute('DELETE FROM customer_timeline WHERE user_id=?',[$uid]);
 $db->execute('DELETE FROM ledger_entries WHERE order_id IN (?,?)',[$oid,$origOrderId]);
 $db->execute('DELETE FROM payment_receipts WHERE order_id IN (?,?)',[$oid,$origOrderId]);

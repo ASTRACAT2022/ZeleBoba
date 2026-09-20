@@ -27,16 +27,20 @@ $db->execute("INSERT INTO subscriptions(id,order_id,user_id,plan_id,status,expir
 $N=8;
 // Children signal success purely by exit code (0 = charged, 7 = not due); no
 // fragile pipe/file plumbing. The authoritative assertion is the DB state.
-$inline='\$c=require "bootstrap.php"; \$r=\$c->billing->dailyChargeFromBalance(\''.$sid.'\'); exit(\$r===true?0:7);';
-$cmd='cd /app && '.PHP_BINARY.' -r '.escapeshellarg($inline).' 2>/dev/null';
-$pids=[];
+$inline='$c=require "bootstrap.php"; $r=$c->billing->dailyChargeFromBalance(\''.$sid.'\'); exit($r===true?0:7);';
+$cmd='cd /app && '.PHP_BINARY.' -r '.escapeshellarg($inline);
+$N=(int)$N;
+$handles=[];
 for($i=0;$i<$N;$i++){
     $proc=proc_open($cmd,[0=>['pipe','w'],1=>['pipe','w'],2=>['pipe','w']],$pipes,null,null,['APP_ENV'=>'prod']);
-    $pids[]=$proc;
-    fclose($pipes[0]); fclose($pipes[1]); fclose($pipes[2]);
+    fclose($pipes[0]); fclose($pipes[1]);
+    $handles[]=['proc'=>$proc,'err'=>$pipes[2]];
 }
-$charged=0;
-foreach($pids as $p){ $st=proc_close($p); if($st===0)$charged++; }
+$errs=[];
+foreach($handles as $i=>$h){ $errs[$i]=stream_get_contents($h['err']); fclose($h['err']); }
+$codes=[];
+foreach($handles as $i=>$h){ $codes[$i]=proc_close($h['proc']); }
+$charged=count(array_filter($codes,fn($c)=>$c===0));
 
 $balAfter=$db->one('SELECT balance_kopeks FROM users WHERE id=?',[$uid])['balance_kopeks'];
 $txs=$db->all("SELECT * FROM transactions WHERE user_id=? AND type='subscription_daily'",[$uid]);
@@ -54,7 +58,7 @@ if($fail){echo "=== RESULT: FAIL ===\n$fail"; }
 else { echo "=== RESULT: PASS — под гонкой N параллельных воркеров списано ровно 1 раз, без двойного ===\n"; }
 
 // cleanup
-foreach($pids as $p)@proc_terminate($p);
+
 $db->execute('DELETE FROM operation_events WHERE operation_id IN (SELECT id FROM operations WHERE user_id=? OR subscription_id=?)',[$uid,$sid]);
 $db->execute('DELETE FROM operations WHERE user_id=? OR subscription_id=?',[$uid,$sid]);
 $db->execute('DELETE FROM customer_timeline WHERE user_id=?',[$uid]);
