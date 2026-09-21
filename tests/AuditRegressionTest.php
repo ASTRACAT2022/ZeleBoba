@@ -244,21 +244,21 @@ final class AuditRegressionTest extends TestCase
     {
         $app=new Container([
             'DATABASE_DSN'=>'sqlite::memory:', 'APP_ENV'=>'test', 'PURCHASES_ENABLED'=>'1', 'APP_URL'=>'http://localhost',
-            'CRYPTOBOT_ENABLED'=>'1', 'CRYPTOBOT_API_TOKEN'=>'fixture-token',
+            'PLATEGA_ENABLED'=>'1', 'PLATEGA_MERCHANT_ID'=>'merchant', 'PLATEGA_SECRET'=>'secret',
         ]);
         $app->db->migrate(__DIR__.'/../migrations');
         $app->db->execute("INSERT INTO users(id,email,created_at) VALUES('user','user@example.test',?)",[time()]);
         $app->db->execute("INSERT INTO plans(id,name,price_minor,currency,duration_days,traffic_bytes,devices) VALUES('plan','Plan',100,'RUB',30,0,1)");
         $now=time();
-        $app->db->execute("INSERT INTO orders(id,user_id,plan_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,provider_payment_id,created_at) VALUES('crypto-order','user','plan','reconcile-order',100,'RUB','Plan',30,0,1,'pending','cryptobot','invoice-1',?)",[$now]);
-        $app->db->execute("INSERT INTO topups(id,user_id,amount_kopeks,currency,status,provider,idempotency_key,provider_payment_id,created_at) VALUES('unsupported-topup','user',100,'RUB','pending','tribute','reconcile-topup','invoice-2',?)",[$now]);
+        $app->db->execute("INSERT INTO orders(id,user_id,plan_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,provider_payment_id,created_at) VALUES('platega-order','user','plan','reconcile-order',100,'RUB','Plan',30,0,1,'pending','platega','invoice-1',?)",[$now]);
+        $app->db->execute("INSERT INTO topups(id,user_id,amount_kopeks,currency,status,provider,idempotency_key,provider_payment_id,created_at) VALUES('unsupported-topup','user',100,'RUB','pending','demo','reconcile-topup','invoice-2',?)",[$now]);
         (new Reconciler($app))->run();
         self::assertCount(1,$app->db->all("SELECT * FROM outbox WHERE topic='payment.verify'"));
         $received=[];
         self::assertTrue($app->outbox->runOne(function(string $topic,array $payload) use (&$received): void {
             $received=['topic'=>$topic,'payload'=>$payload];
         }));
-        self::assertSame(['topic'=>'payment.verify','payload'=>['payment_id'=>'invoice-1','provider'=>'cryptobot']],$received);
+        self::assertSame(['topic'=>'payment.verify','payload'=>['payment_id'=>'invoice-1','provider'=>'platega']],$received);
     }
 
     public function testReconcilerRecoversProvisioningAfterDeadJob(): void
@@ -274,12 +274,12 @@ final class AuditRegressionTest extends TestCase
 
     public function testMalformedConfiguredProviderWebhookIsRejectedWithoutServerError(): void
     {
-        $config=['CRYPTOBOT_ENABLED'=>'1','CRYPTOBOT_API_TOKEN'=>'fixture-token'];
+        $config=['PLATEGA_ENABLED'=>'1','PLATEGA_MERCHANT_ID'=>'merchant','PLATEGA_SECRET'=>'secret'];
         $http=new MockHttpClient();
         $registry=new ProviderRegistry($http,$config);
-        $registry->register(new \App\Integration\Payment\CryptoBotProvider($http,$config));
+        $registry->register(new \App\Integration\Payment\PlategaProvider($http,$config));
         $service=new PaymentService($this->app->db,$this->app->billing,$http,$config,$registry);
-        self::assertFalse($service->handleWebhook('cryptobot',Request::create('/','POST',[],[],[],['CONTENT_TYPE'=>'application/json'],'{')));
+        self::assertFalse($service->handleWebhook('platega',Request::create('/','POST',[],[],[],['CONTENT_TYPE'=>'application/json'],'{')));
     }
 
 }

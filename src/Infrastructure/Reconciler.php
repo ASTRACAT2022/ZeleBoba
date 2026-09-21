@@ -112,7 +112,7 @@ final class Reconciler
             // containers use the dynamic registry.
             $providers=isset($this->app->providers)
                 ? array_keys($this->app->providers->enabled())
-                : ['platega','yookassa'];
+                : ['platega'];
             do{
                 $placeholders=implode(',',array_fill(0,count($providers),'?'));
                 $rows=$providers===[]?[]:$db->all("SELECT id,provider,provider_payment_id FROM orders WHERE id>? AND status='pending' AND provider IN ($placeholders) AND provider_payment_id IS NOT NULL ORDER BY id LIMIT 100",array_merge([$after],$providers));

@@ -88,7 +88,7 @@ final class PaymentService
     }
     private function requireCheckoutSupport(string $provider): void
     {
-        if (in_array($provider,['telegram_stars','tribute'],true)) throw new BillingError('Подтверждение платежей этого провайдера пока не реализовано.');
+        // Only Platega is supported after the provider cleanup.
     }
     /** Verify a payment with the provider and settle if paid. */
     public function verify(string $paymentId, ?string $providerId=null, ?string $correlationId=null): void
@@ -113,7 +113,7 @@ final class PaymentService
         }
         $metadata=$result['metadata']??[];
         // Recover a checkout that succeeded remotely before its id was stored locally.
-        if (!$entity && in_array($providerId,['yookassa','platega'],true)) {
+        if (!$entity && $providerId==='platega') {
             $orderId=$metadata['order_id']??$metadata['merchant_order_id']??'';
             $topupId=$metadata['topup_id']??$metadata['merchant_order_id']??'';
             $order=$this->db->one('SELECT * FROM orders WHERE id=? AND provider=?',[$orderId,$providerId]);
@@ -133,10 +133,9 @@ final class PaymentService
         $boundById = ($entity['provider_payment_id'] ?? null) === (string)$paymentId;
         $expected = $metadata[$isOrder ? 'order_id' : 'topup_id'] ?? null;
         if (!$boundById
-            && in_array($providerId, ['yookassa', 'platega'], true)
+            && $providerId==='platega'
             && $expected !== $entity['id']) throw new BillingError('Платёж относится к другому заказу.');
-        if ($providerId==='cryptobot' && ($metadata['payload']??'')!==($isOrder?'order:':'topup:').$entity['id']) throw new BillingError('CryptoBot: неверная привязка счёта.');
-        $account=match($providerId){'yookassa'=>($this->config['YOOKASSA_SHOP_ID']??''),'platega'=>($this->config['PLATEGA_MERCHANT_ID']??''),default=>''};
+        $account=match($providerId){'platega'=>($this->config['PLATEGA_MERCHANT_ID']??''),default=>''};
         if (isset($entity['provider_account']) && $entity['provider_account']!=='' && $entity['provider_account']!==$account) throw new BillingError('Несовпадение магазина.');
         $actualId=$result['payment_id']??'';
         if (!is_string($actualId) || $actualId==='' || strlen($actualId)>100 || ($entity['provider_payment_id']!==null && $entity['provider_payment_id']!==$actualId)) throw new BillingError('Несовпадение платежа.');

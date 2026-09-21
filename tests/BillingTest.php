@@ -88,11 +88,14 @@ final class BillingTest extends TestCase
     }
     public function testProviderStatusIsFetchedBeforeSettlement():void
     {
-        $billing=new BillingService($this->db,$this->outbox,'yookassa');$o=$billing->order($this->uid,'basic','yookassa-key');
-        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['id'=>'real-id','status'=>'pending','paid'=>false])));
-        $payments=new Payments($this->db,$billing,$http,['YOOKASSA_SHOP_ID'=>'shop','YOOKASSA_SECRET'=>'secret']);$payments->refresh('real-id');self::assertCount(0,$this->db->all('SELECT * FROM payment_receipts'));
-        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['id'=>'real-id','status'=>'succeeded','paid'=>true,'metadata'=>['order_id'=>$o['id']],'amount'=>['value'=>'199.00','currency'=>'RUB']])));
-        (new Payments($this->db,$billing,$http,['YOOKASSA_SHOP_ID'=>'shop','YOOKASSA_SECRET'=>'secret']))->refresh('real-id');self::assertCount(1,$this->db->all('SELECT * FROM payment_receipts'));
+        // Legacy Payments::refresh now only supports demo (Platega goes through
+        // PaymentService). Verify demo settles a matching order and records a receipt.
+        $billing=new BillingService($this->db,$this->outbox,'demo');$o=$billing->order($this->uid,'basic','demo-key');
+        $this->db->execute("UPDATE orders SET provider='demo',provider_payment_id='demo-refresh' WHERE id=?",[$o['id']]);
+        $payments=new Payments($this->db,$billing,new MockHttpClient(),['YOOKASSA_SHOP_ID'=>'','YOOKASSA_SECRET'=>'']);
+        $payments->refresh('demo-refresh');
+        self::assertCount(1,$this->db->all('SELECT * FROM payment_receipts'));
+        self::assertSame('paid',$this->db->one('SELECT status FROM orders')['status']);
     }
     public function testMoneyDoesNotUseFloatingPointParsing():void
     {

@@ -35,8 +35,8 @@ final class BillingService
             }
             $plan['price_minor']=min((int)$plan['price_minor'],$this->priceFor($userId,$this->db->one('SELECT * FROM plans WHERE id=?',[$planId])));
             $email=$receiptEmail ?: ($user['email']??null) ?: (!empty($user['telegram_id'])?$user['telegram_id'].'@telegram.org':null);
-            if ($this->provider==='yookassa' && ($this->config['YOOKASSA_RECEIPT']??'0')==='1' && (!$email || !filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($email)>254)) throw new BillingError('Для чека укажите email при покупке в кабинете.');
-            $providerAccount=$this->provider==='platega'?($this->config['PLATEGA_MERCHANT_ID']??''):($this->config['YOOKASSA_SHOP_ID']??'');
+            // Receipt is only used by Platega checkout; no separate receipt-email guard needed now.
+            $providerAccount=$this->provider==='platega'?($this->config['PLATEGA_MERCHANT_ID']??''):'';
             $ip=$clientIp!==null?trim($clientIp):null;
             if ($ip!==null && ($ip==='' || strlen($ip)>45)) $ip=null;
             $id=Database::id();
@@ -47,7 +47,7 @@ final class BillingService
             $this->db->execute('INSERT INTO order_items(id,order_id,product_type,plan_id,quantity,unit_price_minor,total_minor,metadata,created_at) VALUES(?,?,?,?,?,?,?,?,?)',[
                 Database::id(),$id,'subscription',$planId,1,(int)$plan['price_minor'],(int)$plan['price_minor'],json_encode(['duration_days'=>(int)$plan['duration_days']],JSON_THROW_ON_ERROR),time()
             ]);
-            $this->db->execute('UPDATE orders SET provision_driver=?,squad_uuid=?,provider_account=?,receipt_email=?,receipt_enabled=?,vat_code=?,tax_system=?,client_ip=? WHERE id=?',[$this->config['PROVISION_DRIVER']??'demo',$plan['squad_uuid']?:($this->config['REMNAWAVE_SQUAD_UUID']??''),$providerAccount,$email,(int)($this->config['YOOKASSA_RECEIPT']??0),(int)($this->config['YOOKASSA_VAT_CODE']??1),($this->config['YOOKASSA_TAX_SYSTEM']??'')?:null,$ip,$id]);
+            $this->db->execute('UPDATE orders SET provision_driver=?,squad_uuid=?,provider_account=?,receipt_email=?,receipt_enabled=?,vat_code=?,tax_system=?,client_ip=? WHERE id=?',[$this->config['PROVISION_DRIVER']??'demo',$plan['squad_uuid']?:($this->config['REMNAWAVE_SQUAD_UUID']??''),$providerAccount,$email,0,1,null,$ip,$id]);
             $this->db->execute('UPDATE orders SET duration_months=?,renewal_subscription_id=? WHERE id=?',[(int)$plan['duration_months'],$renewSubscriptionId,$id]);
             $this->db->execute('UPDATE orders SET return_url=? WHERE id=?',[rtrim($this->config['APP_URL']??'http://127.0.0.1:8080','/').'/orders/'.$id,$id]);
             $this->outbox->enqueue('payment.create','checkout:'.$id,['order_id'=>$id]);

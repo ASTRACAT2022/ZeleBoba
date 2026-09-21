@@ -23,7 +23,6 @@ final class ProviderRegistry
     {
         $result = [];
         foreach ($this->providers as $id => $provider) {
-            if (in_array($id,['telegram_stars','tribute'],true)) continue; // Confirmation flow is not implemented.
             if ($provider->configured()) $result[$id] = $provider;
         }
         return $result;

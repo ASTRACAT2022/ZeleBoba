@@ -31,11 +31,6 @@ final class IntegrationCheck
                     $hb=$this->app->db->one('SELECT seen_at FROM runtime_heartbeats WHERE name=?',['telegram']);
                     if(!$hb || (int)$hb['seen_at']<time()-180)throw new BillingError('Бот доступен, но webhook не зарегистрирован и polling не активен.');
                 }
-            }elseif($name==='yookassa'){
-                if(!$c['YOOKASSA_SHOP_ID']||!$c['YOOKASSA_SECRET'])throw new BillingError('Заполните магазин и ключ.');
-                $data=$http->request('GET','https://api.yookassa.ru/v3/me',['auth_basic'=>[$c['YOOKASSA_SHOP_ID'],$c['YOOKASSA_SECRET']]])->toArray();
-                if((string)($data['account_id']??'')!==$c['YOOKASSA_SHOP_ID'])throw new BillingError('Идентификатор магазина не совпал.');
-                if($c['APP_ENV']==='prod' && ($data['test']??true)!==false)throw new BillingError('Магазин работает в тестовом режиме.');
             }elseif($name==='platega'){
                 if(!$c['PLATEGA_MERCHANT_ID']||!$c['PLATEGA_SECRET'])throw new BillingError('Заполните merchant_id и секрет Platega.');
                 // Platega signs every request with HMAC-SHA256 over the payload; there is no

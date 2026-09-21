@@ -18,9 +18,9 @@ final class DemoEvents
         if ($op) { $op['existing'] = true; return $op['id']; }
 
         $this->db->execute('INSERT INTO operations(id,correlation_id,trace_id,type,status,user_id,started_at,metadata) VALUES(?,?,?,?,?,?,?,?)', [$opId, $correlationId, $traceId, 'payment', 'processing', $userId, $now, json_encode(['amount' => 19900, 'currency' => 'RUB', 'email' => $email], JSON_THROW_ON_ERROR)]);
-        $this->addEvent($opId, $correlationId, $traceId, $userId, null, null, null, $now, 'payment.webhook.received', 'success', 'Webhook received from YooKassa', ['webhook_id' => 'wf_' . bin2hex(random_bytes(8)), 'amount' => 19900]);
+        $this->addEvent($opId, $correlationId, $traceId, $userId, null, null, null, $now, 'payment.webhook.received', 'success', 'Webhook received from Platega', ['webhook_id' => 'wf_' . bin2hex(random_bytes(8)), 'amount' => 19900]);
 
-        $this->addStep($opId, null, 'Webhook received', 'webhook', 'success', $now, $now + 1, 23, 1, 1, 'POST', '/api/webhooks/yookassa', 200, null, null, ['body' => 'id=payment_demo'], ['status' => 'ok']);
+        $this->addStep($opId, null, 'Webhook received', 'webhook', 'success', $now, $now + 1, 23, 1, 1, 'POST', '/webhooks/platega', 200, null, null, ['body' => 'id=payment_demo'], ['status' => 'ok']);
         $this->addEvent($opId, $correlationId, $traceId, $userId, null, null, null, $now + 1, 'payment.signature.verified', 'success', 'Signature verified');
         $this->addStep($opId, null, 'Signature verified', 'payment', 'success', $now + 1, $now + 2, 8, 1, 1);
         $this->addEvent($opId, $correlationId, $traceId, $userId, null, null, null, $now + 2, 'payment.transaction.lookup', 'success', 'Transaction created in billing');
