@@ -124,10 +124,10 @@ final class BillingService
                 // Each purchase is an independent subscription unless it is a renewal order.
                 $months=(int)$order['duration_months'];
                 $expiry=(new SubscriptionService($this->db,$this->outbox))->expiryAfter($now,(int)$order['duration_days'],$months);
-                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,?,?,'provisioning',?,?,?,?,?,?,'pending',?,?,?)",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
+                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,traffic_used_gb,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,?,?,'provisioning',?,?,?,?,0,?,?,'pending',?,?,?)",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
                 // Daily-priced tariffs auto-enable the daily charge: while the
                 // wallet covers the daily price the subscription renews itself.
-                if ((int)$order['duration_days']<=1 && ($this->config['AUTORENEW_ENABLED']??'0')==='1') {
+                if ((int)$order['duration_days']<=1 && $this->autoRenewEnabled()) {
                     $this->db->execute('UPDATE subscriptions SET auto_renew=1,renew_plan_id=?,renew_price_minor=?,last_daily_charge_at=? WHERE id=? AND status=\'provisioning\'',[$order['plan_id'],(int)$order['price_minor'],$now,$sub]);
                     $this->timeline?->record($order['user_id'], 'subscription.daily_auto_enabled', ['subscription_id'=>$sub,'plan_id'=>$order['plan_id']], $now);
                 }
@@ -188,6 +188,17 @@ final class BillingService
     {
         $this->topups = $topups;
     }
+    /** Fresh AUTORENEW_ENABLED from app_settings at decision time, NOT the
+     *  process-start config snapshot. The long-lived worker freezes Container
+     *  config for its whole lifetime, so a snapshot here would silently keep
+     *  daily auto-enable off until the worker restarts — exactly how wallet/
+     *  auto-purchased daily subs regressed to auto_renew=0 (settled in the
+     *  stale worker). Mirror Worker::renew which already reads the DB fresh. */
+    private function autoRenewEnabled(): bool
+    {
+        $row=$this->db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
+        return ($row && $row['value']==='1') || (($this->config['AUTORENEW_ENABLED']??'0')==='1' && !$row);
+    }
     /** Enable or disable auto-renew for a subscription. Returns updated row. */
     public function setAutoRenew(string $userId,string $subscriptionId,bool $enable): array
     {
@@ -196,7 +207,7 @@ final class BillingService
             if (!$sub || $sub['user_id']!==$userId) throw new BillingError('Подписка не найдена.');
             if ($sub['status']!=='active' || (int)$sub['expires_at']<=time()) throw new BillingError('Автопродление доступно только для активной подписки.');
             if ($enable) {
-                if (($this->config['AUTORENEW_ENABLED']??'0')!=='1') throw new BillingError('Автопродление отключено администратором.');
+                if (!$this->autoRenewEnabled()) throw new BillingError('Автопродление отключено администратором.');
                 $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$sub['plan_id']]);
                 if (!$plan) throw new BillingError('Тариф подписки больше недоступен.');
                 $renewAt=$this->renewAt((int)$sub['expires_at'],(int)$plan['duration_days'],isset($plan['autorenew_days_before'])?(int)$plan['autorenew_days_before']:null);
