@@ -215,7 +215,12 @@ final class BillingService
     }
     private function nextTxSeq(): int
     {
-        return (int)($this->db->one('SELECT COALESCE(MAX(seq),0)+1 AS s FROM transactions')['s'] ?? 1);
+        // Same serialization as Wallet::nextSeq(): the UNIQUE(seq) index plus
+        // this advisory lock prevent duplicate sequence numbers under
+        // concurrent settlement/credit paths.
+        if ($this->db->postgres()) $this->db->execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',['zeleboba:transactions:seq']);
+        $row=$this->db->one('SELECT COALESCE(MAX(seq),0)+1 AS s FROM transactions', []);
+        return (int)($row['s'] ?? 1);
     }
 
     /**

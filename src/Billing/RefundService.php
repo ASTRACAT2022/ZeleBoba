@@ -11,6 +11,10 @@ final class RefundService
     {
         if($amount<=0) throw new BillingError('Сумма возврата должна быть положительной.');
         return $this->db->transaction(function()use($paymentId,$amount,$reason,$actor) {
+            // Serialize refund aggregation for one payment so two concurrent
+            // refund requests can never both pass the < remaining check and
+            // together exceed the payment amount.
+            if ($this->db->postgres()) $this->db->execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',['refund:'.$paymentId]);
             $payment=$this->db->one("SELECT * FROM payments WHERE id=? AND status='succeeded'".$this->db->lock(),[$paymentId]);
             if(!$payment) throw new BillingError('Успешный платёж не найден.');
             $key='refund:'.$paymentId.':'.hash('sha256',$reason.':'.$amount);

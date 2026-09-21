@@ -55,7 +55,12 @@ final class Wallet
     }
     private function nextSeq(): int
     {
-        return (int)($this->db->one('SELECT COALESCE(MAX(seq),0)+1 AS s FROM transactions')['s'] ?? 1);
+        // Serialize seq allocation so concurrent credit/debit can never mint a
+        // duplicate seq (there is a UNIQUE index on transactions.seq). The
+        // advisory xact lock is released when the caller's transaction ends.
+        if ($this->db->postgres()) $this->db->execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',['zeleboba:transactions:seq']);
+        $row=$this->db->one('SELECT COALESCE(MAX(seq),0)+1 AS s FROM transactions', []);
+        return (int)($row['s'] ?? 1);
     }
     public function historyCount(string $userId): int
     {

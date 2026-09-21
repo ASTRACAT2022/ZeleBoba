@@ -1,0 +1,11 @@
+-- UNIQUE(seq) + serialized allocation.
+--
+-- Wallet::nextSeq()/BillingService::nextTxSeq() allocated seq via
+-- MAX(seq)+1 without any serialization or uniqueness guarantee. Under
+-- concurrent credit/debit this could mint duplicate seq values and corrupt
+-- the wallet-history ordering. A unique index is the hard guarantee; the
+-- pg_advisory_xact_lock added in code serializes allocation on PostgreSQL.
+--
+-- Safe to add now: production transactions.seq is currently duplicate-free
+-- (verified before authoring this migration).
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_seq_unique ON transactions(seq);
