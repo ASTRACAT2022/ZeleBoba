@@ -1,12 +1,13 @@
 <?php
 // Fault-test: SubscriptionMergeService::merge() — resource transfer + source
-// cancellation. Asserts:
+// hard-delete. Asserts:
 //  - traffic limit + purchased traffic summed into target
 //  - remaining days of source added to target expiry
 //  - device limits summed; unlimited (0) wins
-//  - source transitioned cancelled/disabled, provisioning rows detached
-//  - rejects: same sub, foreign sub, non-active sub
-//  - idempotency: second merge attempt on the now-cancelled source is rejected
+//  - source row HARD-deleted from subscriptions (migration 035 FK: runtime
+//    provisioning CASCADE, financial history SET NULL)
+//  - rejects: same sub, foreign sub, missing/non-active sub
+//  - idempotency: second merge attempt on the deleted source is rejected
 // Runs against the dev Container / prod DB with synthetic entities only
 // (no real money, no provisioning). NO panel calls in dev (provisioner null).
 declare(strict_types=1);
@@ -69,12 +70,15 @@ if ($merged) {
     if ((int)$m['expires_at'] !== $expExpiry) $fail .= "FAIL expiry=".$m['expires_at']." expect $expExpiry\n";
     echo "merged target: traffic={$m['traffic_limit_gb']} purch={$m['purchased_traffic_gb']} dev={$m['device_limit']} used={$m['traffic_used_gb']} expiry={$m['expires_at']}\n";
 }
-// source must be cancelled/disabled
+// source must be HARD-deleted (row removed from subscriptions)
 $srcAfter = $db->one('SELECT status,lifecycle_status,auto_renew FROM subscriptions WHERE id=?',[$src]);
-if (($srcAfter['status']??'') !== 'disabled') $fail .= "FAIL source status=".($srcAfter['status']??'?')." expect disabled\n";
-if (($srcAfter['lifecycle_status']??'') !== 'cancelled') $fail .= "FAIL source lifecycle=".($srcAfter['lifecycle_status']??'?')." expect cancelled\n";
-if ((int)($srcAfter['auto_renew']??1) !== 0) $fail .= "FAIL source auto_renew not disabled\n";
-echo "source after: status={$srcAfter['status']} lifecycle={$srcAfter['lifecycle_status']} auto_renew={$srcAfter['auto_renew']}\n";
+if ($srcAfter) $fail .= "FAIL source still exists: status=".($srcAfter['status']??'?')." expect hard-deleted\n";
+// financial history must survive with subscription link cleared (SET NULL)
+$opSrc = $db->one('SELECT id FROM operations WHERE subscription_id=?',[$src]);
+if ($opSrc) $fail .= "FAIL source ops still reference subscription (expected NULL)\n";
+$ordSrc = $db->one('SELECT id FROM orders WHERE renewal_subscription_id=?',[$src]);
+if ($ordSrc) $fail .= "FAIL source order still references subscription (expected NULL)\n";
+echo "source after hard-delete: exists=".($srcAfter?'yes':'no')."\n";
 
 // ============ 2. reject: merge sub into itself ============
 $uid2=mruid(); mkUser($db,$uid2,$TID.'-self@test.local');
@@ -91,15 +95,17 @@ $createdSubs[]=$osrc; $createdSubs[]=$tgtMine;
 try { $c->merger->merge($uid2,$osrc,$tgtMine); $fail.="FAIL foreign source not rejected\n"; echo "foreign merge: NOT rejected (BUG)\n"; }
 catch (\Throwable $e) { echo "foreign source rejected: ".get_class($e)."\n"; if (!str_contains($e->getMessage(),'другому аккаунту')) $fail.="FAIL foreign wrong msg\n"; }
 
-// ============ 4. reject: non-active source/target ============
+// ============ 4. reject: non-active / missing source ============
 $uid3=mruid(); mkUser($db,$uid3,$TID.'-na@test.local');
-// source cancelled (already removed flow)
+// source row removed (as after a prior merge) -> merge must reject not-found
 $naSrc = mkSub($db,$uid3,10,0,1,5,0);
-$db->execute("UPDATE subscriptions SET lifecycle_status='cancelled',status='disabled' WHERE id=?",[$naSrc]);
 $naTgt = mkSub($db,$uid3,10,0,1,5,0);
 $createdSubs[]=$naSrc; $createdSubs[]=$naTgt;
-try { $c->merger->merge($uid3,$naSrc,$naTgt); $fail.="FAIL cancelled source accepted\n"; echo "cancelled source: NOT rejected (BUG)\n"; }
-catch (\Throwable $e) { echo "cancelled source rejected: ".get_class($e)."\n"; }
+$db->execute('DELETE FROM subscriptions WHERE id=?',[$naSrc]); // simulate prior merge / vanished source
+$db->execute('DELETE FROM provisioning_accounts WHERE subscription_id=?',[$naSrc]);
+$db->execute('DELETE FROM provisioning_operations WHERE subscription_id=?',[$naSrc]);
+try { $c->merger->merge($uid3,$naSrc,$naTgt); $fail.="FAIL missing source accepted\n"; echo "missing source: NOT rejected (BUG)\n"; }
+catch (\Throwable $e) { echo "missing source rejected: ".get_class($e)."\n"; }
 // expired target
 $uid4=mruid(); mkUser($db,$uid4,$TID.'-exp@test.local');
 $okSrc = mkSub($db,$uid4,10,0,1,5,0);
@@ -108,15 +114,18 @@ $createdSubs[]=$okSrc; $createdSubs[]=$expTgt;
 try { $c->merger->merge($uid4,$okSrc,$expTgt); $fail.="FAIL expired target accepted\n"; echo "expired target: NOT rejected (BUG)\n"; }
 catch (\Throwable $e) { echo "expired target rejected: ".get_class($e)."\n"; if(!str_contains($e->getMessage(),'истекла')) $fail.="FAIL expired wrong msg\n"; }
 
-// ============ 5. idempotency: re-merge on cancelled source rejected ============
+// ============ 5. idempotency: re-merge on deleted source rejected ============
 $uid5=mruid(); mkUser($db,$uid5,$TID.'-idem@test.local');
 $isrc = mkSub($db,$uid5,10,0,1,3,0);
 $itgt = mkSub($db,$uid5,10,0,1,3,0);
 $createdSubs[]=$isrc; $createdSubs[]=$itgt;
 $c->merger->merge($uid5,$isrc,$itgt); // first merge succeeds
+// source row is now hard-deleted -> second merge must reject (not found)
+if ($db->one('SELECT id FROM subscriptions WHERE id=?',[$isrc])) { $fail .= "FAIL idempotency: source still exists after first merge\n"; }
+else { echo "source hard-deleted after merge: yes\n"; }
 try {
-    $c->merger->merge($uid5,$isrc,$itgt); // source now cancelled -> must reject
-    $fail.="FAIL second merge on cancelled source succeeded\n";
+    $c->merger->merge($uid5,$isrc,$itgt); // source gone -> must reject
+    $fail.="FAIL second merge on deleted source succeeded\n";
     echo "idempotency(second merge): NOT rejected (BUG)\n";
 } catch (\Throwable $e) {
     echo "idempotency rejected: ".get_class($e).": ".substr($e->getMessage(),0,60)."\n";

@@ -3,7 +3,7 @@ declare(strict_types=1);
 namespace App\Subscriptions;
 
 use App\Billing\BillingError;
-use App\Infrastructure\{Database,Outbox,StateMachine};
+use App\Infrastructure\{Database,Outbox};
 use App\Observability\OperationsService;
 
 /**
@@ -23,11 +23,12 @@ use App\Observability\OperationsService;
  *   auto_renew -> target keeps its own auto-renew settings (source's is dropped
  *                 since the source is removed)
  *
- * The source subscription is NOT hard-deleted: it is transitioned to
- * 'cancelled' via the state machine, its provisioning is disabled on the
- * panel, its provisioning rows are removed, and it is filtered out of the
- * client UI. This preserves the financial audit trail (linked orders /
- * operations) while making the subscription disappear for the customer.
+ * The source subscription is HARD-deleted: its row is removed from
+ * `subscriptions` within the same transaction. FK on `subscriptions` are
+ * repointed by migration 035 so runtime provisioning rows CASCADE away and
+ * financial history rows (operations/order_items/orders/operation_events)
+ * are kept with their subscription link set to NULL — the money trail is
+ * never destroyed, while the subscription itself fully disappears.
  */
 final class SubscriptionMergeService
 {
@@ -67,6 +68,9 @@ final class SubscriptionMergeService
             $rowA = $this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(), [$a]);
             $rowB = $this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(), [$b]);
             // Map locked rows back to source/target by their real id.
+            if (!$rowA || !$rowB) {
+                throw new BillingError('Подписка не найдена.');
+            }
             $source = $rowA['id'] === $sourceId ? $rowA : $rowB;
             $target = $rowA['id'] === $targetId ? $rowA : $rowB;
 
@@ -111,20 +115,18 @@ final class SubscriptionMergeService
                  'active', 'active', $now, $targetId]
             );
 
-            // Transition the source to cancelled via the state machine.
-            StateMachine::assertCanTransition('subscription', (string)($source['lifecycle_status'] ?? $source['status']), 'cancelled');
-            $this->db->execute(
-                "UPDATE subscriptions SET status='disabled',lifecycle_status='cancelled',auto_renew=0,renew_order_id=NULL,renew_failed_at=NULL,updated_at=?,version=version+1 WHERE id=?",
-                [$now, $sourceId]
-            );
-            // Drop pending provisioning/extension work for the source.
+            // HARD-delete the source subscription. FK are repointed (migration
+            // 035): provisioning rows CASCADE, financial history SET NULL —
+            // the audit trail survives with a cleared link, the subscription
+            // itself is gone for the customer and the panel.
+            $this->db->execute('DELETE FROM subscriptions WHERE id=?', [$sourceId]);
+            // Drop pending scheduling/provisioning work for the source.
             $this->db->execute(
                 "DELETE FROM outbox WHERE topic IN ('subscription.provision','subscription.extend','subscription.renew','subscription.daily') AND payload LIKE ?",
                 ['%'.$sourceId.'%']
             );
-            // Detach runtime provisioning rows (they reference the source sub).
-            $this->db->execute('DELETE FROM provisioning_accounts WHERE subscription_id=?', [$sourceId]);
-            $this->db->execute('DELETE FROM provisioning_operations WHERE subscription_id=?', [$sourceId]);
+            // Runtime provisioning rows are removed by the CASCADE FK; nothing
+            // else references the source subscription.
 
             // Audit + timeline.
             $this->audit($userId, 'subscription.merged', $sourceId,
