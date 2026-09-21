@@ -9,7 +9,7 @@ final class WebTest extends TestCase
     private Container $c;private Application $web;private string $uid;private string $session;private string $csrf;
     protected function setUp():void
     {
-        $config=['APP_ENV'=>'test','PURCHASES_ENABLED'=>'1','APP_URL'=>'http://localhost','DATABASE_DSN'=>'sqlite::memory:','DATABASE_USER'=>'','DATABASE_PASSWORD'=>'','PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo','YOOKASSA_SHOP_ID'=>'','YOOKASSA_SECRET'=>'','REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>'','TELEGRAM_BOT_TOKEN'=>'123456:abcdefghijklmnopqrstuvwxyz','TELEGRAM_BOT_USERNAME'=>'example_bot','TELEGRAM_WEBHOOK_SECRET'=>str_repeat('s',32)];
+$config=['APP_ENV'=>'test','PURCHASES_ENABLED'=>'1','APP_URL'=>'http://localhost','DATABASE_DSN'=>'sqlite::memory:','DATABASE_USER'=>'','DATABASE_PASSWORD'=>'','PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo','REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>'','TELEGRAM_BOT_TOKEN'=>'123456:abcdefghijklmnopqrstuvwxyz','TELEGRAM_BOT_USERNAME'=>'example_bot','TELEGRAM_WEBHOOK_SECRET'=>str_repeat('s',32)];
         $this->c=new Container($config);$this->c->db->migrate(__DIR__.'/../migrations');$this->c->db->execute("INSERT INTO plans(id,name,price_minor,currency,duration_days,traffic_bytes,devices,active) VALUES('basic','Basic',19900,'RUB',30,0,3,1)");
         $this->uid=$this->c->auth->register('a@example.org','correct-horse-battery');$this->session=$this->c->auth->issue($this->uid);$this->csrf=$this->c->auth->session($this->session)['csrf'];$this->web=new Application($this->c);
     }

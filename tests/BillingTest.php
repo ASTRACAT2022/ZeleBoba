@@ -92,7 +92,7 @@ final class BillingTest extends TestCase
         // PaymentService). Verify demo settles a matching order and records a receipt.
         $billing=new BillingService($this->db,$this->outbox,'demo');$o=$billing->order($this->uid,'basic','demo-key');
         $this->db->execute("UPDATE orders SET provider='demo',provider_payment_id='demo-refresh' WHERE id=?",[$o['id']]);
-        $payments=new Payments($this->db,$billing,new MockHttpClient(),['YOOKASSA_SHOP_ID'=>'','YOOKASSA_SECRET'=>'']);
+        $payments=new Payments($this->db,$billing,new MockHttpClient(),[]);
         $payments->refresh('demo-refresh');
         self::assertCount(1,$this->db->all('SELECT * FROM payment_receipts'));
         self::assertSame('paid',$this->db->one('SELECT status FROM orders')['status']);

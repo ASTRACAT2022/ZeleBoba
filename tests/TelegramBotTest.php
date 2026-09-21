@@ -114,7 +114,7 @@ final class TelegramBotTest extends TestCase
     }
     public function testGateBlocksUntilChannelSubscribed(): void
     {
-        $config=['APP_ENV'=>'test','APP_URL'=>'https://cabinet.example','DATABASE_DSN'=>'sqlite::memory:','DATABASE_USER'=>'','DATABASE_PASSWORD'=>'','PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo','TELEGRAM_BOT_TOKEN'=>'TOKEN','YOOKASSA_SHOP_ID'=>'','YOOKASSA_SECRET'=>'','REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>''];
+$config=['APP_ENV'=>'test','APP_URL'=>'https://cabinet.example','DATABASE_DSN'=>'sqlite::memory:','DATABASE_USER'=>'','DATABASE_PASSWORD'=>'','PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo','TELEGRAM_BOT_TOKEN'=>'TOKEN','REMNAWAVE_URL'=>'','REMNAWAVE_TOKEN'=>'','REMNAWAVE_SQUAD_UUID'=>''];
         $c=new Container($config);
         $c->db->migrate(__DIR__.'/../migrations');
         $c->channels->add('@AstracatUO','https://t.me/AstracatUO','ASTRACAT UO','admin');

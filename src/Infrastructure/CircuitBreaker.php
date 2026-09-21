@@ -3,7 +3,7 @@ declare(strict_types=1);
 namespace App\Infrastructure;
 
 /**
- * Circuit breaker for outbound upstreams (FreeKassa API, Remnawave API, etc.).
+ * Circuit breaker for outbound upstreams (Platega API, Remnawave API, etc.).
  *
  * States: closed -> open (after failureThreshold consecutive failures) -> half_open (after timeout)
  * In open state calls are rejected fast (fail-fast) to protect downstream.

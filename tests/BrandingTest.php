@@ -19,7 +19,6 @@ final class BrandingTest extends TestCase
             'APP_ENV' => 'test', 'PURCHASES_ENABLED' => '1', 'APP_URL' => 'http://localhost',
             'DATABASE_DSN' => 'sqlite:'.$this->dbFile, 'DATABASE_USER' => '', 'DATABASE_PASSWORD' => '',
             'PAYMENT_DRIVER' => 'demo', 'PROVISION_DRIVER' => 'demo',
-            'YOOKASSA_SHOP_ID' => '', 'YOOKASSA_SECRET' => '',
             'REMNAWAVE_URL' => '', 'REMNAWAVE_TOKEN' => '', 'REMNAWAVE_SQUAD_UUID' => '',
             'TELEGRAM_BOT_TOKEN' => '123456:abcdefghijklmnopqrstuvwxyz', 'TELEGRAM_BOT_USERNAME' => 'example_bot',
             'TELEGRAM_WEBHOOK_SECRET' => str_repeat('s', 32),

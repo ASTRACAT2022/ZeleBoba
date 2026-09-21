@@ -32,8 +32,8 @@ abstract class AbstractProvider implements ProviderInterface
 
     /**
      * Single outbound HTTP path shared by every provider. Circuit-breaker is
-     * applied here so a failing or slow upstream (Platega, YooKassa, Lava, …)
-     * is short-circuited fast once the breaker opens, instead of letting every
+     * applied here so a failing or slow upstream payment gateway is
+     * short-circuited fast once the breaker opens, instead of letting every
      * checkout/verify burn attempts against a dead gateway.
      */
     protected function json(string $method, string $url, array $options = []): array
