@@ -1,16 +1,23 @@
 # ZeleBoba — текущий статус репозитория
 
-> Snapshot: **2026-09-12 18:05 UTC**, после rehearsal-сессии.
-> Версия legacy-runtime: **0.5** (по `docs/PRODUCTION_READINESS.md`).
-> Версия Laravel: **0.0** (foundation, см. `laravel-migration-inventory.md`).
+> Snapshot: **2026-09-21 15:55 UTC** — актуальное состояние после выпилки всех платёжных провайдеров кроме Platega.
+> Версия legacy-runtime: **1.1** (только Platega + demo; см. README).
 
-Этот документ — **честная сводка** того, что работает в проде прямо сейчас, что
-есть в репо, что проверено, что не проверено, и что надо убрать или
-доработать. Все оценки сделаны по факту репетиции 2026-09-12.
+## Актуальное состояние (2026-09-21)
+
+Последнее крупное изменение — удалены все платёжные провайдеры, кроме **Platega** (коммит `2b729a4`). Ниже — что верно для текущей ветки:
+
+- **Платёжный провайдер один — Platega** (`platega`), плюс `demo`-адаптер для разработки.
+- Удалены: FreeKassa, ЮKassa, CryptoBot, Telegram Stars, Lava, WATA, Heleket, Tribute, MulenPay, Pal24, CloudPayments, Kassa AI, RioPay, SeverPay, PayPear, RollyPay, Overpay, AuraPay, Etoplatezhi, Antilopay, Jupiter, Donut, CisPay, TabPay, ParityPay.
+- Webhook'и: только `/webhooks/platega` и `/webhooks/telegram`. Удалённые webhook'и возвращают 404.
+- `PAYMENT_DRIVER` допускает только `demo|platega`; конфиг — `PLATEGA_ENABLED`, `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`, `PLATEGA_API_BASE`.
+- Прод (zeleboba-all-1): boot OK, `enabled()=platega`, outbox чист, логи без ошибок.
+
+> ⚠️ Разделы ниже — **исторический срез на 2026-09-12** (до выпилки провайдеров). Они описывают legacy-состояние с FreeKassa/ЮKassa и не отражают текущую платёжную схему. Для актуального описания платёжного контура смотрите `README.md`, `docs/manual.md` (раздел 5) и `docs/architecture.md`.
 
 ---
 
-## 1. Что реально работает в проде (legacy runtime)
+## 1. Что реально работало в проде на 2026-09-12 (историч.)
 
 Подтверждено через `docker ps`, `psql`, `audit_log`, `outbox.status`
 на работающем `zeleboba-db-1`, `zeleboba-app-1`, `zeleboba-web-1`,

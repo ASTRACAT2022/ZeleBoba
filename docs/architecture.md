@@ -30,8 +30,7 @@ numeric ID; `users.telegram_id` пока остаётся read-проекцие�
 flowchart LR
     Web[Веб-кабинет / админка] --> App[PHP: Web / Identity / Billing]
     TG[Telegram webhook] --> App
-    FK[FreeKassa webhook] --> Verify[Проверка через API FreeKassa]
-    Yoo[ЮKassa webhook] --> Verify
+    PL[Platega webhook] --> Verify[Проверка через API Platega]
     Verify --> App
     App --> DB[(PostgreSQL: заказы / квитанции / учёт / outbox)]
     DB --> Worker[Фоновые workers]
@@ -47,7 +46,7 @@ flowchart LR
 |---|---|
 | Identity | Пароли Argon2id, аккаунты, серверные сессии, rate limiting |
 | Billing | Тарифные snapshots, заказ, подтверждение платежа, учёт, аудит |
-| Integration | FreeKassa, ЮKassa, Remnawave, Telegram, демоадаптеры |
+| Integration | Platega, Remnawave, Telegram, демоадаптер |
 | Infrastructure | PDO, миграции, outbox, worker |
 | Web | HTTP-маршруты, авторизация операций, CSRF, Twig |
 
@@ -90,7 +89,7 @@ Backoff с jitter, 8 попыток, затем dead. Администратор
 
 ## Контракты
 
-- [ЮKassa: уведомления](https://yookassa.ru/developers/using-api/webhooks), [API](https://yookassa.ru/developers/api).
+- [Platega API и webhook](https://app.platega.io) (платёжный контракт).
 - [Telegram Bot API](https://core.telegram.org/bots/api#setwebhook).
 - [Remnawave](https://github.com/remnawave/panel), [официальный Rust SDK](https://github.com/remnawave/rust-sdk).
 

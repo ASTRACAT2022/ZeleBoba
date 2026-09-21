@@ -1,6 +1,6 @@
 # ZeleBoba Billing · Руководство оператора
 
-Полное руководство по развёртыванию, настройке и эксплуатации ZeleBoba Billing — PHP-биллинга подписок для Remnawave с веб-кабинетом, Telegram-ботом, кошельком, 26 платёжными провайдерами, промокодами, реферальной программой, подарками, триалами, маркетингом и админкой.
+Полное руководство по развёртыванию, настройке и эксплуатации ZeleBoba Billing — PHP-биллинга подписок для Remnawave с веб-кабинетом, Telegram-ботом, кошельком, платёжным провайдером Platega, промокодами, реферальной программой, подарками, триалами, маркетингом и админкой.
 
 **Продукт остаётся ZeleBoba.** Название, логотип, цвета и тексты бота настраиваются через админку — код менять не нужно. **Реальный приём денег включается только после проверки конкретного магазина, панели и публичного HTTPS-домена.**
 
@@ -137,83 +137,36 @@ docker compose up -d app worker scheduler web
 
 ## 5. Платёжные провайдеры
 
-### 5.1. Список провайдеров
+### 5.1. Провайдер
 
-Все провайдеры работают параллельно через единый реестр. Клиент выбирает способ оплаты на странице баланса (веб) или кнопками в меню баланса (бот).
+У системы один платёжный провайдер — **Platega** (id `platega`, валюта RUB, методы: карты/СБП/крипто по доступности кассы). Плюс встроенный `demo`-адаптер для локальной разработки и проверки, который в боевом режиме не активен.
 
 | Провайдер | id | Методы | Валюта |
 |---|---|---|---|
-| ЮKassa | `yookassa` | Карты, СБП | RUB |
-| FreeKassa | `freekassa` | СБП QR, карты РФ | RUB |
-| CryptoBot | `cryptobot` | USDT, TON, BTC, ETH | Crypto |
-| Telegram Stars | `telegram_stars` | Звёзды Telegram | XTR |
-| Lava Business | `lava` | Карты, СБП | RUB |
-| WATA | `wata` | СБП, карты | RUB |
-| Heleket | `heleket` | USDT, мульти-сеть | Crypto |
-| Platega | `platega` | Карты, СБП, крипто | RUB |
-| Tribute | `tribute` | Telegram-платежи | RUB |
-| MulenPay | `mulenpay` | Карты | RUB |
-| PayPalych (Pal24) | `pal24` | Карты, СБП | RUB |
-| CloudPayments | `cloudpayments` | Карты, 3-D Secure | RUB |
-| Kassa AI | `kassa_ai` | СБП, карты, SberPay | RUB |
-| RioPay | `riopay` | Карты | RUB |
-| SeverPay | `severpay` | СБП, карты | RUB |
-| PayPear | `paypear` | Карты, СБП, SberPay, T-Pay | RUB |
-| RollyPay | `rollypay` | СБП, карты, крипто | RUB |
-| Overpay | `overpay` | Карты, СБП | RUB |
-| AuraPay | `aurapay` | Карты, СБП | RUB |
-| Etoplatezhi | `etoplatezhi` | Карты, СБП | RUB |
-| Antilopay | `antilopay` | Карты, СБП, SberPay | RUB |
-| Jupiter | `jupiter` | СБП через QR (FPGate P2P) | RUB |
-| Donut | `donut` | Карты, СБП по телефону, СБП QR | RUB |
-| CisPay | `cispay` | СБП, карты | RUB |
-| TabPay | `tabpay` | СБП, карты с 3-D Secure | RUB |
-| ParityPay | `paritypay` | СБП, карты | RUB |
-| Демо | `demo` | Тестовый платёж | RUB |
+| Platega | `platega` | карты, СБП, крипто | RUB |
+| Демо (dev) | `demo` | тестовый платёж | RUB |
 
 ### 5.2. Настройка провайдера
 
-В `/admin/config` → «Платежи» для каждого провайдера:
+В `/admin/config` → «Платежи»:
 
-1. Включите флаг `<ПРОВАЙДЕР>_ENABLED=1`.
-2. Заполните ключи (токены, shop id, секреты). Пустые поля ключей сохраняют текущие значения.
+1. Включите флаг `PLATEGA_ENABLED=1`.
+2. Заполните ключи: `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`, `PLATEGA_API_BASE` (по умолчанию `https://app.platega.io`). Пустые поля ключей сохраняют текущие значения.
 3. Сохраните настройки.
 4. Зарегистрируйте webhook (см. ниже).
 5. Проверьте подключение кнопкой «Проверить».
 
-Секреты хранятся зашифрованными. Магазин привязан к существующим заказам: замена магазина требует отдельной миграции, ключи можно обновлять здесь.
+Секрет хранится зашифрованным. Магазин привязан к существующим заказам: замена магазина требует отдельной миграции, ключи можно обновлять здесь.
 
-### 5.3. Webhook'и
+### 5.3. Webhook
 
 | Провайдер | URL | Формат |
 |---|---|---|
-| ЮKassa | `https://домен/webhooks/yookassa` | JSON, события `payment.succeeded`, `payment.canceled` |
-| FreeKassa | `https://домен/webhooks/freekassa` | POST/GET form-data, ответ `YES`, IP whitelist |
-| CryptoBot | `https://домен/webhooks/cryptobot` | JSON + `Crypto-Pay-API-Signature` (HMAC-SHA256) |
-| Lava | `https://домен/webhooks/lava` | JSON + подпись HMAC-SHA256 |
-| WATA | `https://домен/webhooks/wata` | JSON |
-| Heleket | `https://домен/webhooks/heleket` | JSON |
-| Platega | `https://домен/webhooks/platega` | JSON |
-| Tribute | `https://домен/webhooks/tribute` | JSON + `X-Tribute-Signature` |
-| MulenPay | `https://домен/webhooks/mulenpay` | JSON |
-| Pal24 | `https://домен/webhooks/pal24` | JSON |
-| CloudPayments | `https://домен/webhooks/cloudpayments` | JSON |
-| Kassa AI | `https://домен/webhooks/kassa_ai` | form-data + MD5 подпись |
-| RioPay | `https://домен/webhooks/riopay` | JSON |
-| SeverPay | `https://домен/webhooks/severpay` | JSON |
-| PayPear | `https://домен/webhooks/paypear` | JSON |
-| RollyPay | `https://домен/webhooks/rollypay` | JSON + `X-Signature` |
-| Overpay | `https://домен/webhooks/overpay` | JSON |
-| AuraPay | `https://домен/webhooks/aurapay` | JSON + `X-Signature` |
-| Etoplatezhi | `https://домен/webhooks/etoplatezhi` | JSON |
-| Antilopay | `https://домен/webhooks/antilopay` | JSON |
-| Jupiter | `https://домен/webhooks/jupiter` | JSON |
-| Donut | `https://домен/webhooks/donut` | JSON |
-| CisPay | `https://домен/webhooks/cispay` | JSON |
-| TabPay | `https://домен/webhooks/tabpay` | JSON + `X-Signature` |
-| ParityPay | `https://домен/webhooks/paritypay` | JSON + `X-Signature` |
+| Platega | `https://домен/webhooks/platega` | JSON (POST) |
 
-**Важно**: webhook — только подсказка. Авторитетный статус всегда запрашивается через API провайдера перед зачислением. Неверная подпись отклоняется; неизвестный провайдер возвращает 404.
+Других платёжных webhook'ов в системе нет: единственный webhook, кроме Platega, — `https://домен/webhooks/telegram` (бот).
+
+**Важно**: webhook — только подсказка. Авторитетный статус всегда запрашивается через API провайдера перед зачислением. Неверная подпись отклоняется; несуществующий webhook возвращает 404.
 
 ### 5.4. Безопасность платежей
 
@@ -240,7 +193,7 @@ docker compose up -d app worker scheduler web
 Если клиент выбрал тариф, но на балансе не хватает средств:
 
 1. Корзина сохраняется с меткой intent (в БД, таблица `carts`).
-2. Клиент пополняет баланс любым провайдером.
+2. Клиент пополняет баланс через Platega.
 3. После зачисления worker автоматически списывает баланс и завершает покупку (подписка, подарок, докупка трафика или устройств).
 4. При неудаче корзина сохраняется с intent для повторной попытки; клиент получает уведомление.
 
@@ -524,7 +477,7 @@ admin.roles, admin.audit, admin.monitoring, admin.maintenance
 
 - **Ключевые показатели**: выручка, средний чек, заказы, пополнения, подарки, новые пользователи, конверсия в покупку, активные подписки (включая триалы).
 - **Структура выручки**: пополнения баланса, покупки подписок, подарки, докупки (трафик/устройства).
-- **Выручка по провайдерам**: заказов и сумма по каждому провайдеру.
+- **Выручка по платёжному провайдеру**: заказов и сумма.
 - **Выручка по тарифам**: заказов и сумма по каждому тарифу.
 - **Выручка по дням**: дневная серия.
 - **Топ клиентов по тратам**: с переходом в профиль.
@@ -549,7 +502,7 @@ admin.roles, admin.audit, admin.monitoring, admin.maintenance
 | `/status` | Подписки + неоплаченные заказы |
 | `/orders` | Мои заказы |
 | `/subs` | Мои подписки + автопродление |
-| `/balance` | Баланс + выбор провайдера |
+| `/balance` | Баланс → пополнение через Platega |
 | `/topup <сумма>` | Пополнить баланс |
 | `/promo <код>` | Активировать промокод |
 | `/referral` | Реферальная программа |
@@ -698,7 +651,7 @@ docker compose exec app php bin/console billing:audit
 - Секреты зашифрованы (XChaCha20-Poly1305); ключ в `var/master.key` (0600), не в Git.
 - Runtime-роль БД не может UPDATE/DELETE/TRUNCATE ledger, payment_receipts, audit_log.
 - Rate limiting: вход (IP + email), мутации, webhook'и.
-- Webhook'и провайдеров проверяют подписи; FreeKassa — IP whitelist.
+- Webhook'и проверяют подписи Platega.
 - Порт web привязан к loopback; внешний HTTPS proxy перезаписывает Host и X-Forwarded-Proto.
 - Не публикуйте внутренний HTTP endpoint напрямую.
 

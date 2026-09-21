@@ -5,6 +5,11 @@ historical debugging artefacts from the FreeKassa nonce lockout incident
 (2026-09) stay in the repository without polluting the main `scripts/`
 directory that production backup tooling depends on.
 
+> ⚠️ **FreeKassa был удалён из кодовой базы** (коммит `2b729a4` — остался только
+> Platega). Эти `fk_*.php`-скрипты сохранены как исторический артефакт инцидента
+> и не используются в текущем платёжном контуре. Не запускать их против текущего
+> прода — провайдер FreeKassa больше не зарегистрирован.
+
 ## Contents
 
 | File | Purpose |

@@ -6,8 +6,8 @@ ZeleBoba PHP — независимая PHP-реализация функцио�
 |---|---|
 | Веб | Регистрация, пароль, Telegram-вход, кабинет, заказы, подписки, баланс, промокоды, реферальная программа, подарки, триалы, лендинги |
 | Telegram | Бот-дублер кабинета: /start, /help, /plans, /buy, /status, /orders, /subs, /cabinet, /support, /link, /login, /balance, /topup, /promo, /referral, /gift, /gift_buy, /gift_claim, /trial + deep-link вход, inline-кнопки, answerCallbackQuery, тандем с вебом |
-| Кошелёк | Единый баланс, пополнение любым провайдером, автопокупка после пополнения (умная корзина), история транзакций, has_made_first_topup |
-| Платёжные провайдеры | 26 провайдеров через единый реестр: ЮKassa, FreeKassa, CryptoBot, Telegram Stars, Lava, WATA, Heleket, Platega, Tribute, MulenPay, Pal24, CloudPayments, Kassa AI, RioPay, SeverPay, PayPear, RollyPay, Overpay, AuraPay, Etoplatezhi, Antilopay, Jupiter, Donut, CisPay, TabPay, ParityPay + demo |
+| Кошелёк | Единый баланс, пополнение через Platega, автопокупка после пополнения (умная корзина), история транзакций, has_made_first_topup |
+| Платёжные провайдеры | Platega через единый реестр + demo-адаптер |
 | Промокоды | Деньги, дни подписки, триалы, скидки %, комбо деньги+дни, лимиты, first_purchase_only, анти-стакинг |
 | Реферальная программа | Коды, deep-link ref_, комиссия с пополнений, бонус за первое пополнение, ступени комиссии, вывод средств с риск-скорингом |
 | Подарки | Покупка с баланса, канонические коды GIFT_<59>, deep-link активация, запрет самоактивации, first-claim, идемпотентность, «Мои подарки» |
