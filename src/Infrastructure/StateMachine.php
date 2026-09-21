@@ -46,12 +46,13 @@ final class StateMachine
     ];
     /** subscriptions.lifecycle_status axis */
     private const SUBSCRIPTION = [
-        'pending'     => ['provisioning', 'active', 'expired'],
-        'provisioning'=> ['active', 'expired'],
-        'active'      => ['grace', 'expired'],
-        'grace'       => ['active', 'expired'],
+        'pending'     => ['provisioning', 'active', 'expired', 'cancelled'],
+        'provisioning'=> ['active', 'expired', 'cancelled'],
+        'active'      => ['grace', 'expired', 'cancelled'],
+        'grace'       => ['active', 'expired', 'cancelled'],
         'expired'     => [],
-        'trial'       => ['active', 'expired'],
+        'cancelled'   => [],
+        'trial'       => ['active', 'expired', 'cancelled'],
     ];
 
     /** @return string[] the target states reachable from $from (immutable copy). */

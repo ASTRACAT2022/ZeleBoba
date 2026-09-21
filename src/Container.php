@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace App;
 use App\Infrastructure\{Database,Outbox,Worker,SecretRedactor,KillSwitch,CircuitBreaker,RateLimiter,WebhookGuard,OptimisticLock,WorkerHeartbeat,FourEyes,DurableWorkflow};
 use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,CreatorService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline,RefundService};
+use App\Subscriptions\SubscriptionMergeService;
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
 use App\Integration\{Payments,DemoProvisioner,RemnawaveProvisioner,Telegram,PaymentService,Mailer};
@@ -63,6 +64,7 @@ final class Container
     public readonly OperationsIntelligence $intelligence;
     public readonly InvestigationService $investigations;
     public readonly DemoEvents $demoEvents;
+    public readonly SubscriptionMergeService $merger;
     public readonly array $config;
     public function __construct(array $config)
     {
@@ -116,6 +118,7 @@ final class Container
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
         $remnawave=new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID'],$this->circuitBreaker);
         $this->userAdmin=new UserAdminService($this->db,$this->wallet,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->outbox,$this->timeline);
+        $this->merger=new \App\Subscriptions\SubscriptionMergeService($this->db,$this->outbox,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->timeline);
         $this->providers=new ProviderRegistry($http,$config);
         foreach ([new PlategaProvider($http,$config,$this->circuitBreaker)] as $provider) $this->providers->register($provider);
         $this->mailer=new Mailer($this->db,$config);
