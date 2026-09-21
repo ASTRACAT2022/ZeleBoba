@@ -81,8 +81,8 @@ final class Container
         $this->demoEvents=new DemoEvents($this->db);
         $this->timeline=new CustomerTimeline($this->db);
         $this->billing=new BillingService($this->db,$this->outbox,$config['PAYMENT_DRIVER'],$config,$this->timeline);
-        $this->refunds=new RefundService($this->db);
         $this->wallet=new Wallet($this->db);
+        $this->refunds=new RefundService($this->db,$this->wallet);
         $this->carts=new CartService($this->db);
         $this->topups=new TopupService($this->db,$this->outbox,$this->wallet,$config['PAYMENT_DRIVER'],$config);
         $this->billing->setTopups($this->topups);

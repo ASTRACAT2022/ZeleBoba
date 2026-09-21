@@ -40,6 +40,18 @@ $cli->add((new Command('billing:audit'))->setDescription('Check ledger and paid 
     $missing=$c->db->all("SELECT o.id FROM orders o LEFT JOIN subscriptions s ON s.order_id=o.id LEFT JOIN payment_receipts p ON p.order_id=o.id WHERE o.status IN ('paid','fulfilled') AND (s.id IS NULL OR p.order_id IS NULL)");
     $count=count($errors)+count($missing);$o->writeln('Invariant violations: '.$count);return $count?1:0;
 }));
+$cli->add((new Command('billing:refund'))->setDescription('Return a successful payment to the customer internal balance (no card/cassa)')
+    ->addArgument('paymentId',InputArgument::REQUIRED,'ID of a succeeded payment')
+    ->addArgument('amount',InputArgument::REQUIRED,'Amount in kopeks to return')
+    ->addArgument('reason',InputArgument::REQUIRED,'Refund reason')
+    ->setCode(function(InputInterface $i,OutputInterface $o) use($c){
+        $paymentId=$i->getArgument('paymentId');$amount=(int)$i->getArgument('amount');$reason=$i->getArgument('reason');
+        if ($amount<=0){$o->writeln('<error>Amount must be positive.</error>');return 1;}
+        $refund=$c->refunds->request($paymentId,$amount,$reason,'cli');
+        if (strlen($refund['reason']??'')<1) throw new \RuntimeException('Bad refund');
+        $o->writeln('<info>Refund executed.</info> id='.$refund['id'].' payment='.$refund['payment_id'].' amount='.$refund['amount_minor'].' status='.$refund['status']);
+        return 0;
+    }));
 $cli->add((new Command('app:install'))->setDescription('Create the initial owner; all service settings are in the web admin')->addArgument('email',InputArgument::REQUIRED)->setCode(function(InputInterface $i,OutputInterface $o) use($c){
     if($c->db->one("SELECT id FROM users WHERE role='admin' LIMIT 1")){$o->writeln('An administrator already exists.');return 1;}
     $question=(new \Symfony\Component\Console\Question\Question('Initial administrator password (12+ characters): '))->setHidden(true)->setHiddenFallback(false);
