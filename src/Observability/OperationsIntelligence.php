@@ -57,7 +57,7 @@ final class OperationsIntelligence
     public function invariants(bool $createCases): array
     {
         $money=$this->consistency->run();
-        $paidWithoutSub=$this->db->all("SELECT o.id,o.user_id FROM orders o LEFT JOIN subscriptions s ON s.order_id=o.id WHERE o.workflow_status IN ('paid','fulfilled') GROUP BY o.id,o.user_id HAVING COUNT(s.id)=0");
+        $paidWithoutSub=$this->db->all("SELECT o.id,o.user_id FROM orders o LEFT JOIN subscriptions s ON s.order_id=o.id WHERE o.workflow_status IN ('paid','fulfilled') AND NOT EXISTS (SELECT 1 FROM outbox ox WHERE ox.topic='subscription.extend' AND ox.dedup_key LIKE '%:'||o.id||'%') GROUP BY o.id,o.user_id HAVING COUNT(s.id)=0");
         $activeExpired=$this->db->all("SELECT id,user_id FROM subscriptions WHERE lifecycle_status='active' AND expires_at<=?",[time()]);
         $violations=['financial'=>$money['count'],'paid_without_fulfillment'=>count($paidWithoutSub),'active_expired'=>count($activeExpired)];
         if($createCases){foreach($paidWithoutSub as $row)$this->caseOnce('high','Оплата/заказ без выдачи подписки',$row['user_id'],null,null,['order_id'=>$row['id']]);foreach($activeExpired as $row)$this->caseOnce('medium','Активная подписка с истёкшим сроком',$row['user_id'],null,$row['id'],[]);}
