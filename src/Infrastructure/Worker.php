@@ -308,7 +308,28 @@ final class Worker
     private function answer(array $payload): void
     {
         if (!$this->botToken) throw new \RuntimeException('Telegram is not configured');
-        $result=$this->http->request('POST',rtrim($this->telegramApiBase,'/').'/bot'.$this->botToken.'/answerCallbackQuery',['json'=>$payload,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0])->toArray();
-        if (!($result['ok']??false)) throw new \RuntimeException('Telegram rejected callback answer');
+        try {
+            $resp=$this->http->request('POST',rtrim($this->telegramApiBase,'/').'/bot'.$this->botToken.'/answerCallbackQuery',['json'=>$payload,'timeout'=>10,'max_duration'=>20,'max_redirects'=>0]);
+            // Inspect the body without throwing on HTTP status: a callback
+            // query that is too old, already answered, or from a chat that
+            // blocked the bot is a permanent denial that retrying can never
+            // fix. Only truly transient failures (429/5xx/network) should
+            // retry. Keep this symmetric with send() so these resolve to done
+            // instead of piling up retries and dead-letters.
+            $status=$resp->getStatusCode();
+            $result=$resp->toArray(false);
+        } catch (TransportExceptionInterface $e) {
+            // Network-level failure (timeout, connection reset, DNS): transient.
+            throw new \RuntimeException('Telegram network failure', 0, $e);
+        }
+        if (!($result['ok'] ?? false)) {
+            $code=(int)($result['error_code'] ?? $status);
+            if (in_array($code, [400, 403, 404, 409, 410], true)) {
+                // Query invalid/expired/already answered, bot blocked: permanent.
+                throw new JobPermanentFailure('Telegram permanently refused answer ('.$code.'): '.($result['description'] ?? ''));
+            }
+            // 429 rate-limit, 5xx, or unexpected: transient, keep backoff.
+            throw new \RuntimeException('Telegram rejected callback answer ('.$code.')');
+        }
     }
 }
