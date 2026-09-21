@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+### Добавлено
+- **Брендинг ZeleBoba** — логотип со стилизованной курсивной «Z» в фирменных цветах (тёмно-зелёный `#135d45` + лайм `#d8f784`). SVG-мастер + PNG-набор в `public/branding/` и `docs/logo/`; дефолтный `favicon.ico` и `apple-touch-icon` подключены в шаблон; логотип показан в hero-блоке README.
+
 ### Исправлено
 - **Orphan-платёжные события теперь ack'атся вместо ретраев до смерти** — задания `payment.event.process` без подходящего провайдера (например, устаревший или неизвестный id) бросали `BillingError`, ретраились 8 раз и уходили в dead-letter. `processEvent()` теперь помечает постоянные бизнес-ошибки как `processed` (ack), чтобы событие покидало очередь без 500-loop; `PaymentEventStore::failed()` сразу dead-letter'ит `JobPermanentFailure`. Проверено `tests/worker_event_faulttest.php` + `tests/outbox_cycle_faulttest.php`.
 

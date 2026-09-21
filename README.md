@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="public/branding/zeleboba-logo.png" alt="ZeleBoba" width="96" height="96">
+
 # ZeleBoba Billing
 
 ### Промышленный биллинг подписок для VPN-панелей Remnawave
@@ -95,6 +97,7 @@ ZeleBoba была построена — и закалена в живом produ
 │   └── Web/              # HTTP-приложение, роутер, контроллеры
 ├── templates/             # Twig-шаблоны
 ├── public/               # Web root
+│   └── branding/         # Логотип, favicon, apple-touch-icon
 ├── migrations/           # Версионированные SQL-миграции
 ├── tests/                # PHPUnit + fault-injection харнессы
 ├── docs/                 # Архитектура, эксплуатация, проверки, руководство

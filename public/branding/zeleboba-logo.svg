@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="ZeleBoba">
+  <!-- Фирменный скругленный квадрат, цвет green #135d45 -->
+  <rect x="2" y="2" width="60" height="60" rx="15" ry="15" fill="#135d45"/>
+
+  <!-- Стилизованная курсивная Z, цвет lime #d8f784, в стиле logo биллинга -->
+  <g transform="translate(5 0) skewX(-8)">
+    <path d="M 16 21 L 45 21 L 23 43 L 45 43 L 45 45.5 L 16 45.5 L 38 23.5 L 16 23.5 Z"
+          fill="#d8f784"/>
+  </g>
+</svg>
