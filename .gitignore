@@ -1,25 +1,141 @@
+# ---- Compose variants (canonical file is compose.yaml) ----
+/docker-compose.yml
+/migrate-compose.yml
+/__pycache__/
+/scripts/__pycache__/
+
+# ---- Dependencies & build ----
 /vendor/
-/.env
-/.env.*
-/.env.rehearsal
+/node_modules/
 /var/*
 !/var/.gitkeep
 /.phpunit.cache/
+/package-lock.json
+/package.json
 
-# OTel collector secrets — never commit. These contain live credentials
-# for the production observability pipeline.
+# ---- Environment & secrets (never commit) ----
+/.env
+/.env.*
+/.env.rehearsal
+
+# OTel collector secrets — live credentials for production observability
 /infra/*.creds
 /infra/*.htpasswd
 /infra/*.bak-*
+/infra/otel-collector-config.yaml
+/infra/update-otel-zeleboba-logs.py
+/infra/traces.creds
+/infra/traces.htpasswd
 
+# Cookies / auth artifacts
+/cookies.txt
 
-# IDE / editor state
+# ---- IDE / editor state ----
 /.idea/
 /.vscode/
 /.zed/
 /*.swp
 /*.swo
 
-# OS noise
+# ---- OS noise ----
 .DS_Store
 Thumbs.db
+
+# ---- Operational / workspace artifacts (not part of the product) ----
+# These files live in the working checkout but are NOT part of the ZeleBoba
+# codebase. They are kept local only (reports, screenshots, sibling projects,
+# tooling probes) and must never be committed to this repository.
+
+# Workspace agent / personal files
+/.openclaw/
+/skills/
+/memory/
+/DREAMS.md
+/MEMORY.md
+/IDENTITY.md
+/SOUL.md
+/USER.md
+/AGENTS.md
+
+# Sibling projects & redesigns (separate repos)
+/django-billing/
+/astracat-backup/
+/astracat-redesign/
+/billing-redesign/
+/balancedns-baseline/
+/balancedns-dev/
+/grafana/
+/signoz/
+/vmagent/
+/zeleboba/
+/migration/
+/_archive/
+/_admin_recovery/
+/.admin_recovery/
+/.screenshots/
+/.shots/
+/.ux-audit/
+/screenshots/
+
+# Incident / audit reports (operational history, not product docs)
+/*_REPORT.md
+/BILLING_REFUND_GHOST_SUB_FIX.md
+/MONEY_AUDIT_INCIDENT_*.md
+/ANALYSIS_BILLING_ISSUES.md
+/ASTRACAT_DNS_*.md
+/ASTRACAT_PAYMENTER_STATUS.md
+
+# Throwaway scripts & probes
+/fix_panel2.py
+/fix_routes.py
+/astracat_fix.sh
+/test_delete.sh
+/freeze_writes.sh
+/fkmicro.php
+/fkprobe*.php
+/migrate_stealthnet.php
+/scripts/fk_*.php
+/scripts/reconcile_pending.*
+/scripts/backup_pg*.sh
+/scripts/backup_sqlite.sh
+/scripts/failure_test.sh
+/scripts/smoke_test.sh
+/scripts/test_*.sh
+/scripts/verify_pg_connection.sh
+/scripts/zabbix_*.sh
+/scripts/zeleboba-logs-link.sh
+/scripts/freeze_writes.sh
+
+# Screenshot / UI artifacts
+/cf-*.png
+/cf-*.js
+/cf-*.html
+/*.bak
+/*.bak-*
+/compose.yaml.bak-*
+/routes.yml.bak-*
+/index.css.bak
+/new_index.css
+
+# Stealth wrappers (sibling project)
+/stealth-*.d.ts
+/stealth-*.tsx
+
+# SQL scratch
+/sql/
+/tmp/
+
+# Data / CSV dumps
+/_bak_auto_renew_off_*.csv
+
+# Blesta migration shim (sibling module, not part of this product)
+/src/Integration/Blesta/
+
+# Local migration fix (not upstream)
+/migrations/020_payment_unavailable.sql
+
+# Ad-hoc race-seed harness
+/tests/race_seed.php
+
+# Workspace state snapshot
+/openclaw-workspace-state.json.*
