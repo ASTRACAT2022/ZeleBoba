@@ -21,7 +21,7 @@ final class BillingService
             if (!$this->db->one('SELECT id FROM users WHERE id=? AND disabled=0'.$this->db->lock(),[$userId])) throw new BillingError('Аккаунт не найден.');
             $existing=$this->db->one('SELECT * FROM orders WHERE user_id=? AND idempotency_key=?',[$userId,$key]);
             if ($existing) {
-                if ($existing['plan_id']!==$planId) throw new BillingError('Этот ключ уже использован для другого тарифа.');
+                if ($existing['plan_id']!==$planId || $existing['renewal_subscription_id']!==$renewSubscriptionId) throw new BillingError('Этот ключ уже использован для другого тарифа.');
                 return $existing;
             }
             $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
@@ -48,6 +48,7 @@ final class BillingService
                 Database::id(),$id,'subscription',$planId,1,(int)$plan['price_minor'],(int)$plan['price_minor'],json_encode(['duration_days'=>(int)$plan['duration_days']],JSON_THROW_ON_ERROR),time()
             ]);
             $this->db->execute('UPDATE orders SET provision_driver=?,squad_uuid=?,provider_account=?,receipt_email=?,receipt_enabled=?,vat_code=?,tax_system=?,client_ip=? WHERE id=?',[$this->config['PROVISION_DRIVER']??'demo',$plan['squad_uuid']?:($this->config['REMNAWAVE_SQUAD_UUID']??''),$providerAccount,$email,(int)($this->config['YOOKASSA_RECEIPT']??0),(int)($this->config['YOOKASSA_VAT_CODE']??1),($this->config['YOOKASSA_TAX_SYSTEM']??'')?:null,$ip,$id]);
+            $this->db->execute('UPDATE orders SET duration_months=?,renewal_subscription_id=? WHERE id=?',[(int)$plan['duration_months'],$renewSubscriptionId,$id]);
             $this->db->execute('UPDATE orders SET return_url=? WHERE id=?',[rtrim($this->config['APP_URL']??'http://127.0.0.1:8080','/').'/orders/'.$id,$id]);
             $this->outbox->enqueue('payment.create','checkout:'.$id,['order_id'=>$id]);
             $this->audit($userId,'order.created',$id);
@@ -64,6 +65,7 @@ final class BillingService
     /** Values must originate from a verified provider API, never browser/webhook claims. */
     public function settle(string $orderId,string $provider,string $paymentId,int $amount,string $currency,?string $correlationId=null): void
     {
+        if ($paymentId==='' || strlen($paymentId)>100 || $amount<=0) throw new BillingError('Некорректный платёж.');
         $operations=new OperationsService($this->db);
         $op=$operations->start('payment.apply',['order_id'=>$orderId,'metadata'=>['provider'=>$provider,'provider_payment_id'=>$paymentId,'amount_minor'=>$amount,'currency'=>$currency]],$correlationId??'cor_'.substr(hash('sha256',$provider.':'.$paymentId),0,40));
         try { $this->db->transaction(function () use ($orderId,$provider,$paymentId,$amount,$currency,$operations,$op) {
@@ -97,7 +99,9 @@ final class BillingService
             $this->timeline?->record($order['user_id'], 'payment.paid', ['amount_kopeks'=>$amount, 'order_id'=>$orderId], $now);
             $this->db->execute('UPDATE users SET has_had_paid_subscription=1 WHERE id=?',[$order['user_id']]);
             // Renewal: extend the existing subscription instead of creating a new one.
-            $renewSub=$this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
+            $renewSub=$order['renewal_subscription_id']!==null
+                ? $this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$order['renewal_subscription_id']])
+                : $this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
             // Record the purchase transaction for analytics (wallet history).
             $type = $renewSub ? 'subscription_renewal' : 'subscription_purchase';
             // Wallet debits already write the authoritative transaction. Do
@@ -118,7 +122,7 @@ final class BillingService
             } else {
                 $sub=Database::id();
                 // Each purchase is an independent subscription unless it is a renewal order.
-                $months=(int)($this->db->one('SELECT duration_months FROM plans WHERE id=?',[$order['plan_id']])['duration_months'] ?? 0);
+                $months=(int)$order['duration_months'];
                 $expiry=(new SubscriptionService($this->db,$this->outbox))->expiryAfter($now,(int)$order['duration_days'],$months);
                 $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,?,?,'provisioning',?,?,?,?,?,?,'pending',?,?,?)",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
                 // Daily-priced tariffs auto-enable the daily charge: while the
@@ -177,7 +181,8 @@ final class BillingService
     /** Settle a balance topup after provider verification. Delegates to TopupService. */
     public function settleTopup(string $topupId, string $provider, string $paymentId, int $amount, string $currency): void
     {
-        $this->topups?->settle($topupId, $provider, $paymentId, $amount, $currency);
+        if (!$this->topups) throw new \RuntimeException('Topup settlement service unavailable');
+        $this->topups->settle($topupId, $provider, $paymentId, $amount, $currency);
     }
     public function setTopups(\App\Billing\TopupService $topups): void
     {
@@ -254,6 +259,7 @@ final class BillingService
             $this->db->execute('UPDATE orders SET provision_driver=?,squad_uuid=?,provider_account=?,receipt_email=?,receipt_enabled=?,vat_code=?,tax_system=?,client_ip=?,return_url=? WHERE id=?',[
                 $original['provision_driver'],$original['squad_uuid'],$original['provider_account'],$original['receipt_email'],$original['receipt_enabled'],$original['vat_code'],$original['tax_system'],$original['client_ip'],$original['return_url'],$orderId,
             ]);
+            $this->db->execute('UPDATE orders SET duration_months=?,renewal_subscription_id=? WHERE id=?',[(int)$plan['duration_months'],$subscriptionId,$orderId]);
             $this->debitRenewal($sub,$plan,$price,$orderId,$original['provider']);
             $this->audit('system','subscription.autorenew_debited',$subscriptionId);
             return true;
@@ -299,9 +305,10 @@ final class BillingService
             // Extend from now (never stack onto a stale anchor), keep paid time.
             $anchor=max($now,(int)$sub['expires_at']);
             $newExpiry=$anchor+$period;
-            $this->db->execute('UPDATE subscriptions SET expires_at=?,last_daily_charge_at=?,renew_failed_at=NULL WHERE id=?',[$newExpiry,$now,$subscriptionId]);
+            $this->db->execute('UPDATE subscriptions SET expires_at=?,last_daily_charge_at=?,renew_failed_at=NULL,updated_at=?,version=version+1 WHERE id=?',[$newExpiry,$now,$now,$subscriptionId]);
             $txId=Database::id();
             (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_daily','Ежедневное автосписание: '.$plan['name'],'balance',$txId);
+            $this->outbox->enqueue('subscription.extend','daily-extend:'.$subscriptionId.':'.$newExpiry,['subscription_id'=>$subscriptionId]);
             $this->audit('system','subscription.daily_debited',$subscriptionId);
             return true;
         });

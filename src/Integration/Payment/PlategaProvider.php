@@ -15,8 +15,7 @@ use Symfony\Component\HttpFoundation\Request;
  *         payload, orderId, metadata{userId,userName,clientIp}
  *   Reply: { transactionId, status, url, expiresIn, rate }
  *
- * amount is in minor units (kopeks) — the docs sample "amount":500 with
- * rate ~91.2 is 5.00 RUB.
+ * Amounts use RUB major units; preserve the fractional kopeks.
  */
 final class PlategaProvider extends AbstractProvider
 {
@@ -107,7 +106,7 @@ final class PlategaProvider extends AbstractProvider
         if ($amountMinor < 100) throw new BillingError('Platega: некорректная сумма заказа.');
         // Platega expects `amount` in RUB major units (rubles), not kopeks.
         // Sending kopeks here inflates the charge 100x (100 RUB became 10 000 RUB).
-        $amountRub = (int)intdiv($amountMinor, 100);
+        $amountRub = $amountMinor / 100;
         if ($amountRub < 1) throw new BillingError('Platega: некорректная сумма заказа.');
         $res = $this->post('v2/transaction/process', [
             'paymentDetails' => [
@@ -118,12 +117,15 @@ final class PlategaProvider extends AbstractProvider
             'return' => $return,
             'failedUrl' => $failedUrl,
             'orderId' => (string)$orderOrTopup['id'],
+            'payload' => json_encode([isset($orderOrTopup['amount_kopeks'])?'topup_id':'order_id'=>(string)$orderOrTopup['id']],JSON_THROW_ON_ERROR),
             'metadata' => $this->metadata($user),
         ]);
         $url = (string)($res['url'] ?? '');
         if ($url === '' || !str_starts_with($url, 'https://')) throw new BillingError('Platega не вернул ссылку оплаты.');
+        $paymentId=$res['transactionId']??null;
+        if (!is_string($paymentId) || $paymentId==='' || strlen($paymentId)>100) throw new BillingError('Platega не вернул идентификатор платежа.');
         return [
-            'payment_id' => (string)($res['transactionId'] ?? $orderOrTopup['id']),
+            'payment_id' => $paymentId,
             'checkout_url' => $url,
         ];
     }
@@ -153,31 +155,9 @@ final class PlategaProvider extends AbstractProvider
      */
     public function verify(string $paymentId): array
     {
-        // A canceled/expired transaction may return a non-2xx from the status
-        // endpoint (the tx is no longer an open charge). Treat 4xx as canceled
-        // so topups/orders that were never funded settle-as-canceled instead of
-        // poisoning the worker with retry churn. HTTP 5xx stays terminal-error.
-        $res = [];
-        try {
-            // Correct status endpoint per docs: GET /transaction/{id} (NOT
-            // POST /v2/transaction/{id} — that returns 404, which made every
-            // verify() misread a live transaction as "canceled").
-            $res = $this->get('transaction/'.rawurlencode($paymentId), []);
-        } catch (\Symfony\Contracts\HttpClient\Exception\ClientExceptionInterface $e) {
-            $code = 0;
-            try { $code = $e->getResponse()?->getStatusCode() ?? 0; } catch (\Throwable) {}
-            // 4xx client error on a status probe => the tx is gone/invalid.
-            if ($code >= 404) {
-                return [
-                    'status' => 'canceled',
-                    'amount_kopeks' => 0,
-                    'currency' => 'RUB',
-                    'payment_id' => $paymentId,
-                    'metadata' => ['order_id' => '', 'topup_id' => ''],
-                ];
-            }
-            throw $e;
-        }
+        // HTTP failures (including 404 and 429) are not payment outcomes.
+        // Keep the local payment pending and retry authoritative verification.
+        $res = $this->get('transaction/'.rawurlencode($paymentId), []);
         $status = strtoupper((string)($res['status'] ?? ''));
         // Platega returns paymentDetails.amount in RUB rubles (gross) with a
         // separate `comission` field; the merchant-receivable (net) amount =
@@ -186,15 +166,20 @@ final class PlategaProvider extends AbstractProvider
         // customer charge of 199.00 + 9% commission (216.91) was read as 21691
         // kopeks vs the order's 19900 -> settle() rejected "Платёж не
         // соответствует заказу" and the Reconciler re-verified forever.
-        $amountRub = (float)($res['paymentDetails']['amount'] ?? 0);
-        $commission = (float)($res['comission'] ?? 0);
-        $netRub = max(0.0, $amountRub - $commission);
+        $amountMinor = self::minor(self::normalizeAmount((string)($res['paymentDetails']['amount'] ?? 0)));
+        $commissionMinor = self::minor(self::normalizeAmount((string)($res['comission'] ?? 0)));
+        if ($commissionMinor > $amountMinor) throw new BillingError('Platega: некорректная комиссия.');
+        $actualId=$res['id']??$res['transactionId']??null;
+        if (!is_string($actualId) || $actualId!==$paymentId) throw new BillingError('Platega: несовпадение идентификатора платежа.');
+        $metadata=json_decode((string)($res['payload']??'{}'),true);
+        if (!is_array($metadata)) $metadata=[];
+        if (!isset($metadata['order_id'],$metadata['topup_id']) && !empty($res['orderId'])) $metadata=['order_id'=>(string)$res['orderId'],'topup_id'=>(string)$res['orderId']];
         return [
             'status' => $status === 'CONFIRMED' ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED', 'CANCELED'], true) ? 'canceled' : 'pending'),
-            'amount_kopeks' => (int)round($netRub * 100),
+            'amount_kopeks' => $amountMinor - $commissionMinor,
             'currency' => (string)($res['paymentDetails']['currency'] ?? 'RUB'),
-            'payment_id' => (string)($res['id'] ?? $res['transactionId'] ?? $paymentId),
-            'metadata' => ['order_id' => (string)($res['orderId'] ?? ''), 'topup_id' => (string)($res['orderId'] ?? '')],
+            'payment_id' => $actualId,
+            'metadata' => $metadata,
         ];
     }
 
@@ -206,10 +191,11 @@ final class PlategaProvider extends AbstractProvider
      */
     public function handleWebhook(Request $request): ?array
     {
-        // Reject callbacks that don't identify this merchant (defense in depth).
+        // Both authentication headers are required by the Platega callback contract.
         $merchant = (string)($this->config['PLATEGA_MERCHANT_ID'] ?? '');
         $incoming = (string)($request->headers->get('X-MerchantId') ?? $request->headers->get('X-Merchant-Id') ?? '');
-        if ($merchant !== '' && $incoming !== '' && !hash_equals($merchant, $incoming)) return null;
+        $secret=(string)($this->config['PLATEGA_SECRET']??'');
+        if ($merchant==='' || $secret==='' || !hash_equals($merchant,$incoming) || !hash_equals($secret,(string)$request->headers->get('X-Secret',''))) return null;
         $data = $request->toArray();
         $paymentId = (string)($data['transactionId'] ?? $data['id'] ?? $data['payment_id'] ?? '');
         if ($paymentId === '') return null;

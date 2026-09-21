@@ -45,8 +45,8 @@ final class GiftService
             $contactType = $buyer['email'] ? 'email' : 'telegram';
             $contactValue = $buyer['email'] ?? (string)$buyer['telegram_id'];
             $this->db->execute(
-                'INSERT INTO guest_purchases(id,token,contact_type,contact_value,is_gift,source,buyer_user_id,gift_recipient_type,gift_recipient_value,gift_message,plan_id,period_days,amount_kopeks,currency,payment_method,status,created_at,paid_at,idempotency_key) VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                [$id, $token, $contactType, $contactValue, $source, $buyerId, $recipientType, $recipientValue, $message, $plan['id'], (int)$plan['duration_days'], $price, 'RUB', 'balance', 'paid', $now, $now, $idempotencyKey]
+                'INSERT INTO guest_purchases(id,token,contact_type,contact_value,is_gift,source,buyer_user_id,gift_recipient_type,gift_recipient_value,gift_message,plan_id,period_days,traffic_bytes,device_limit,amount_kopeks,currency,payment_method,status,created_at,paid_at,idempotency_key) VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                [$id, $token, $contactType, $contactValue, $source, $buyerId, $recipientType, $recipientValue, $message, $plan['id'], (int)$plan['duration_days'], (int)$plan['traffic_bytes'], (int)$plan['devices'], $price, 'RUB', 'balance', 'paid', $now, $now, $idempotencyKey]
             );
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $buyerId, 'gift.purchased', $id, $now]);
             return $this->db->one('SELECT * FROM guest_purchases WHERE id=?', [$id]);
@@ -97,13 +97,11 @@ final class GiftService
             if ($purchase['user_id'] !== null && $purchase['user_id'] !== $claimantId) throw new BillingError('Подарок уже активирован другим пользователем.');
             if ($purchase['status'] === 'delivered' && $purchase['user_id'] === $claimantId) return $purchase;
             if (!in_array($purchase['status'], ['paid', 'pending_activation'], true)) throw new BillingError('Подарок не может быть активирован.');
-            $plan = $this->db->one('SELECT * FROM plans WHERE id=?', [$purchase['plan_id']]);
-            if (!$plan) throw new BillingError('Тариф подарка больше недоступен.');
             $now = time();
             $sub = Database::id();
             $this->db->execute(
-                "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,plan_id,traffic_limit_gb,device_limit,is_trial,start_date) VALUES(?,NULL,?,'provisioning',?,?,?,?,?,0,?)",
-                [$sub, $claimantId, $now + (int)$purchase['period_days'] * 86400, $now, $plan['id'], (int)$plan['traffic_bytes'] / 1073741824, (int)$plan['devices'], $now]
+                "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,plan_id,traffic_limit_gb,device_limit,is_trial,start_date,traffic_limit_bytes) VALUES(?,NULL,?,'provisioning',?,?,?,?,?,0,?,?)",
+                [$sub, $claimantId, $now + (int)$purchase['period_days'] * 86400, $now, $purchase['plan_id'], (int)$purchase['traffic_bytes'] / 1073741824, (int)$purchase['device_limit'], $now, (int)$purchase['traffic_bytes']]
             );
             $this->db->execute("UPDATE guest_purchases SET status='delivered',user_id=?,delivered_at=? WHERE id=?", [$claimantId, $now, $purchase['id']]);
             $this->outbox->enqueue('subscription.provision', 'provision:'.$sub, ['subscription_id' => $sub]);

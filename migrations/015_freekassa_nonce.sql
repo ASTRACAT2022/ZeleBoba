@@ -11,5 +11,9 @@
 -- [PG]
 CREATE SEQUENCE IF NOT EXISTS freekassa_nonce_seq START 9200000000000004000;
 SELECT setval('freekassa_nonce_seq', GREATEST(last_value, 9200000000000004000::bigint), true) FROM freekassa_nonce_seq;
-GRANT USAGE, SELECT ON SEQUENCE freekassa_nonce_seq TO billing;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'billing') THEN
+    GRANT USAGE, SELECT ON SEQUENCE freekassa_nonce_seq TO billing;
+  END IF;
+END $$;
 -- [/PG]

@@ -125,7 +125,13 @@ final class RemnawaveProvisioner implements Provisioner
         }
         try {
             $r = $this->http->request($method,rtrim($this->baseUrl,'/').$path,$options);
-            $this->breaker?->success('remnawave_api');
+            // Symfony's client is lazy: no network I/O is guaranteed until a
+            // response method is called.  Record breaker success only after
+            // receiving an HTTP response, and count 5xx/4xx as failures even
+            // though selected callers intentionally handle 404/409 themselves.
+            $status=$r->getStatusCode();
+            if ($status >= 200 && $status < 400) $this->breaker?->success('remnawave_api');
+            else $this->breaker?->failure('remnawave_api');
             return $r;
         } catch (\Throwable $e) {
             $this->breaker?->failure('remnawave_api');

@@ -35,8 +35,8 @@ final class DurableWorkflow
             $op=$this->db->one("SELECT * FROM provisioning_operations WHERE subscription_id=? AND operation_type='activate' ORDER BY created_at DESC LIMIT 1".$this->db->lock(),[$subscriptionId]);
             if(!$op || in_array($op['status'],['succeeded','cancelled','failed_needs_attention'],true)) return null;
             $now=time();
-            if($op['status']==='running' && (int)($op['lease_until']??0)>$now) return null;
-            if(in_array($op['status'],['pending','retry'],true) && (int)($op['next_attempt_at']??0)>$now) return null;
+            if(in_array($op['status'],['running','verifying'],true) && (int)($op['lease_until']??0)>$now) return null;
+            if(in_array($op['status'],['pending','retry','unknown'],true) && (int)($op['next_attempt_at']??0)>$now) return null;
             $attempts=(int)$op['attempts']+1;
             if($attempts>(int)$op['max_attempts']) {
                 $this->db->execute("UPDATE provisioning_operations SET status='failed_needs_attention',last_error='attempt_limit',updated_at=? WHERE id=?",[$now,$op['id']]);
@@ -82,7 +82,7 @@ final class DurableWorkflow
     public function recover(int $limit=100): int
     {
         $now=time();
-        $rows=$this->db->all("SELECT subscription_id FROM provisioning_operations WHERE operation_type='activate' AND status IN ('pending','retry','unknown','running','verifying') AND (next_attempt_at IS NULL OR next_attempt_at<=? OR lease_until<=?) ORDER BY updated_at LIMIT ?",[$now,$now,$limit]);
+        $rows=$this->db->all("SELECT subscription_id FROM provisioning_operations WHERE operation_type='activate' AND status IN ('pending','retry','unknown','running','verifying') AND ((status IN ('pending','retry','unknown') AND COALESCE(next_attempt_at,0)<=?) OR (status IN ('running','verifying') AND COALESCE(lease_until,0)<=?)) ORDER BY updated_at LIMIT ?",[$now,$now,$limit]);
         foreach($rows as $row) $this->outbox->enqueue('subscription.provision','workflow-recover:'.$row['subscription_id'].':'.intdiv($now,60),['subscription_id'=>$row['subscription_id']]);
         return count($rows);
     }

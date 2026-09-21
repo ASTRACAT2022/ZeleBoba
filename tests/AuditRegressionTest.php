@@ -209,14 +209,17 @@ final class AuditRegressionTest extends TestCase
         self::assertSame(303,$response->getStatusCode());
         self::assertSame(15920,(int)$this->app->db->one('SELECT price_minor FROM orders')['price_minor']);
     }
-    public function testForwardedHeaderCannotBypassFreekassaIpAllowlist(): void
+    public function testForwardedHeaderCannotBypassPlategaSecret(): void
     {
-        $config=array_merge($this->app->config,['PAYMENT_DRIVER'=>'freekassa','FREEKASSA_SHOP_ID'=>'123','FREEKASSA_SECRET2'=>'secret']);
-        $request=Request::create('/webhooks/freekassa','POST',['MERCHANT_ID'=>'123','AMOUNT'=>'100','MERCHANT_ORDER_ID'=>str_repeat('a',32),'SIGN'=>md5('123:100:secret:'.str_repeat('a',32))],[],[],['REMOTE_ADDR'=>'203.0.113.1','HTTP_X_REAL_IP'=>'168.119.157.136','HTTP_X_FORWARDED_FOR'=>'168.119.157.136']);
+        $config=array_merge($this->app->config,['PAYMENT_DRIVER'=>'platega','PLATEGA_ENABLED'=>'1','PLATEGA_MERCHANT_ID'=>'merchant','PLATEGA_SECRET'=>'secret']);
+        $request=Request::create('/webhooks/platega','POST',[],[],[],['CONTENT_TYPE'=>'application/json','REMOTE_ADDR'=>'203.0.113.1','HTTP_X_REAL_IP'=>'merchant','HTTP_X_FORWARDED_FOR'=>'merchant'],json_encode(['transactionId'=>'payment-1','status'=>'CANCELED']));
         // This container needs its own in-memory schema.
         $container=new Container($config);
         $container->db->migrate(__DIR__.'/../migrations');
-        self::assertSame(403,(new Application($container))->handle($request)->getStatusCode());
+        // The endpoint acknowledges an invalid delivery to avoid a provider
+        // retry storm, but it must not persist or enqueue it.
+        self::assertSame(200,(new Application($container))->handle($request)->getStatusCode());
+        self::assertSame(0,(int)$container->db->one('SELECT COUNT(*) AS c FROM payment_events')['c']);
     }
 
     public function testPersonalDiscountIsShownAndChargedWithoutStacking(): void

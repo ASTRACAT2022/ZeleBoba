@@ -274,6 +274,7 @@ final class Worker
             $this->db->execute('UPDATE orders SET return_url=? WHERE id=?',[preg_replace('~/orders/[^/]+$~','/orders/'.$orderId,(string)($this->db->one('SELECT return_url FROM orders WHERE id=?',[$s['order_id']])['return_url']??'')),$orderId]);
             $original=$this->db->one('SELECT receipt_enabled,vat_code,tax_system FROM orders WHERE id=?',[$s['order_id']]);
             if ($original) $this->db->execute('UPDATE orders SET receipt_enabled=?,vat_code=?,tax_system=? WHERE id=?',[$original['receipt_enabled'],$original['vat_code'],$original['tax_system'],$orderId]);
+            $this->db->execute('UPDATE orders SET duration_months=?,renewal_subscription_id=? WHERE id=?',[(int)$plan['duration_months'],$id,$orderId]);
             $this->db->execute('UPDATE subscriptions SET renew_order_id=?,renew_at=NULL WHERE id=?',[$orderId,$id]);
             $this->outbox->enqueue('payment.create','checkout:'.$orderId,['order_id'=>$orderId]);
         });

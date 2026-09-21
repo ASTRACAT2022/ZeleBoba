@@ -5,7 +5,7 @@ use PHPUnit\Framework\TestCase;
 use App\Infrastructure\{Database,Outbox};
 use App\Billing\{BillingService,Wallet,TopupService};
 use App\Identity\Auth;
-use App\Integration\Payment\{ProviderRegistry,CryptoBotProvider,TelegramStarsProvider,LavaProvider,YooKassaProvider,FreeKassaProvider};
+use App\Integration\Payment\{ProviderRegistry,CryptoBotProvider,TelegramStarsProvider,LavaProvider,YooKassaProvider};
 use App\Integration\PaymentService;
 use App\Payments\PaymentEventStore;
 use Symfony\Component\HttpClient\{MockHttpClient,Response\MockResponse};
@@ -28,7 +28,7 @@ final class ProvidersTest extends TestCase
     {
         $http=$http??new MockHttpClient();
         $r=new ProviderRegistry($http,$config);
-        foreach ([new YooKassaProvider($http,$config),new FreeKassaProvider($http,$config),new CryptoBotProvider($http,$config),new TelegramStarsProvider($http,$config),new LavaProvider($http,$config),new \App\Integration\Payment\MulenPayProvider($http,$config),new \App\Integration\Payment\Pal24Provider($http,$config),new \App\Integration\Payment\CloudPaymentsProvider($http,$config),new \App\Integration\Payment\KassaAiProvider($http,$config),new \App\Integration\Payment\RioPayProvider($http,$config),new \App\Integration\Payment\SeverPayProvider($http,$config),new \App\Integration\Payment\PayPearProvider($http,$config),new \App\Integration\Payment\RollyPayProvider($http,$config),new \App\Integration\Payment\OverpayProvider($http,$config),new \App\Integration\Payment\AuraPayProvider($http,$config),new \App\Integration\Payment\EtoplatezhiProvider($http,$config),new \App\Integration\Payment\AntilopayProvider($http,$config),new \App\Integration\Payment\JupiterProvider($http,$config),new \App\Integration\Payment\DonutProvider($http,$config),new \App\Integration\Payment\CisPayProvider($http,$config),new \App\Integration\Payment\TabPayProvider($http,$config),new \App\Integration\Payment\ParityPayProvider($http,$config),new \App\Integration\Payment\WataProvider($http,$config),new \App\Integration\Payment\HeleketProvider($http,$config),new \App\Integration\Payment\PlategaProvider($http,$config),new \App\Integration\Payment\TributeProvider($http,$config)] as $p) $r->register($p);
+        foreach ([new YooKassaProvider($http,$config),new CryptoBotProvider($http,$config),new TelegramStarsProvider($http,$config),new LavaProvider($http,$config),new \App\Integration\Payment\MulenPayProvider($http,$config),new \App\Integration\Payment\Pal24Provider($http,$config),new \App\Integration\Payment\CloudPaymentsProvider($http,$config),new \App\Integration\Payment\KassaAiProvider($http,$config),new \App\Integration\Payment\RioPayProvider($http,$config),new \App\Integration\Payment\SeverPayProvider($http,$config),new \App\Integration\Payment\PayPearProvider($http,$config),new \App\Integration\Payment\RollyPayProvider($http,$config),new \App\Integration\Payment\OverpayProvider($http,$config),new \App\Integration\Payment\AuraPayProvider($http,$config),new \App\Integration\Payment\EtoplatezhiProvider($http,$config),new \App\Integration\Payment\AntilopayProvider($http,$config),new \App\Integration\Payment\JupiterProvider($http,$config),new \App\Integration\Payment\DonutProvider($http,$config),new \App\Integration\Payment\CisPayProvider($http,$config),new \App\Integration\Payment\TabPayProvider($http,$config),new \App\Integration\Payment\ParityPayProvider($http,$config),new \App\Integration\Payment\WataProvider($http,$config),new \App\Integration\Payment\HeleketProvider($http,$config),new \App\Integration\Payment\PlategaProvider($http,$config),new \App\Integration\Payment\TributeProvider($http,$config)] as $p) $r->register($p);
         return $r;
     }
     public function testRegistryOnlyExposesConfiguredProviders():void
@@ -124,17 +124,17 @@ final class ProvidersTest extends TestCase
         self::assertTrue($r->has('telegram_stars'));
         self::assertArrayNotHasKey('telegram_stars',$r->enabled());
     }
-    public function testFreeKassaWebhookVerification():void
+    public function testPlategaWebhookRequiresBothCredentials():void
     {
-        $config=['FREEKASSA_SHOP_ID'=>'123','FREEKASSA_SECRET2'=>'secret2','FREEKASSA_API_KEY'=>'key'];
+        $config=['PLATEGA_ENABLED'=>'1','PLATEGA_MERCHANT_ID'=>'merchant','PLATEGA_SECRET'=>'secret'];
         $r=$this->registry($config);
         $svc=new PaymentService($this->db,$this->billing,new MockHttpClient(),$config,$r);
-        $sign=md5('123:199.00:secret2:order-1');
-        $req=Request::create('/webhooks/freekassa','POST',['MERCHANT_ID'=>'123','AMOUNT'=>'199.00','MERCHANT_ORDER_ID'=>'order-1','SIGN'=>$sign]);
-        self::assertNotNull($r->get('freekassa')->handleWebhook($req));
-        self::assertTrue($svc->handleWebhook('freekassa',$req));
-        $req2=Request::create('/webhooks/freekassa','POST',['MERCHANT_ID'=>'123','AMOUNT'=>'199.00','MERCHANT_ORDER_ID'=>'order-1','SIGN'=>'bad']);
-        self::assertFalse($svc->handleWebhook('freekassa',$req2));
+        $body=json_encode(['transactionId'=>'payment-1','status'=>'CONFIRMED','orderId'=>'order-1']);
+        $req=Request::create('/webhooks/platega','POST',[],[],[],['CONTENT_TYPE'=>'application/json','HTTP_X_MERCHANTID'=>'merchant','HTTP_X_SECRET'=>'secret'],$body);
+        self::assertNotNull($r->get('platega')->handleWebhook($req));
+        self::assertTrue($svc->handleWebhook('platega',$req));
+        $bad=Request::create('/webhooks/platega','POST',[],[],[],['CONTENT_TYPE'=>'application/json','HTTP_X_MERCHANTID'=>'merchant','HTTP_X_SECRET'=>'wrong'],$body);
+        self::assertFalse($svc->handleWebhook('platega',$bad));
     }
     public function testAllProvidersRegistered():void
     {
@@ -143,8 +143,8 @@ final class ProvidersTest extends TestCase
         $enabled=$r->enabled();
         // Stars and Tribute stay registered but are deliberately unavailable
         // until their provider-side confirmation flows are implemented.
-        self::assertCount(24,$enabled);
-        foreach (['yookassa','freekassa','cryptobot','lava','wata','heleket','platega','mulenpay','pal24','cloudpayments','kassa_ai','riopay','severpay','paypear','rollypay','overpay','aurapay','etoplatezhi','antilopay','jupiter','donut','cispay','tabpay','paritypay'] as $id) {
+        self::assertCount(23,$enabled);
+        foreach (['yookassa','cryptobot','lava','wata','heleket','platega','mulenpay','pal24','cloudpayments','kassa_ai','riopay','severpay','paypear','rollypay','overpay','aurapay','etoplatezhi','antilopay','jupiter','donut','cispay','tabpay','paritypay'] as $id) {
             self::assertArrayHasKey($id,$enabled,$id);
         }
         self::assertArrayNotHasKey('telegram_stars',$enabled);

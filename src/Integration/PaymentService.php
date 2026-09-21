@@ -107,10 +107,13 @@ final class PaymentService
         $providerId??=$entity['provider']??null;
         if ($providerId===null || $providerId==='demo') return;
         $result=$this->registry->get($providerId)->verify($paymentId);
-        if (!in_array($result['status']??'',['paid','canceled'],true)) return;
+        if (!in_array($result['status']??'',['paid','canceled'],true)) {
+            if ($correlationId!==null) throw new JobDeferred(60);
+            return;
+        }
         $metadata=$result['metadata']??[];
         // Recover a checkout that succeeded remotely before its id was stored locally.
-        if (!$entity && in_array($providerId,['yookassa'],true)) {
+        if (!$entity && in_array($providerId,['yookassa','platega'],true)) {
             $orderId=$metadata['order_id']??$metadata['merchant_order_id']??'';
             $topupId=$metadata['topup_id']??$metadata['merchant_order_id']??'';
             $order=$this->db->one('SELECT * FROM orders WHERE id=? AND provider=?',[$orderId,$providerId]);
@@ -119,7 +122,7 @@ final class PaymentService
             $entity=$order??$topup;
             $orders=$order?[$order]:[];
         }
-        if (!$entity) return;
+        if (!$entity) throw new BillingError('Платёж пока не привязан к локальному заказу. Требуется сверка.');
         $isOrder=$orders!==[];
         // When the entity was resolved by its own stored provider_payment_id,
         // the binding is already authoritative (payment belongs to this entity).
@@ -247,42 +250,10 @@ final class PaymentService
         $correlation='cor_'.substr(hash('sha256',$event['provider'].':'.($event['payment_id']?:$event['provider_event_id'])),0,40);
         $op=$this->db->one('SELECT id FROM operations WHERE correlation_id=?',[$correlation]);
         try {
-            $payload=$event['payload'];
-            $payloadStatus=is_string($payload)?(json_decode($payload,true)['status']??''):'';
-            // A canceled event carries no money: settle nothing and skip the
-            // provider verify() HTTP call (Platega returns non-2xx for orphan/
-            // closed txs, which otherwise poisons the worker with retry jobs).
-            if ($payloadStatus==='canceled') {
-                $pid=(string)$event['payment_id'];
-                // A provider event must never cancel another provider's
-                // similarly named payment, nor revive/overwrite terminal rows.
-                $this->db->execute("UPDATE orders SET status='canceled' WHERE provider=? AND (provider_payment_id=? OR id=?) AND status='pending'",[$event['provider'],$pid,$pid]);
-                $this->db->execute("UPDATE topups SET status='canceled' WHERE provider=? AND (provider_payment_id=? OR id=?) AND status='pending'",[$event['provider'],$pid,$pid]);
-                if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
-                if($op){$operations->event($op['id'],'payment.canceled','success','Canceled payment, nothing to settle');$operations->complete($op['id']);}
-                return;
-            }
+            // Webhooks are hints, including cancellations and events arriving
+            // before checkout persistence. Always consult the provider before
+            // changing state; API metadata can recover a lost local binding.
             $pid=(string)$event['payment_id'];
-            // Orphan event: the webhook references a payment that matches no
-            // local order/topup AND carries no order_id/topup_id in its own
-            // metadata. There is nothing to settle (no money moves), so ack it
-            // and do NOT call the provider verify() — a bogus/orphan payment id
-            // makes Platega return non-2xx and the worker retries 8 times,
-            // poisoning the queue (see dead job 52580200). Same philosophy as
-            // the canceled branch above.
-            $hasLocalRef = $this->db->one("SELECT 1 FROM payments WHERE provider=? AND (provider_payment_id=? OR id=?) LIMIT 1",[$event['provider'],$pid,$pid])
-                ?? $this->db->one("SELECT 1 FROM orders WHERE provider=? AND (id=? OR provider_payment_id=?) LIMIT 1",[$event['provider'],$pid,$pid])
-                ?? $this->db->one("SELECT 1 FROM topups WHERE provider=? AND (id=? OR provider_payment_id=?) LIMIT 1",[$event['provider'],$pid,$pid]);
-            if ($hasLocalRef===null) {
-                $json=is_string($payload)?json_decode($payload,true):[];
-                $meta=$json['metadata']??[];
-                $metaRef=(string)($meta['order_id']??'') !== '' || (string)($meta['topup_id']??'') !== '';
-                if (!$metaRef) {
-                    if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
-                    if($op){$operations->event($op['id'],'payment.orphan_ack','success','Orphan payment event (no local order/topup), nothing to settle');$operations->complete($op['id']);}
-                    return;
-                }
-            }
             $this->verify($pid,$event['provider'],$correlation);
             if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
             if($op){$operations->event($op['id'],'payment.verified','success','Payment verified with provider');$operations->complete($op['id']);}

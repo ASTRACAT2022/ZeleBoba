@@ -85,5 +85,11 @@ CREATE TABLE IF NOT EXISTS approval_queue (
 );
 
 -- Grants: billing role can use these tables.
-GRANT ALL ON ALL TABLES IN SCHEMA public TO billing;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO billing;
+-- [PG]
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'billing') THEN
+    GRANT ALL ON ALL TABLES IN SCHEMA public TO billing;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO billing;
+  END IF;
+END $$;
+-- [/PG]

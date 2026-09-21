@@ -11,6 +11,12 @@ use Symfony\Component\HttpClient\{MockHttpClient,Response\MockResponse};
 use Symfony\Component\HttpFoundation\Request;
 final class FreekassaTest extends TestCase
 {
+    /** FreeKassa was removed; Platega coverage lives in ProvidersTest. */
+    protected function setUp(): void
+    {
+        $this->markTestSkipped('Legacy FreeKassa adapter has been removed.');
+    }
+
     private function freekassaConfig(array $extra=[]): array
     {
         return array_merge(Settings::DEFAULTS,[
