@@ -63,7 +63,11 @@ final class PaymentEventStore
         $this->db->transaction(function() use($id,$token,$e) {
             $event=$this->db->one('SELECT provider,provider_event_id,attempts FROM payment_events WHERE id=? AND status=\'processing\' AND lock_token=?'.$this->db->lock(),[$id,$token]);
             if (!$event) return;
-            $attempts=(int)$event['attempts']; $dead=$attempts>=8;
+            // A permanent failure (JobPermanentFailure) is a deterministic,
+            // non-recoverable business error — dead-letter it immediately
+            // instead of burning retries on something that can never succeed.
+            $permanent=$e instanceof \App\Infrastructure\JobPermanentFailure;
+            $attempts=(int)$event['attempts']; $dead=$permanent || $attempts>=8;
             $changed=$this->db->execute("UPDATE payment_events SET status=?,processing_error=?,next_attempt_at=?,locked_until=NULL,lock_token=NULL WHERE id=? AND status='processing' AND lock_token=?",[$dead?'dead':'retry',get_class($e),$dead?null:time()+min(3600,2**$attempts)+random_int(0,5),$id,$token]);
             if ($changed) $this->db->execute('UPDATE incoming_webhooks SET status=?,attempts=?,last_error=? WHERE provider=? AND provider_event_id=?',[$dead?'dead':'retry',$attempts,get_class($e),$event['provider'],$event['provider_event_id']]);
         });

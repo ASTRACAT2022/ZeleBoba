@@ -256,6 +256,13 @@ final class PaymentService
             $this->verify($pid,$event['provider'],$correlation);
             if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
             if($op){$operations->event($op['id'],'payment.verified','success','Payment verified with provider');$operations->complete($op['id']);}
+        } catch (\App\Billing\BillingError $e) {
+            // Permanent business-logic failure (unknown provider, mismatched
+            // amount, already-settled, etc.): retrying can never succeed.
+            // Mark processed so the event leaves the queue — the outcome is
+            // recorded for audit, and a 500-loop would only spam the worker.
+            if ($this->events) $this->events->processed($eventId,(string)$event['lock_token']);
+            if($op)$operations->fail($op['id'],$e);
         } catch (\Throwable $e) {
             if ($this->events) $this->events->failed($eventId,(string)$event['lock_token'],$e);
             if($op)$operations->fail($op['id'],$e);
