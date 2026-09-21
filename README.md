@@ -2,9 +2,9 @@
 
 # ZeleBoba Billing
 
-### Production-grade subscription billing for Remnawave VPN panels
+### Промышленный биллинг подписок для VPN-панелей Remnawave
 
-**Stripe-grade money handling · Exactly-once settlement · Durable async processing · Full audit trail**
+**Обработка денег уровня Stripe · Точно-однократное зачисление · Устойчивое асинхронное выполнение · Полный аудит**
 
 [![CI](https://github.com/ASTRACAT2022/ZeleBoba/actions/workflows/ci.yml/badge.svg)](https://github.com/ASTRACAT2022/ZeleBoba/actions/workflows/ci.yml)
 [![PHP](https://img.shields.io/badge/PHP-8.4-8892BE?logo=php&logoColor=white)](https://www.php.net)
@@ -12,104 +12,104 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Symfony](https://img.shields.io/badge/Symfony-7.4-000000?logo=symfony&logoColor=white)](https://symfony.com)
 
-_Web cabinet · Telegram bot · Wallet · Platega payments · Referrals · Gifts · Trials · Marketing · Full admin_
+_Веб-кабинет · Telegram-бот · Кошелёк · Платежи Platega · Рефералы · Подарки · Триалы · Маркетинг · Полная админка_
 
 </div>
 
 ---
 
-**ZeleBoba** is a complete, self-hosted subscription billing platform for [Remnawave](https://github.com/remnawave) VPN panels. It is engineered as a **money-handling system first**: every payment settles **exactly once**, nothing is ever lost, and every financial mutation is recorded in a tamper-proof audit trail.
+**ZeleBoba** — полноценная, self-hosted платформа биллинга подписок для VPN-панелей [Remnawave](https://github.com/remnawave). Она спроектирована **прежде всего как система обработки денег**: каждый платёж зачисляется **ровно один раз**, ничего никогда не теряется, а каждое финансовое изменение фиксируется в защищённом от подделки журнале аудита.
 
-> ⚠️ **Real money receiving is enabled only after you verify a specific merchant, panel, and public HTTPS domain.** Live payments connect exclusively via **Platega** (plus a built-in `demo` adapter for local development). See [Deployment](#deployment).
+> ⚠️ **Реальный приём денег включается только после проверки конкретного магазина, панели и публичного HTTPS-домена.** Живые платежи подключаются исключительно через **Platega** (плюс встроенный `demo`-адаптер для локальной разработки). См. [Развёртывание](#развёртывание).
 
 ---
 
-## Why "production-grade"
+## Почему «промышленный класс»
 
-ZeleBoba was built — and hardened in live production — around the same correctness invariants Stripe-class platforms rely on:
+ZeleBoba была построена — и закалена в живом production — вокруг тех же инвариантов корректности, на которых держатся платформы класса Stripe:
 
-| Invariant | How it's enforced |
+| Инвариант | Как обеспечивается |
 |---|---|
-| **Exactly-once settled** | PostgreSQL advisory locks + `UNIQUE(provider, provider_payment_id)` + idempotency keys |
-| **No lost payments** | Provider → durable inbox → transactional outbox → API re-verification → settle |
-| **No double credits** | Row-level `FOR UPDATE` + unique receipts + state machine |
-| **Replay / tamper safe** | `WebhookGuard` payload hashing; no webhook can re-trigger settlement |
-| **Crash-safe provisioning** | `DurableWorkflow` leases remote calls; deterministic `zb_<sub>` usernames recover safely |
-| **Self-healing** | A reconciler re-enqueues only verifiable work; circuit breakers fail fast |
-| **Financial drift detection** | `ConsistencyChecker` verifies the ledger balances to zero every cycle |
+| **Точно-однократное зачисление** | advisory locks PostgreSQL + `UNIQUE(provider, provider_payment_id)` + ключи идемпотентности |
+| **Ни один платёж не теряется** | провайдер → durable-вход → транзакционный outbox → повторная верификация по API → зачисление |
+| **Ни двойного зачисления** | блокировки строк `FOR UPDATE` + уникальные квитанции + state machine |
+| **Защита от replay / подделки** | хеширование payload в `WebhookGuard`; ни один webhook не может перезапустить зачисление |
+| **Provisioning, устойчивый к сбоям** | `DurableWorkflow` лизинг сетевых вызовов; детерминированные `zb_<sub>` username'ы безопасно восстанавливаются |
+| **Самовосстановление** | reconciliation пере-ставит в очередь только проверяемую работу; circuit breakers дают fail-fast |
+| **Выявление финансового дрейфа** | `ConsistencyChecker` каждый цикл проверяет, что ledger сходится к нулю |
 
-In production today: **34,000+ orders**, **3,600+ active subscriptions**, **zero duplicate settlements**, **zero money drift** (ledger balance = 0).
+В production сейчас: **34 000+ заказов**, **3 600+ активных подписок**, **ноль дублей зачислений**, **ноль денежного дрейфа** (баланс ledger = 0).
 
 ---
 
-## Capabilities
+## Возможности
 
-| Domain | What it does |
+| Домен | Что делает |
 |--------|---------------|
-| **Auth** | Email/password + Telegram; 5-min one-time deep-link login; TOTP 2FA with backup codes |
-| **Billing** | One wallet (balance top-ups via Platega, balance purchases, auto-purchase smart cart) |
-| **Payments** | Platega primary (amounts normalized, net-of-commission, gross handling), `demo` adapter |
-| **Subscriptions** | Auto-renewal N-days before expiry, daily-priced plans, Remnawave sync |
-| **Promo** | Money, days, trials, discounts, combos; limits and anti-stacking |
-| **Referrals** | Topup commission, bonuses, tiers, withdraw with risk-scoring |
-| **Gifts** | `GIFT_<code>` subscriptions, deep-link activation |
-| **Trials** | Free/paid trial, in-place conversion to paid |
-| **Marketing** | Segment broadcasts, required channels, landing pages, contests, reward surveys |
-| **Admin** | RBAC roles/permissions, immutable audit, reports, monitoring, backups, maintenance |
+| **Аутентификация** | Email/пароль + Telegram; одноразовый вход по deep-link на 5 минут; TOTP 2FA с резервными кодами |
+| **Биллинг** | Единый кошелёк (пополнение через Platega, покупка с баланса, автопокупка «умная корзина») |
+| **Платежи** | Основной провайдер Platega (нормализация сумм, net-зачисление после комиссии, gross handling), адаптер `demo` |
+| **Подписки** | Автопродление за N дней до окончания, подписки с дневной ценой, синхронизация с Remnawave |
+| **Промо** | Деньги, дни, триалы, скидки, комбо; лимиты и защита анти-стакинг |
+| **Рефералы** | Комиссия с пополнений, бонусы, ступени, вывод средств с риск-скорингом |
+| **Подарки** | Подписки `GIFT_<код>`, активация по deep-link |
+| **Триалы** | Бесплатный/платный триал, конвертация в платный on-place |
+| **Маркетинг** | Рассылки по сегментам, обязательные каналы, лендинги, конкурсы, награды за опросы |
+| **Админка** | RBAC роли/права, неизменяемый аудит, отчёты, мониторинг, бэкапы, техработы |
 
 ---
 
-## Security model
+## Модель безопасности
 
-- **Secrets encrypted at rest** in PostgreSQL; master key lives outside the app in `var/master.key` (separate volume).
-- **PostgreSQL role separation** — the runtime role cannot rewrite the ledger, receipts, or audit.
-- **No secrets in the image or web root**; `.env` holds only DB connectivity, not merchant keys.
-- **Immutable audit trail** — every money/service mutation is logged with actor, old/new state, and correlation ID.
-- **2FA required** for admin sections; admin approval auto-expires after 15 minutes.
-- **Webhook tamper detection** — same event id + different payload = flagged as potential attack, surfaced to ops.
-
----
-
-## Tech stack
-
-- **PHP 8.4** (strict types), **Symfony 7.4** components, **Twig 3**
-- **PostgreSQL 17** — the system of record for state, outbox, and workflows
-- **Docker / Docker Compose** (single merged runtime container)
-- **OpenTelemetry** (OTLP exporter) for observability
-- CI: PHPUnit, PSR-12 lint, `composer validate --strict`, `composer audit`, Docker build
+- **Секреты шифруются при хранении** в PostgreSQL; мастер-ключ живёт вне приложения в `var/master.key` (отдельный volume).
+- **Разделение ролей PostgreSQL** — runtime-роль не может переписать ledger, квитанции или аудит.
+- **Секретов нет в образе и в web root**; `.env` содержит только подключение к БД, а не ключи магазина.
+- **Неизменяемый аудит** — каждое изменение денег/услуг логируется с актором, старым/новым состоянием и correlation ID.
+- **2FA обязательна** для админ-разделов; административное подтверждение авто-истекает через 15 минут.
+- **Выявление подделки webhook** — тот же event id + другой payload = помечается как потенциальная атака, всплывает у оператора.
 
 ---
 
-## Repository layout
+## Технологический стек
+
+- **PHP 8.4** (строгие типы), компоненты **Symfony 7.4**, **Twig 3**
+- **PostgreSQL 17** — система записи для состояния, outbox и workflow
+- **Docker / Docker Compose** (единый объединённый runtime-контейнер)
+- **OpenTelemetry** (OTLP exporter) для наблюдаемости
+- CI: PHPUnit, PSR-12 lint, `composer validate --strict`, `composer audit`, сборка Docker
+
+---
+
+## Структура репозитория
 
 ```
 ├── src/
 │   ├── Billing/          # BillingService, Wallet, Topups, Auto-renew, Refunds
-│   ├── Integration/      # PaymentService, Platega provider, Remnawave provisioner, Telegram
+│   ├── Integration/      # PaymentService, Platega-provider, Remnawave-provisioner, Telegram
 │   ├── Payments/         # Durable webhook inbox (PaymentEventStore), attempts
 │   ├── Infrastructure/   # Outbox, Reconciler, DurableWorkflow, CircuitBreaker, WebhookGuard
-│   ├── Subscriptions/    # Subscription lifecycle & state machine
-│   ├── Identity/         # Auth, TOTP 2FA
+│   ├── Subscriptions/    # Жизненный цикл подписок и state machine
+│   ├── Identity/         # Аутентификация, TOTP 2FA
 │   ├── Observability/    # ConsistencyChecker, Ops, Telemetry
-│   ├── Settings/         # Config, readiness, integration checks
-│   └── Web/              # HTTP application, router, controllers
-├── templates/             # Twig templates
+│   ├── Settings/         # Конфиг, readiness, проверки интеграций
+│   └── Web/              # HTTP-приложение, роутер, контроллеры
+├── templates/             # Twig-шаблоны
 ├── public/               # Web root
-├── migrations/           # Versioned SQL migrations
-├── tests/                # PHPUnit + fault-injection harnesses
-├── docs/                 # Architecture, operations, verification, manual
-├── .github/workflows/    # CI pipeline
+├── migrations/           # Версионированные SQL-миграции
+├── tests/                # PHPUnit + fault-injection харнессы
+├── docs/                 # Архитектура, эксплуатация, проверки, руководство
+├── .github/workflows/    # CI-пайплайн
 └── compose.yaml          # Docker Compose
 ```
 
 ---
 
-## Deployment
+## Развёртывание
 
-Requires Docker Engine + Docker Compose. HTTPS is terminated at an external reverse proxy; the built-in Nginx listens only on localhost and the DB/PHP-FPM are not exposed.
+Требуется Docker Engine + Docker Compose. HTTPS завершается на внешнем reverse proxy; встроенный Nginx слушает только localhost, а БД и PHP-FPM не публикуются наружу.
 
-1. Copy `.env.example` → `.env`; set **distinct strong** `DATABASE_PASSWORD` and `DATABASE_MIGRATION_PASSWORD`.
-2. Bring the stack up:
+1. Скопируйте `.env.example` → `.env`; задайте **отдельные сильные** `DATABASE_PASSWORD` и `DATABASE_MIGRATION_PASSWORD`.
+2. Поднимите стек:
 
    ```sh
    docker compose build
@@ -119,18 +119,18 @@ Requires Docker Engine + Docker Compose. HTTPS is terminated at an external reve
    docker compose up -d app worker scheduler web
    ```
 
-   `app:install` prompts for a password via hidden input. No embedded credentials exist.
-3. Configure an HTTPS proxy per `infra/reverse-proxy.example.conf`. **Do not expose port 8080** to the internet.
-4. Open `/login`, enable 2FA, save backup codes. Then `/admin/config`: public HTTPS URL, keys, bot username, Remnawave squad. Keep sales **off** until verified.
-5. Register the Telegram webhook; in the Platega cabinet set the notification URL `https://your-domain/webhooks/platega` (POST) and configure `PLATEGA_SECRET`.
-6. Run a **test end-to-end payment and subscription issuance**. Then switch to live merchant keys and enable sales.
-7. Complete `/admin/readiness`, configure offsite backup and monitoring.
+   `app:install` запрашивает пароль скрытым вводом. Встроенных учётных данных нет.
+3. Настройте HTTPS-прокси по `infra/reverse-proxy.example.conf`. **Не открывайте порт 8080** в интернет.
+4. Откройте `/login`, включите 2FA, сохраните резервные коды. Затем `/admin/config`: публичный HTTPS URL, ключи, username бота, squad Remnawave. Держите продажи **выключенными** до проверки.
+5. Зарегистрируйте webhook Telegram; в кабинете Platega укажите URL оповещения `https://ваш-домен/webhooks/platega` (POST) и настройте `PLATEGA_SECRET`.
+6. Проведите **тестовый сквозной платёж и выдачу подписки**. Затем переключитесь на боевые ключи магазина и включите продажи.
+7. Завершите `/admin/readiness`, настройте offsite-бэкап и мониторинг.
 
-> **Use separate environments and DBs for test and live merchants.** Never move test orders into the live system.
+> **Для тестового и боевого магазинов используйте отдельные окружения и БД.** Никогда не переносите тестовые заказы в боевую систему.
 
-### Hot-fix deploy (production)
+### Hot-fix деплой (production)
 
-Workspace is not bind-mounted into the runtime. After editing PHP files, copy them into the merged container and restart:
+Workspace не bind-mounted в runtime. После правки PHP-файлов скопируйте их в объединённый контейнер и перезапустите:
 
 ```sh
 docker cp src/Integration/PaymentService.php zeleboba-all-1:/app/src/Integration/PaymentService.php
@@ -139,7 +139,7 @@ docker restart zeleboba-all-1
 
 ---
 
-## Local development
+## Локальная разработка
 
 ```sh
 composer install
@@ -148,17 +148,17 @@ php bin/console db:migrate
 php bin/console app:install owner@example.com
 php bin/console db:seed
 php -S 127.0.0.1:8080 -t public public/router.php
-# Second terminal:
+# Второй терминал:
 php bin/console worker:run
-# Periodically:
+# Периодически:
 php bin/console billing:reconcile
 ```
 
-SQLite is for development only. Enable demo sales in the admin for local tests; sales are off by default.
+SQLite предназначена только для разработки. Включите демопродажи в админке для локальных тестов; продажи по умолчанию выключены.
 
 ---
 
-## Verification & operations
+## Проверки и эксплуатация
 
 ```sh
 composer test
@@ -169,31 +169,31 @@ docker compose exec app php bin/console billing:audit
 scripts/backup.sh /secure/offsite-staging
 ```
 
-For concurrency tests set `TEST_POSTGRES_DSN`, `TEST_POSTGRES_USER`, `TEST_POSTGRES_PASSWORD` pointing at a separate PostgreSQL DB.
+Для конкурентных тестов задайте `TEST_POSTGRES_DSN`, `TEST_POSTGRES_USER`, `TEST_POSTGRES_PASSWORD`, указывающие на отдельную БД PostgreSQL.
 
-The fault-injection suite (`tests/*_faulttest.php`) verifies exactly-once settlement, double-webhook idempotency, concurrent-settle races, and paid-without-delivery detection against a live DB.
-
----
-
-## Documentation
-
-- [Architecture](docs/architecture.md) — system design, data flow, invariants
-- [Operations & Recovery](docs/operations.md) — runbook, backup/restore, incident handling
-- [Verification](docs/verification.md) — test coverage, audits, proofs
-- [Parity](docs/parity.md) — feature boundaries
-- [Operator Manual](docs/manual.md) — full operator guide
-- [Production Status](STATUS.md) — live deployment health & invariants
-- [Changelog](CHANGELOG.md) — version history
-
-## Project health
-
-- [Security policy](SECURITY.md) — how to report vulnerabilities
-- [Contributing](CONTRIBUTING.md) — coding standards & PR checklist
+Набор fault-injection тестов (`tests/*_faulttest.php`) проверяет на живой БД точно-однократное зачисление, идемпотентность двойных webhook, гонки конкурентного зачисления и выявление оплаченных-без-выдачи.
 
 ---
 
-## License
+## Документация
+
+- [Архитектура](docs/architecture.md) — проектирование системы, потоки данных, инварианты
+- [Эксплуатация и восстановление](docs/operations.md) — runbook, бэкап/восстановление, инциденты
+- [Проверки](docs/verification.md) — покрытие тестами, аудиты, доказательства
+- [Границы функциональности](docs/parity.md) — границы возможностей
+- [Руководство оператора](docs/manual.md) — полное руководство оператора
+- [Статус production](STATUS.md) — здоровье боевого деплоя и инварианты
+- [История изменений](CHANGELOG.md) — история версий
+
+## Здоровье проекта
+
+- [Политика безопасности](SECURITY.md) — как сообщать об уязвимостях
+- [Участие](CONTRIBUTING.md) — стандарты кода и чек-лист PR
+
+---
+
+## Лицензия
 
 [MIT](LICENSE) © 2026 ASTRACAT2022
 
-*Independent PHP implementation; inspired by [Bedolaga](https://github.com/BEDOLAGA-DEV/remnawave-bedolaga-telegram-bot). No source or assets were copied.*
+*Независимая PHP-реализация; вдохновлена [Bedolaga](https://github.com/BEDOLAGA-DEV/remnawave-bedolaga-telegram-bot). Исходный код и ресурсы не копировались.*

@@ -1,64 +1,54 @@
-# Security Policy
+# Политика безопасности
 
-ZeleBoba handles **real money** and **customer data**. We take security seriously
-and follow the same discipline as payment platforms that move billions.
+ZeleBoba оперирует **реальными деньгами** и **данными клиентов**. Мы относимся к безопасности серьёзно и следуем той же дисциплине, что и платёжные платформы, через которые проходят миллиарды.
 
-## Supported versions
+## Поддерживаемые версии
 
-Only the latest release on the `main` branch is supported. Security fixes are
-backported to the current release only.
+Поддерживается только последний релиз на ветке `main`. Исправления безопасности бэкапортятся только в текущий релиз.
 
-| Version | Supported |
+| Версия | Поддержка |
 |---|---|
-| 1.1 (current) | ✅ |
+| 1.1 (текущая) | ✅ |
 | < 1.1 | ❌ |
 
-## Reporting a vulnerability
+## Как сообщить об уязвимости
 
-**Please do not open a public GitHub issue for security vulnerabilities.**
+**Пожалуйста, не открывайте публичный GitHub issue для уязвимостей безопасности.**
 
-Instead, report privately so we can fix and release before disclosure: open a
-**private vulnerability report** on this repository (GitHub → Security →
-"Report a vulnerability"), or contact the maintainers directly.
+Вместо этого сообщите приватно, чтобы мы исправили и выпустили до раскрытия: откройте **приватный отчёт об уязвимости** в этом репозитории (GitHub → Security → «Report a vulnerability») или свяжитесь с поддерживающими напрямую.
 
-We aim to respond within **48 hours** and publish a fix as soon as a
-reproducible case is confirmed.
+Мы стремимся ответить в течение **48 часов** и выпустить исправление, как только получится воспроизводимый случай.
 
-### What we handle as a vulnerability
+### Что мы считаем уязвимостью
 
-- Funds loss, double-credit, or payment replay
-- Unauthorized access to admin or user accounts
-- Credential / secret disclosure
-- Audit-trail tampering
-- Remote code execution or injection
-- Any issue that can lead to a customer being charged incorrectly
+- Потеря средств, двойное зачисление или replay платежа
+- Несанкционированный доступ к админ- или пользовательским аккаунтам
+- Раскрытие учётных данных / секретов
+- Подделка журнала аудита
+- Удалённое выполнение кода или инъекции
+- Любая проблема, которая может привести к некорректному списанию с клиента
 
-### Non-priority (please report anyway)
+### Не приоритетно (но всё равно сообщайте)
 
-- Cosmetic UI bugs
-- Missing rate limits (worth reporting, but not critical on their own)
+- Косметические баги UI
+- Недостающие rate limits (стоит сообщать, но сами по себе некритично)
 
-## Security design notes
+## Заметки по проектированию безопасности
 
-- **Exactly-once settlement** — advisory locks + unique constraints prevent
-  double-credit even under concurrent/duplicate webhooks.
-- **No secrets in the image or web root** — keys are encrypted at rest in
-  PostgreSQL; the master key lives on a separate volume.
-- **Role separation** — the runtime DB role cannot rewrite ledger, receipts,
-  or audit (verified via SQLSTATE 42501).
-- **Webhook tamper detection** — same event id + different payload is treated
-  as a potential attack and surfaced to ops with money untouched.
-- **Immutable audit** — every money/service mutation is logged with actor,
-  old/new state, and correlation id.
+- **Точно-однократное зачисление** — advisory locks + уникальные ограничения предотвращают двойное зачисление даже при конкурентных/дублирующих webhook.
+- **Секретов нет в образе и в web root** — ключи шифруются при хранении в PostgreSQL; мастер-ключ живёт на отдельном volume.
+- **Разделение ролей** — runtime-роль БД не может переписать ledger, квитанции или аудит (проверено через SQLSTATE 42501).
+- **Выявление подделки webhook** — тот же event id + другой payload трактуется как потенциальная атака и всплывает у оператора, деньги не трогаются.
+- **Неизменяемый аудит** — каждое изменение денег/услуг логируется с актором, старым/новым состоянием и correlation ID.
 
-If you find a way to break any of these, that's a critical report.
+Если вы найдёте способ сломать что-то из этого — это критический отчёт.
 
-## Disclosure
+## Раскрытие
 
-We follow **responsible disclosure**:
-1. Reporter privately contacts us.
-2. We confirm the issue and reproduce it.
-3. We ship a fixed version.
-4. The issue is publicly disclosed after a reasonable window.
+Мы следуем **ответственному раскрытию**:
+1. Репортёр приватно связывается с нами.
+2. Мы подтверждаем проблему и воспроизводим её.
+3. Мы выпускаем исправленную версию.
+4. Проблема публично раскрывается после разумного окна ожидания.
 
-Thank you for helping keep ZeleBoba production-safe.
+Спасибо, что помогаете держать ZeleBoba безопасной в production.

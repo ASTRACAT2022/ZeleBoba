@@ -1,54 +1,46 @@
-# Contributing to ZeleBoba
+# Участие в разработке ZeleBoba
 
-Thanks for wanting to help make ZeleBoba more reliable. This is a
-**money-handling system**: changes to the payment or billing path have real
-consequences, so we gate them with the same rigor as a payment platform.
+Спасибо, что хотите сделать ZeleBoba надёжнее. Это **система, работающая с деньгами**: изменения в платёжном или биллинговом пути имеют реальные последствия, поэтому мы обкладываем их той же строгостью, что и платёжная платформа.
 
-## How to contribute
+## Как внести вклад
 
-1. **Open an issue** first for anything touching payments, settlement,
-   provisioning, or security. Discuss the approach before writing code.
-2. Fork the repository.
-3. Create a branch: `fix/<short-description>` or `feat/<short-description>`.
-4. Write your change with tests.
-5. Open a pull request against `main`.
+1. **Сначала откройте issue** по всему, что касается платежей, зачисления, provisioning или безопасности. Обсудите подход до написания кода.
+2. Сделайте форк репозитория.
+3. Создайте ветку: `fix/<краткое-описание>` или `feat/<краткое-описание>`.
+4. Напишите ваше изменение вместе с тестами.
+5. Откройте pull request на `main`.
 
-## Code standards
+## Стандарты кода
 
-- **PHP 8.4**, `declare(strict_types=1)` in every file.
+- **PHP 8.4**, `declare(strict_types=1)` в каждом файле.
 - **Conventional commits**: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`.
-- **No secrets, ever** — never commit keys, `.env`, cookies, panel tokens, or
-  subscription URLs. The `.gitignore` covers the known ones; if you find a new
-  secret pattern, add it there.
-- **Money paths are transactional.** Any change to `BillingService::settle()`,
-  `TopupService::settle()`, `PaymentService::verify()`, or
-  `DurableWorkflow` must preserve exactly-once semantics.
+- **Никаких секретов, никогда** — не коммитьте ключи, `.env`, cookies, токены панели или URL подписок. `.gitignore` покрывает известные; если нашли новый секрет-паттерн — добавьте его туда.
+- **Денежные пути транзакционны.** Любое изменение в `BillingService::settle()`, `TopupService::settle()`, `PaymentService::verify()` или `DurableWorkflow` должно сохранять семантику точно-однократного зачисления.
 
-## Testing
+## Тестирование
 
 ```sh
 composer install
 cp .env.example .env
-php bin/console db:migrate          # requires a database
+php bin/console db:migrate          # требует БД
 composer test                        # PHPUnit
 php bin/console biling:audit
 ```
 
-For **fault-injection** tests (money safety) set a separate PostgreSQL DB:
+Для **fault-injection тестов** (безопасность денег) укажите отдельную БД PostgreSQL:
 
 ```sh
-TEST_POSTGRES_DSN=... TEST_POSTGRES_USER=... TEST_POSTGRES_PASSWORD=... php tests/worker_event_faulttest.php
+TEST_POSTGRES_DSN=... TEST_POSTGRES_USER=... TEST_POSTGRES_PASSWORD=*** php tests/worker_event_faulttest.php
 ```
 
-Every change to the payment path **must** add or update a fault test proving the
-invariant still holds (e.g. no double-settle under concurrent webhooks).
+Каждое изменение платёжного пути **обязано** добавить или обновить fault-тест, доказывающий, что инвариант держится (например, нет двойного зачисления при конкурентных webhook).
 
-## Pull request checklist
+## Чек-лист pull request
 
-- [ ] `composer test` passes
-- [ ] `composer validate --strict` passes
-- [ ] `composer audit` has no advisories
-- [ ] `php -l` passes on every changed file
-- [ ] Fault test added/updated for payment-path changes
-- [ ] CHANGELOG updated under [Unreleased]
-- [ ] No secrets or operational artifacts in the diff
+- [ ] `composer test` проходит
+- [ ] `composer validate --strict` проходит
+- [ ] `composer audit` без advisories
+- [ ] `php -l` проходит на каждом изменённом файле
+- [ ] Fault-тест добавлен/обновлён для изменений платёжного пути
+- [ ] CHANGELOG обновлён в разделе [Unreleased]
+- [ ] В диффе нет секретов или операционных артефактов
