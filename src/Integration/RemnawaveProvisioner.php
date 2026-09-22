@@ -98,6 +98,34 @@ final class RemnawaveProvisioner implements Provisioner
         if (!$id) return;
         $this->request('PATCH','/api/users',['id'=>(int)$id,'status'=>'DISABLED']);
     }
+    /**
+     * List ACTIVE panel users page by page. Used to import subscriptions that
+     * exist on the panel but are missing locally (legacy without order_id).
+     * Returns a flat array of decoded user objects.
+     */
+    public function listActiveUsers(int $pageSize = 200): array
+    {
+        $out = []; $page = 1;
+        while (true) {
+            $r = $this->request('GET', '/api/users?page=' . $page . '&pageSize=' . $pageSize);
+            if ($r->getStatusCode() !== 200) {
+                // tolerate transient page failures: stop and return what we have
+                if ($page === 1) throw new \RuntimeException('Remnawave list users failed: HTTP ' . $r->getStatusCode());
+                break;
+            }
+            $data = $r->toArray()['response'] ?? null;
+            if (!is_array($data)) break;
+            $users = $data['users'] ?? [];
+            $total = (int)($data['total'] ?? 0);
+            foreach ($users as $u) {
+                if (($u['status'] ?? '') === 'ACTIVE') $out[] = $u;
+            }
+            $page++;
+            if ($page * $pageSize >= max($total, count($users)) || empty($users)) break;
+            if ($page > 50) break; // hard cap
+        }
+        return $out;
+    }
     public function remove(string $username): void
     {
         $user=$this->fetch($username);

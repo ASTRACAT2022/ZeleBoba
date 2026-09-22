@@ -21,8 +21,11 @@ trait AdminActions
             if($this->app->config['PAYMENT_DRIVER']==='demo' || empty($this->app->config['REMNAWAVE_URL']) || empty($this->app->config['REMNAWAVE_TOKEN']))throw new BillingError('Сначала настройте Remnawave и реальный платежный драйвер.');
             $sync=new \App\Integration\RemnawaveSync($db,new \App\Integration\RemnawaveProvisioner(\Symfony\Component\HttpClient\HttpClient::create(),$this->app->config['REMNAWAVE_URL'],$this->app->config['REMNAWAVE_TOKEN'],$this->app->config['REMNAWAVE_SQUAD_UUID'],$this->app->circuitBreaker));
             $report=$sync->run(100,true);
-            $this->app->billing->audit($uid,'remnawave.sync',sprintf('checked=%d fixed=%d reprovisioned=%d disabled=%d errors=%d',$report['checked'],$report['fixed'],$report['reprovisioned'],$report['disabled'],$report['errors']));
-            return $this->render('admin-sync',['report'=>$report]);
+            // Reverse sync: import panel ACTIVE subs (with telegram) that are missing locally.
+            $import=$sync->importMissing(200,true);
+            $this->app->billing->audit($uid,'remnawave.sync',sprintf('checked=%d fixed=%d reprovisioned=%d disabled=%d errors=%d', $report['checked'],$report['fixed'],$report['reprovisioned'],$report['disabled'],$report['errors']));
+            if ($import['imported']>0) $this->app->billing->audit($uid,'remnawave.import_missing',sprintf('scanned=%d imported=%d skipped_no_account=%d errors=%d',$import['scanned'],$import['imported'],$import['skipped_no_account'],$import['errors']));
+            return $this->render('admin-sync',['report'=>$report,'import'=>$import]);
         }
         if($handler==='admin-readiness')return $this->render('readiness',['checks'=>Readiness::report($this->app)]);
         if($handler==='admin-creators')return $this->render('admin-creators',['creators'=>$db->all("SELECT c.*,COALESCE((SELECT SUM(amount_minor) FROM creator_ledger l WHERE l.creator_id=c.id),0) earned FROM creators c ORDER BY c.created_at DESC")]);
