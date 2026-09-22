@@ -65,6 +65,7 @@ $db->execute('DELETE FROM customer_timeline WHERE user_id=?',[$uid]);
 $db->execute('DELETE FROM ledger_entries WHERE order_id=?',[$oid]);
 $db->execute('DELETE FROM payment_receipts WHERE order_id=?',[$oid]);
 $db->execute('DELETE FROM payments WHERE order_id=?',[$oid]);
+$db->execute('DELETE FROM wallet_ledger_entries WHERE transaction_id IN (SELECT id FROM transactions WHERE user_id=?)',[$uid]);
 $db->execute('DELETE FROM transactions WHERE user_id=?',[$uid]);
 $db->execute('DELETE FROM subscriptions WHERE id=?',[$sid]);
 $db->execute('DELETE FROM orders WHERE id=?',[$oid]);

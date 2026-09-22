@@ -86,12 +86,17 @@ final class Worker
         // that was waiting for balance. Row-level locking in BillingService
         // makes this harmless if the scheduler wakes it simultaneously.
         if ($this->billing) {
-            foreach($this->db->all("SELECT id FROM subscriptions WHERE user_id=? AND auto_renew=1 AND status='active' AND renew_order_id IS NULL AND expires_at>? AND (renew_at<=? OR renew_failed_at IS NOT NULL)",[$userId,time(),time()]) as $sub) {
+            $now=time();
+            foreach($this->db->all("SELECT s.id,p.duration_days FROM subscriptions s JOIN plans p ON p.id=COALESCE(s.renew_plan_id,s.plan_id) WHERE s.user_id=? AND s.auto_renew=1 AND s.status='active' AND s.renew_order_id IS NULL AND s.expires_at>? AND (s.renew_at<=? OR s.renew_failed_at IS NOT NULL)",[$userId,$now,$now]) as $sub) {
                 // A balance topup is an explicit retry signal, so make a
                 // previously backoff-scheduled insufficient-funds renewal due
                 // now. The renewal transaction still verifies every guard.
-                $this->db->execute('UPDATE subscriptions SET renew_at=? WHERE id=? AND renew_order_id IS NULL',[time(),$sub['id']]);
-                $this->outbox->enqueue('subscription.renew','renew:'.$sub['id'].':'.intdiv(time(),60),['subscription_id'=>$sub['id']]);
+                $this->db->execute('UPDATE subscriptions SET renew_at=? WHERE id=? AND renew_order_id IS NULL',[$now,$sub['id']]);
+                $daily=(int)$sub['duration_days']>0 && (int)$sub['duration_days']<=1;
+                $topic=$daily?'subscription.daily':'subscription.renew';
+                $prefix=$daily?'daily':'renew';
+                $bucket=$daily?intdiv($now,3600):intdiv($now,60);
+                $this->outbox->enqueue($topic,$prefix.':'.$sub['id'].':'.$bucket,['subscription_id'=>$sub['id']]);
             }
         }
     }
@@ -233,7 +238,12 @@ final class Worker
     private function renew(string $id): void
     {
         if ($this->billing) {
-            $this->billing->autoRenewFromBalance($id);
+            $plan=$this->db->one('SELECT p.duration_days FROM subscriptions s JOIN plans p ON p.id=COALESCE(s.renew_plan_id,s.plan_id) WHERE s.id=?',[$id]);
+            if ($plan && (int)$plan['duration_days']>0 && (int)$plan['duration_days']<=1) {
+                $this->billing->dailyChargeFromBalance($id);
+            } else {
+                $this->billing->autoRenewFromBalance($id);
+            }
 
             return;
         }

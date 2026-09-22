@@ -32,7 +32,7 @@ $r1=$c->billing->autoRenewFromBalance($subId);
 $balAfter1=$db->one('SELECT balance_kopeks FROM users WHERE id=?',[$uid])['balance_kopeks'];
 $after1=$db->one('SELECT expires_at,renew_order_id FROM subscriptions WHERE id=?',[$subId]);
 $paid=$db->all("SELECT id,status,price_minor,provider_payment_id FROM orders WHERE user_id=? AND id<>? AND idempotency_key LIKE 'autorenew-balance%'",[$uid,$origOrderId]);
-$wallet=$db->all("SELECT amount_kopeks FROM transactions WHERE user_id=? AND external_id IN (SELECT id::text FROM orders WHERE user_id=? AND idempotency_key LIKE 'autorenew-balance%')",[$uid,$uid]);
+$wallet=$db->all("SELECT amount_kopeks FROM transactions WHERE user_id=? AND external_id IN (SELECT CAST(id AS TEXT) FROM orders WHERE user_id=? AND idempotency_key LIKE 'autorenew-balance%')",[$uid,$uid]);
 
 $fail="";
 if($r1!==true)$fail.="FAIL run1 false\n";
@@ -59,9 +59,12 @@ $db->execute('DELETE FROM provisioning_accounts WHERE subscription_id=?',[$subId
 $db->execute('DELETE FROM operation_events WHERE operation_id IN (SELECT id FROM operations WHERE order_id=? OR subscription_id=? OR user_id=?)',[$oid,$subId,$uid]);
 $db->execute('DELETE FROM operations WHERE order_id=? OR subscription_id=? OR user_id=?',[$oid,$subId,$uid]);
 $db->execute('DELETE FROM customer_timeline WHERE user_id=?',[$uid]);
+$db->execute('DELETE FROM order_items WHERE order_id IN (?,?) OR subscription_id=?',[$oid,$origOrderId,$subId]);
+$db->execute('UPDATE orders SET renewal_subscription_id=NULL WHERE id IN (?,?) OR user_id=?',[$oid,$origOrderId,$uid]);
 $db->execute('DELETE FROM ledger_entries WHERE order_id IN (?,?)',[$oid,$origOrderId]);
 $db->execute('DELETE FROM payment_receipts WHERE order_id IN (?,?)',[$oid,$origOrderId]);
 $db->execute('DELETE FROM payments WHERE order_id IN (?,?)',[$oid,$origOrderId]);
+$db->execute('DELETE FROM wallet_ledger_entries WHERE transaction_id IN (SELECT id FROM transactions WHERE user_id=?)',[$uid]);
 $db->execute('DELETE FROM transactions WHERE user_id=?',[$uid]);
 $db->execute('DELETE FROM subscriptions WHERE id=? OR order_id=?',[$subId,$oid]);
 $db->execute('DELETE FROM orders WHERE id IN (?,?) OR user_id=?',[$oid,$origOrderId,$uid]);

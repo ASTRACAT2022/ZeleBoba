@@ -110,6 +110,74 @@ final class AutoRenewTest extends TestCase
         self::assertCount(1,$db->all("SELECT id FROM orders WHERE idempotency_key LIKE 'autorenew-balance:%'"));
     }
 
+    public function testReconcilerRoutesDailyPlansOnlyToDailyQueue(): void
+    {
+        [$db,$billing]=$this->setupBilling();
+        $db->execute("UPDATE plans SET duration_days=1,price_minor=19900 WHERE id='p'");
+        $order=$billing->order('u','p','daily-reconcile-order');
+        $billing->settle($order['id'],'demo','demo_'.$order['id'],19900,'RUB');
+        $sub=$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$order['id']]);
+        $db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',expires_at=? WHERE id=?",[time()+86400,$sub['id']]);
+        $billing->setAutoRenew('u',$sub['id'],true);
+        $db->execute('UPDATE subscriptions SET renew_at=?,last_daily_charge_at=? WHERE id=?',[time()-1,time()-90000,$sub['id']]);
+
+        (new Reconciler($this->createContainer($db)))->run();
+
+        self::assertSame(0,(int)$db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.renew'")['n']);
+        self::assertSame(1,(int)$db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.daily'")['n']);
+    }
+
+    public function testDailyInsufficientBalanceWakesAsDailyAfterTopup(): void
+    {
+        [$db,$billing,$config]=$this->setupBilling();
+        $db->execute("UPDATE plans SET duration_days=1,price_minor=19900 WHERE id='p'");
+        $order=$billing->order('u','p','daily-topup-wake-order');
+        $billing->settle($order['id'],'demo','demo_'.$order['id'],19900,'RUB');
+        $sub=$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$order['id']]);
+        $db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',expires_at=?,last_daily_charge_at=? WHERE id=?",[time()+86400,time()-90000,$sub['id']]);
+        $billing->setAutoRenew('u',$sub['id'],true);
+
+        self::assertFalse($billing->dailyChargeFromBalance($sub['id']));
+        $marked=$db->one('SELECT renew_failed_at FROM subscriptions WHERE id=?',[$sub['id']]);
+        self::assertNotNull($marked['renew_failed_at']);
+
+        (new \App\Billing\Wallet($db))->credit('u',19900,'manual_adjust','topup simulation');
+        $payments=new Payments($db,$billing,new MockHttpClient(),$config);
+        $worker=new Worker($db,new Outbox($db),$payments,new DemoProvisioner(),new MockHttpClient(),'',true,'https://astracattg.netlify.app',null,null,null,null,null,null,'demo',null,null,$billing);
+        $worker->handle('topup.after',['user_id'=>'u']);
+
+        self::assertSame(0,(int)$db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.renew'")['n']);
+        self::assertSame(1,(int)$db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.daily'")['n']);
+        while($db->one("SELECT id FROM outbox WHERE topic='subscription.daily' AND status='pending'")!==null) (new Outbox($db))->runOne($worker->handle(...));
+        self::assertSame(0,(new \App\Billing\Wallet($db))->balance('u')['balance_kopeks']);
+        self::assertSame(1,(int)$db->one("SELECT COUNT(*) n FROM transactions WHERE type='subscription_daily'")['n']);
+        $charged=$db->one('SELECT renew_at,renew_failed_at FROM subscriptions WHERE id=?',[$sub['id']]);
+        self::assertGreaterThan(time()+86000,(int)$charged['renew_at']);
+        self::assertNull($charged['renew_failed_at']);
+    }
+
+    public function testWorkerRoutesStaleDailyRenewJobToDailyCharge(): void
+    {
+        [$db,$billing,$config]=$this->setupBilling();
+        $db->execute("UPDATE plans SET duration_days=1,price_minor=19900 WHERE id='p'");
+        $order=$billing->order('u','p','daily-stale-renew-order');
+        $billing->settle($order['id'],'demo','demo_'.$order['id'],19900,'RUB');
+        $sub=$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$order['id']]);
+        $oldExpiry=time()+86400;
+        $db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',expires_at=?,renew_at=?,last_daily_charge_at=? WHERE id=?",[$oldExpiry,time()-1,time()-90000,$sub['id']]);
+        $billing->setAutoRenew('u',$sub['id'],true);
+        $db->execute('UPDATE subscriptions SET renew_at=?,last_daily_charge_at=? WHERE id=?',[time()-1,time()-90000,$sub['id']]);
+        (new \App\Billing\Wallet($db))->credit('u',19900,'manual_adjust','stale renew funds');
+        $payments=new Payments($db,$billing,new MockHttpClient(),$config);
+        $worker=new Worker($db,new Outbox($db),$payments,new DemoProvisioner(),new MockHttpClient(),'',true,'https://astracattg.netlify.app',null,null,null,null,null,null,'demo',null,null,$billing);
+
+        $worker->handle('subscription.renew',['subscription_id'=>$sub['id']]);
+
+        self::assertSame(0,(int)$db->one("SELECT COUNT(*) n FROM orders WHERE idempotency_key LIKE 'autorenew-balance:%'")['n']);
+        self::assertSame(1,(int)$db->one("SELECT COUNT(*) n FROM transactions WHERE type='subscription_daily'")['n']);
+        self::assertGreaterThan($oldExpiry,(int)$db->one('SELECT expires_at FROM subscriptions WHERE id=?',[$sub['id']])['expires_at']);
+    }
+
     public function testWaitingRenewalWakesAfterBalanceTopup(): void
     {
         [$db,$billing,$config]=$this->setupBilling();

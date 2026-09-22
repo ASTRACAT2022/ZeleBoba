@@ -40,7 +40,7 @@ $after1=$db->one('SELECT expires_at,renew_order_id,renew_fail_count FROM subscri
 $paidOrders=$db->all("SELECT id,status,provider_payment_id FROM orders WHERE user_id=? AND id<>? AND idempotency_key LIKE 'autorenew-balance%'",[$uid,$origOrderId]);
 $debited=$db->all("SELECT amount_kopeks,payment_method FROM transactions WHERE user_id=? AND type='subscription_renewal' AND payment_method='balance'",[$uid]);
 // wallet debit also writes a transaction; plus settle() skips its own tx for balance_
-$walletDebits=$db->all("SELECT amount_kopeks FROM transactions WHERE user_id=? AND external_id IN (SELECT id::text FROM orders WHERE user_id=? AND idempotency_key LIKE 'autorenew-balance%')",[$uid,$uid]);
+$walletDebits=$db->all("SELECT amount_kopeks FROM transactions WHERE user_id=? AND external_id IN (SELECT CAST(id AS TEXT) FROM orders WHERE user_id=? AND idempotency_key LIKE 'autorenew-balance%')",[$uid,$uid]);
 
 echo "run1: returned=".($r1?'TRUE':'FALSE')."\n";
 echo "balance: $bal -> $balAfter1 (diff ".(int)$bal-(int)$balAfter1.", expect $planPrice)\n";
@@ -85,14 +85,19 @@ echo "=== RESULT: PASS (insufficient funds -> false, no debit, no order) ===\n";
 
 // --- cleanup ---
 $oid=$paidOrders[0]['id'];
+$db->execute('DELETE FROM provisioning_operations WHERE subscription_id IN (?,?)',[$subId,$subId2]);
+$db->execute('DELETE FROM provisioning_accounts WHERE subscription_id IN (?,?)',[$subId,$subId2]);
 $db->execute('DELETE FROM operation_events WHERE operation_id IN (SELECT id FROM operations WHERE order_id=? OR subscription_id=? OR correlation_id LIKE ?)',[$oid,$subId,'%'.$origOrderId.'%']);
 $db->execute('DELETE FROM operations WHERE order_id=? OR subscription_id=?',[$oid,$subId]);
 $db->execute('DELETE FROM operation_events WHERE operation_id IN (SELECT id FROM operations WHERE order_id IN (?,?,?) OR user_id IN (?,?))',[$oid,$origOrderId,$origOrderId2,$uid,$uid2]);
 $db->execute('DELETE FROM operations WHERE order_id IN (?,?,?) OR user_id IN (?,?)',[$oid,$origOrderId,$origOrderId2,$uid,$uid2]);
 $db->execute('DELETE FROM customer_timeline WHERE user_id IN (?,?)',[$uid,$uid2]);
+$db->execute('DELETE FROM order_items WHERE order_id IN (?,?,?) OR subscription_id IN (?,?)',[$oid,$origOrderId,$origOrderId2,$subId,$subId2]);
+$db->execute('UPDATE orders SET renewal_subscription_id=NULL WHERE id IN (?,?,?) OR user_id IN (?,?)',[$oid,$origOrderId,$origOrderId2,$uid,$uid2]);
 $db->execute('DELETE FROM ledger_entries WHERE order_id IN (?,?,?)',[$oid,$origOrderId,$origOrderId2]);
 $db->execute('DELETE FROM payment_receipts WHERE order_id IN (?,?,?)',[$oid,$origOrderId,$origOrderId2]);
 $db->execute('DELETE FROM payments WHERE order_id IN (?,?,?)',[$oid,$origOrderId,$origOrderId2]);
+$db->execute('DELETE FROM wallet_ledger_entries WHERE transaction_id IN (SELECT id FROM transactions WHERE user_id IN (?,?))',[$uid,$uid2]);
 $db->execute('DELETE FROM transactions WHERE user_id IN (?,?)',[$uid,$uid2]);
 $db->execute('DELETE FROM subscriptions WHERE id IN (?,?) OR order_id IN (?,?)',[$subId,$subId2,$oid,$origOrderId2]);
 $db->execute('DELETE FROM orders WHERE id IN (?,?,?) OR user_id IN (?,?)',[$oid,$origOrderId,$origOrderId2,$uid,$uid2]);

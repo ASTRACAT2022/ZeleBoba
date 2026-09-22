@@ -301,7 +301,7 @@ final class BillingService
         return $this->db->transaction(function() use($subscriptionId) {
             $now=time();
             $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$subscriptionId]);
-            if (!$sub || (int)$sub['auto_renew']!==1 || $sub['status']!=='active') return false;
+            if (!$sub || (int)$sub['auto_renew']!==1 || $sub['status']!=='active' || (($sub['renew_order_id']??null)!==null && (string)$sub['renew_order_id']!=='')) return false;
             $planId=(string)($sub['renew_plan_id']??$sub['plan_id']);
             $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
             if (!$plan) return false;
@@ -315,13 +315,14 @@ final class BillingService
             if (!$user || (int)$user['balance_kopeks']<$price) {
                 // In grace: never charge, never cancel. A later topup will wake
                 // this job and it will be charged the next run it is due.
+                $this->db->execute('UPDATE subscriptions SET renew_failed_at=?,renew_at=? WHERE id=?',[$now,min((int)$sub['expires_at'],$now+3600),$subscriptionId]);
                 $this->audit('system','subscription.daily_waiting_balance',$subscriptionId);
                 return false;
             }
             // Extend from now (never stack onto a stale anchor), keep paid time.
             $anchor=max($now,(int)$sub['expires_at']);
             $newExpiry=$anchor+$period;
-            $this->db->execute('UPDATE subscriptions SET expires_at=?,last_daily_charge_at=?,renew_failed_at=NULL,updated_at=?,version=version+1 WHERE id=?',[$newExpiry,$now,$now,$subscriptionId]);
+            $this->db->execute('UPDATE subscriptions SET expires_at=?,last_daily_charge_at=?,renew_at=?,renew_failed_at=NULL,updated_at=?,version=version+1 WHERE id=?',[$newExpiry,$now,$now+$period,$now,$subscriptionId]);
             $txId=Database::id();
             (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_daily','Ежедневное автосписание: '.$plan['name'],'balance',$txId);
             $this->outbox->enqueue('subscription.extend','daily-extend:'.$subscriptionId.':'.$newExpiry,['subscription_id'=>$subscriptionId]);

@@ -64,14 +64,19 @@ if($fail){echo "=== RESULT: FAIL ===\n$fail"; $db->execute('UPDATE plans SET aut
 echo "=== RESULT: PASS — per-tariff override работает (7д), NULL использует глобальный (3д) ===\n";
 
 // cleanup
+$db->execute('DELETE FROM provisioning_operations WHERE subscription_id IN (?,?)',[$subId,$subId2]);
+$db->execute('DELETE FROM provisioning_accounts WHERE subscription_id IN (?,?)',[$subId,$subId2]);
 foreach([$subId,$subId2] as $sid){
   $db->execute('DELETE FROM operation_events WHERE operation_id IN (SELECT id FROM operations WHERE user_id=? OR subscription_id=?)',[$uid,$sid]);
   $db->execute('DELETE FROM operations WHERE user_id=? OR subscription_id=?',[$uid,$sid]);
 }
 $db->execute('DELETE FROM customer_timeline WHERE user_id=?',[$uid]);
+$db->execute('DELETE FROM order_items WHERE order_id IN (?,?) OR subscription_id IN (?,?)',[$origOrderId,$origOrderId2,$subId,$subId2]);
+$db->execute('UPDATE orders SET renewal_subscription_id=NULL WHERE id IN (?,?) OR user_id=?',[$origOrderId,$origOrderId2,$uid]);
 $db->execute('DELETE FROM ledger_entries WHERE order_id IN (?,?)',[$origOrderId,$origOrderId2]);
 $db->execute('DELETE FROM payment_receipts WHERE order_id IN (?,?)',[$origOrderId,$origOrderId2]);
 $db->execute('DELETE FROM payments WHERE order_id IN (?,?)',[$origOrderId,$origOrderId2]);
+$db->execute('DELETE FROM wallet_ledger_entries WHERE transaction_id IN (SELECT id FROM transactions WHERE user_id=?)',[$uid]);
 $db->execute('DELETE FROM transactions WHERE user_id=?',[$uid]);
 $db->execute('DELETE FROM subscriptions WHERE id IN (?,?) OR user_id=?',[$subId,$subId2,$uid]);
 $db->execute('DELETE FROM orders WHERE id IN (?,?) OR user_id=?',[$origOrderId,$origOrderId2,$uid]);
