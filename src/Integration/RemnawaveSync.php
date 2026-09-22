@@ -15,7 +15,19 @@ final class RemnawaveSync
     public function run(int $limit=100, bool $fix=true): array
     {
         $report=['checked'=>0,'fixed'=>0,'disabled'=>0,'reprovisioned'=>0,'missing'=>0,'errors'=>0,'details'=>[]];
-        $subs=$this->db->all("SELECT s.*,o.traffic_bytes,o.devices,o.squad_uuid FROM subscriptions s JOIN orders o ON o.id=s.order_id WHERE s.status IN ('active','expired') ORDER BY s.created_at DESC LIMIT ?",[$limit]);
+        $subs=$this->db->all(
+            "SELECT s.*,
+                    COALESCE(o.traffic_bytes,s.traffic_limit_bytes,CASE WHEN s.traffic_limit_gb=0 THEN 0 ELSE (s.traffic_limit_gb+s.purchased_traffic_gb)*1073741824 END) AS traffic_bytes,
+                    COALESCE(o.devices,s.device_limit,1) AS devices,
+                    COALESCE(o.squad_uuid,p.squad_uuid,'') AS squad_uuid
+               FROM subscriptions s
+               LEFT JOIN orders o ON o.id=s.order_id
+               LEFT JOIN plans p ON p.id=s.plan_id
+              WHERE s.status IN ('active','expired')
+              ORDER BY s.created_at DESC
+              LIMIT ?",
+            [$limit]
+        );
         foreach($subs as $s){
             $report['checked']++;
             $username='zb_'.$s['id'];
@@ -87,8 +99,11 @@ final class RemnawaveSync
     public function importMissing(int $limit = 200, bool $fix = true): array
     {
         $known = [];
-        foreach ($this->db->all('SELECT remnawave_id FROM subscriptions WHERE remnawave_id IS NOT NULL') as $r) {
-            $known[(int)$r['remnawave_id']] = true;
+        foreach ($this->db->all('SELECT remnawave_id,remote_id FROM subscriptions WHERE remnawave_id IS NOT NULL OR remote_id IS NOT NULL') as $r) {
+            $panelId = (int)($r['remnawave_id'] ?? 0);
+            if ($panelId > 0) $known[$panelId] = true;
+            $remoteId = (string)($r['remote_id'] ?? '');
+            if (ctype_digit($remoteId) && (int)$remoteId > 0) $known[(int)$remoteId] = true;
         }
         $byTg = [];
         foreach ($this->db->all('SELECT id,telegram_id FROM users WHERE telegram_id IS NOT NULL') as $u) {
@@ -98,7 +113,7 @@ final class RemnawaveSync
         foreach ($this->provisioner->listActiveUsers($limit) as $u) {
             $report['scanned']++;
             $rnId = (int)($u['id'] ?? 0);
-            $tg = (string)($u['telegramId'] ?? '');
+            $tg = (string)($u['telegramId'] ?? $u['telegram_id'] ?? $u['telegram'] ?? '');
             if ($rnId <= 0) { $report['errors']++; continue; }
             if (isset($known[$rnId])) continue; // already present
             if ($tg === '' || !isset($byTg[$tg])) { $report['skipped_no_account']++; continue; }
@@ -120,7 +135,7 @@ final class RemnawaveSync
                     [$id, $userId, $exp, $now, (int)($tb / 1073741824), $dev, (string)$rnId, $rnId, $vu, $su, $url, $now, $tb]
                 );
                 if (!empty($url)) $this->db->execute('UPDATE subscriptions SET subscription_url=? WHERE id=?', [$url, $id]);
-                $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,external_user_id,state,created_at,updated_at) VALUES(?,?,'demo',?,'active',?,?)", [Database::id(), $id, (string)$rnId, $now, $now]);
+                $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,external_user_id,state,created_at,updated_at) VALUES(?,?,'remnawave',?,'active',?,?)", [Database::id(), $id, (string)$rnId, $now, $now]);
                 $known[$rnId] = true;
                 $report['imported']++;
                 $report['details'][] = "id=$rnId imported";

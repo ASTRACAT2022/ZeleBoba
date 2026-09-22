@@ -46,7 +46,7 @@ final class LandingService
             $starts = $landing['discount_starts_at'];
             $ends = $landing['discount_ends_at'];
             if (($starts === null || (int)$starts <= $now) && ($ends === null || (int)$ends >= $now)) {
-                $price = (int)($price * (100 - $discount) / 100);
+                $price = intdiv($price * (100 - $discount), 100);
             }
         }
         return $price;

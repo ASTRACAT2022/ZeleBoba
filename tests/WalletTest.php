@@ -31,6 +31,30 @@ final class WalletTest extends TestCase
         self::assertCount(2,$history);
         self::assertSame(-19900,(int)$history[0]['amount_kopeks']);
         self::assertSame(50000,(int)$history[1]['amount_kopeks']);
+        self::assertSame(30100,$this->wallet->ledgerBalance($this->uid));
+        self::assertCount(4,$this->db->all('SELECT * FROM wallet_ledger_entries'));
+        self::assertSame(0,(int)$this->db->one('SELECT SUM(amount_kopeks) AS s FROM wallet_ledger_entries')['s']);
+        self::assertSame('ok',(new \App\Observability\ConsistencyChecker($this->db))->run()['status']);
+    }
+    public function testWalletExternalIdIsIdempotent():void
+    {
+        $this->wallet->credit($this->uid,50000,'balance_topup','Пополнение','demo','payment-1');
+        $this->wallet->credit($this->uid,50000,'balance_topup','Пополнение replay','demo','payment-1');
+        self::assertSame(50000,$this->wallet->balance($this->uid)['balance_kopeks']);
+        self::assertSame(50000,$this->wallet->ledgerBalance($this->uid));
+        self::assertCount(1,$this->db->all('SELECT * FROM transactions'));
+        self::assertCount(2,$this->db->all('SELECT * FROM wallet_ledger_entries'));
+
+        $this->expectException(BillingError::class);
+        $this->wallet->credit($this->uid,60000,'balance_topup','Wrong replay','demo','payment-1');
+    }
+    public function testWalletLedgerDetectsBalanceDrift():void
+    {
+        $this->wallet->credit($this->uid,50000,'balance_topup','Пополнение','demo','payment-2');
+        $this->db->execute('UPDATE users SET balance_kopeks=balance_kopeks+1 WHERE id=?',[$this->uid]);
+        $report=(new \App\Observability\ConsistencyChecker($this->db))->run();
+        self::assertSame('critical',$report['status']);
+        self::assertSame([$this->uid],$report['details']['wallet_balance_drift']);
     }
     public function testDebitFailsWithoutFunds():void
     {

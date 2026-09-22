@@ -18,9 +18,14 @@ final class ConsistencyChecker {
    $workflowDrift=$this->db->all("SELECT o.id FROM orders o LEFT JOIN workflows w ON w.workflow_type='subscription_fulfillment' AND w.entity_type='order' AND w.entity_id=o.id WHERE o.status='paid' AND o.paid_at IS NOT NULL AND o.created_at>=? AND w.id IS NULL",[$this->workflowCutover()]);
    $provisioningDrift=$this->db->all("SELECT p.id FROM provisioning_operations p LEFT JOIN subscriptions s ON s.id=p.subscription_id WHERE p.status='succeeded' AND (p.actual_state IS NULL OR s.id IS NULL)");
   }
-  $details=['critical_payment_drift'=>array_column($missing,'id'),'critical_creator_drift'=>array_column($creatorDrift,'id'),'paid_without_workflow'=>array_column($workflowDrift,'id'),'provisioning_without_actual_state'=>array_column($provisioningDrift,'id')];$status=($missing||$creatorDrift||$workflowDrift||$provisioningDrift)?'critical':'ok';
+  $walletLedgerDrift=[];$walletBalanceDrift=[];
+  if($this->tableExists('wallet_ledger_entries')) {
+   $walletLedgerDrift=$this->db->all("SELECT transaction_id AS id FROM wallet_ledger_entries GROUP BY transaction_id HAVING COUNT(id)<>2 OR COALESCE(SUM(amount_kopeks),0)<>0");
+   $walletBalanceDrift=$this->db->all("SELECT u.id FROM users u LEFT JOIN wallet_ledger_entries l ON l.account='wallet:user:' || u.id GROUP BY u.id,u.balance_kopeks HAVING COALESCE(SUM(l.amount_kopeks),0)<>u.balance_kopeks");
+  }
+  $details=['critical_payment_drift'=>array_column($missing,'id'),'critical_creator_drift'=>array_column($creatorDrift,'id'),'wallet_ledger_drift'=>array_column($walletLedgerDrift,'id'),'wallet_balance_drift'=>array_column($walletBalanceDrift,'id'),'paid_without_workflow'=>array_column($workflowDrift,'id'),'provisioning_without_actual_state'=>array_column($provisioningDrift,'id')];$status=($missing||$creatorDrift||$walletLedgerDrift||$walletBalanceDrift||$workflowDrift||$provisioningDrift)?'critical':'ok';
   $this->db->execute('INSERT INTO consistency_checks(id,kind,status,details,checked_at) VALUES(?,?,?,?,?)',[Database::id(),'money',$status,json_encode($details,JSON_THROW_ON_ERROR),time()]);
-  return ['status'=>$status,'count'=>count($missing)+count($creatorDrift)+count($workflowDrift)+count($provisioningDrift),'details'=>$details];
+  return ['status'=>$status,'count'=>count($missing)+count($creatorDrift)+count($walletLedgerDrift)+count($walletBalanceDrift)+count($workflowDrift)+count($provisioningDrift),'details'=>$details];
  }
  private function creatorTablesExist():bool {
   if($this->db->postgres())return (bool)($this->db->one("SELECT to_regclass('creator_commissions') name")['name']??null);

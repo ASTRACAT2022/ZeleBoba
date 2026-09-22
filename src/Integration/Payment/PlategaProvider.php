@@ -106,8 +106,8 @@ final class PlategaProvider extends AbstractProvider
         if ($amountMinor < 100) throw new BillingError('Platega: некорректная сумма заказа.');
         // Platega expects `amount` in RUB major units (rubles), not kopeks.
         // Sending kopeks here inflates the charge 100x (100 RUB became 10 000 RUB).
-        $amountRub = $amountMinor / 100;
-        if ($amountRub < 1) throw new BillingError('Platega: некорректная сумма заказа.');
+        if ($amountMinor < 100) throw new BillingError('Platega: некорректная сумма заказа.');
+        $amountRub = self::decimal($amountMinor);
         $res = $this->post('v2/transaction/process', [
             'paymentDetails' => [
                 'amount' => $amountRub,

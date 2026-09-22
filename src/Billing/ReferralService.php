@@ -50,7 +50,7 @@ final class ReferralService
         $referrer = $this->db->one('SELECT * FROM users WHERE id=?', [$user['referred_by_id']]);
         if (!$referrer) return;
         $percent = $this->commissionPercent($referrer, $firstPayment ?? (int)$user['has_made_first_topup'] === 0);
-        $commission = (int)($amountKopeks * $percent / 100);
+        $commission = intdiv($amountKopeks * $percent, 100);
         $minTopup = (int)($this->config['REFERRAL_MINIMUM_TOPUP_KOPEKS'] ?? 10000);
         $firstBonus = (int)($this->config['REFERRAL_FIRST_TOPUP_BONUS_KOPEKS'] ?? 10000);
         $inviterBonus = (int)($this->config['REFERRAL_INVITER_BONUS_KOPEKS'] ?? 10000);

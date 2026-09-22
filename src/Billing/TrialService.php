@@ -61,8 +61,9 @@ final class TrialService
                 [$newExpiry, $plan['id'], (int)$plan['traffic_bytes'] / 1073741824, (int)$plan['devices'], $now, $subscriptionId]
             );
             $this->db->execute('UPDATE users SET has_had_paid_subscription=1 WHERE id=?', [$userId]);
-            $this->db->execute('INSERT INTO subscription_conversions(id,user_id,converted_at,trial_duration_days,payment_method,first_payment_amount_kopeks,first_paid_period_days,created_at) VALUES(?,?,?,?,?,?,?,?)', [Database::id(), $userId, $now, (int)$sub['expires_at'] > 0 ? (int)round(((int)$sub['expires_at'] - (int)$sub['start_date']) / 86400) : null, $paymentMethod, $priceKopeks, (int)$plan['duration_days'], $now]);
-            $this->outbox->enqueue('subscription.extend', 'extend:'.$subscriptionId, ['subscription_id' => $subscriptionId]);
+            $conversionId = Database::id();
+            $this->db->execute('INSERT INTO subscription_conversions(id,user_id,converted_at,trial_duration_days,payment_method,first_payment_amount_kopeks,first_paid_period_days,created_at) VALUES(?,?,?,?,?,?,?,?)', [$conversionId, $userId, $now, (int)$sub['expires_at'] > 0 ? (int)round(((int)$sub['expires_at'] - (int)$sub['start_date']) / 86400) : null, $paymentMethod, $priceKopeks, (int)$plan['duration_days'], $now]);
+            $this->outbox->enqueue('subscription.extend', 'trial-convert:'.$conversionId, ['subscription_id' => $subscriptionId]);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $userId, 'trial.converted', $subscriptionId, $now]);
             return $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$subscriptionId]);
         });

@@ -87,4 +87,76 @@ final class RemnawaveSyncTest extends TestCase
         self::assertSame(0,$report['fixed']);
         self::assertSame('',(string)$this->db->one('SELECT remote_id FROM subscriptions')['remote_id']);
     }
+    public function testRunIncludesActiveSubscriptionWithoutOrder(): void
+    {
+        $now=time();
+        $id=Database::id();
+        $this->db->execute(
+            "INSERT INTO subscriptions(id,order_id,user_id,plan_id,status,expires_at,created_at,traffic_limit_gb,purchased_traffic_gb,device_limit,lifecycle_status,start_date,traffic_limit_bytes) VALUES(?,NULL,?,'p','active',?,?,?,?,?,'active',?,?)",
+            [$id,'u',$now+86400,$now,5,2,3,$now,7*1073741824]
+        );
+        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['response'=>[
+            'id'=>500,'username'=>'zb_'.$id,'status'=>'ACTIVE',
+            'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',$now+86400),
+            'trafficLimitBytes'=>7*1073741824,'hwidDeviceLimit'=>3,'subscriptionUrl'=>'https://sub.example/imported',
+        ]])));
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $sync=new RemnawaveSync($this->db,$p);
+        $report=$sync->run(10,true);
+        self::assertSame(1,$report['checked']);
+        self::assertSame(0,$report['fixed']);
+        self::assertSame(0,$report['missing']);
+    }
+    public function testImportMissingSkipsExistingRemoteId(): void
+    {
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['42','u']);
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute('UPDATE subscriptions SET remote_id=?,remnawave_id=NULL WHERE id=?',['777',$sub['id']]);
+        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['response'=>['users'=>[
+            ['id'=>777,'status'=>'ACTIVE','telegramId'=>'42','expireAt'=>'2030-01-01T00:00:00Z','trafficLimitBytes'=>0,'hwidDeviceLimit'=>3],
+        ],'total'=>1]])));
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $sync=new RemnawaveSync($this->db,$p);
+        $report=$sync->importMissing(200,true);
+        self::assertSame(1,$report['scanned']);
+        self::assertSame(0,$report['imported']);
+        self::assertSame(1,(int)$this->db->one('SELECT COUNT(*) AS c FROM subscriptions')['c']);
+    }
+    public function testImportMissingCreatesRemnawaveProvisioningAccount(): void
+    {
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['43','u']);
+        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['response'=>['users'=>[
+            ['id'=>888,'status'=>'ACTIVE','telegram_id'=>'43','expireAt'=>'2030-01-01T00:00:00Z','trafficLimitBytes'=>10*1073741824,'hwidDeviceLimit'=>2,'shortUuid'=>'short','subscriptionUrl'=>'https://sub.example/888','vlessUuid'=>'uuid'],
+        ],'total'=>1]])));
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $sync=new RemnawaveSync($this->db,$p);
+        $report=$sync->importMissing(200,true);
+        self::assertSame(1,$report['imported']);
+        $sub=$this->db->one('SELECT * FROM subscriptions WHERE remnawave_id=?',[888]);
+        self::assertNotNull($sub);
+        self::assertSame('888',(string)$sub['remote_id']);
+        self::assertSame('remnawave',$this->db->one('SELECT provider FROM provisioning_accounts WHERE subscription_id=?',[$sub['id']])['provider']);
+    }
+    public function testListActiveUsersPaginatesAllPages(): void
+    {
+        $requests=0;
+        $http=new MockHttpClient(function($method,$url)use(&$requests){
+            $requests++;
+            $parts=parse_url($url);
+            parse_str($parts['query'] ?? '', $query);
+            $page=(int)($query['page'] ?? 1);
+            $pageSize=(int)($query['pageSize'] ?? 200);
+            $start=($page-1)*$pageSize+1;
+            $end=min($start+$pageSize-1,250);
+            $users=[];
+            for($i=$start;$i<=$end;$i++){
+                $users[]=['id'=>$i,'status'=>'ACTIVE'];
+            }
+            return new MockResponse(json_encode(['response'=>['users'=>$users,'total'=>250]]));
+        });
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $users=$p->listActiveUsers(200);
+        self::assertCount(250,$users);
+        self::assertSame(2,$requests);
+    }
 }

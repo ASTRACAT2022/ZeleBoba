@@ -25,7 +25,7 @@ final class CircuitBreaker
     /** Should we attempt a call to $name right now? */
     public function allow(string $name): bool
     {
-        $b = $this->db->one('SELECT * FROM circuit_breakers WHERE name=? FOR UPDATE', [$name]);
+        $b = $this->db->one('SELECT * FROM circuit_breakers WHERE name=?'.$this->db->lock(), [$name]);
         if ($b === null) {
             $this->init($name);
             return true;

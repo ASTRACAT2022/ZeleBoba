@@ -22,7 +22,7 @@ final class CheckoutSnapshotTest extends TestCase
             self::assertSame('POST',$method);
             $body=json_decode($options['body'],true);
             self::assertSame((string)$order['id'],$body['orderId']);
-            self::assertSame(199.99,$body['paymentDetails']['amount']);
+            self::assertSame('199.99',$body['paymentDetails']['amount']);
             self::assertStringContainsString('original.example/orders/'.$order['id'],$body['return']);
             $payload=json_decode($body['payload'],true);
             self::assertSame($order['id'],$payload['order_id']);

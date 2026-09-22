@@ -54,12 +54,12 @@ final class ContestService
             $prize = $won ? $template['prize_value'] : null;
             $this->db->execute('INSERT INTO contest_attempts(id,round_id,user_id,won,prize_value,created_at) VALUES(?,?,?,?,?,?)', [Database::id(), $roundId, $userId, (int)$won, $prize, time()]);
             if ($won) {
-                $this->award($userId, $template, $prize);
+                $this->award($userId, $roundId, $template, $prize);
             }
             return ['won' => $won, 'prize' => $prize, 'already' => false];
         });
     }
-    private function award(string $userId, array $template, string $prize): void
+    private function award(string $userId, string $roundId, array $template, string $prize): void
     {
         $type = $template['prize_type'];
         $value = (int)$prize;
@@ -70,7 +70,7 @@ final class ContestService
             if ($sub) {
                 $base = max(time(), (int)$sub['expires_at']);
                 $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active' WHERE id=?", [$base + $value * 86400, $sub['id']]);
-                $this->outbox->enqueue('subscription.extend', 'extend:'.$sub['id'], ['subscription_id' => $sub['id']]);
+                $this->outbox->enqueue('subscription.extend', 'contest-extend:'.$roundId.':'.$userId.':'.$sub['id'], ['subscription_id' => $sub['id']]);
             }
         }
     }

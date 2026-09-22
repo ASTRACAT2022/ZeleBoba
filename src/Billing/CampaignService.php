@@ -50,7 +50,7 @@ final class CampaignService
             if ($sub) {
                 $base = max(time(), (int)$sub['expires_at']);
                 $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active' WHERE id=?", [$base + $days * 86400, $sub['id']]);
-                $this->outbox->enqueue('subscription.extend', 'extend:'.$sub['id'], ['subscription_id' => $sub['id']]);
+                $this->outbox->enqueue('subscription.extend', 'campaign-extend:'.$campaign['id'].':'.$sub['id'], ['subscription_id' => $sub['id']]);
             } else {
                 $plan = $this->db->one('SELECT * FROM plans WHERE id=?', [$campaign['plan_id']]);
                 $subId = Database::id();

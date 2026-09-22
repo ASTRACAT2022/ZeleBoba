@@ -14,7 +14,7 @@ final class TopupService
         if ($amountKopeks < 100 || $amountKopeks > 100000000) throw new BillingError('Сумма пополнения: от 1 до 1 000 000 ₽.');
         if (!preg_match('/^[a-zA-Z0-9:_-]{8,128}$/D', $key)) throw new BillingError('Некорректный ключ операции.');
         $effective = $provider !== null && $provider !== '' ? $provider : $this->provider;
-        if (!in_array($effective, ['demo','platega'], true)) throw new BillingError('Некорректный платёжный провайдер.');
+        if (!in_array($effective, ['demo','platega','wata'], true)) throw new BillingError('Некорректный платёжный провайдер.');
         if ($effective==='demo' && ($this->config['APP_ENV']??'dev')==='prod') throw new BillingError('Демоплатёж запрещён.');
         return $this->db->transaction(function () use ($userId, $amountKopeks, $key, $effective) {
             if (!$this->db->one('SELECT id FROM users WHERE id=? AND disabled=0' . $this->db->lock(), [$userId])) throw new BillingError('Аккаунт не найден.');

@@ -53,6 +53,9 @@ final class Database
             foreach (glob($directory.'/*.sql') as $path) {
                 if ($this->one('SELECT version FROM migrations WHERE version = ?', [basename($path)])) continue;
                 $sql = file_get_contents($path);
+                if ($sql === false) {
+                    throw new \RuntimeException('Unable to read migration: '.basename($path));
+                }
                 // SQLite cannot DROP/ADD constraints: strip PostgreSQL-only blocks.
                 if (!$pg) {
                     $sql = preg_replace('/-- \[PG\]\R.*?-- \[\/PG\]\R/s', '', $sql);
@@ -69,7 +72,9 @@ final class Database
                     $sql = preg_replace('/^GRANT .*;\s*$/m', '', $sql);
                     $sql = preg_replace('/^ALTER DEFAULT PRIVILEGES .*;\s*$/m', '', $sql);
                 }
-                $this->pdo->exec($sql);
+                if (trim($sql) !== '') {
+                    $this->pdo->exec($sql);
+                }
                 $this->execute('INSERT INTO migrations VALUES (?, ?)', [basename($path), time()]);
             }
         });

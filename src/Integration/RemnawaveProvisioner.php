@@ -98,6 +98,11 @@ final class RemnawaveProvisioner implements Provisioner
         if (!$id) return;
         $this->request('PATCH','/api/users',['id'=>(int)$id,'status'=>'DISABLED']);
     }
+    public function disableById(int $panelId): void
+    {
+        if ($panelId <= 0) return;
+        $this->request('PATCH','/api/users',['id'=>$panelId,'status'=>'DISABLED']);
+    }
     /**
      * List ACTIVE panel users page by page. Used to import subscriptions that
      * exist on the panel but are missing locally (legacy without order_id).
@@ -105,6 +110,7 @@ final class RemnawaveProvisioner implements Provisioner
      */
     public function listActiveUsers(int $pageSize = 200): array
     {
+        $pageSize = max(1, min($pageSize, 500));
         $out = []; $page = 1;
         while (true) {
             $r = $this->request('GET', '/api/users?page=' . $page . '&pageSize=' . $pageSize);
@@ -117,11 +123,13 @@ final class RemnawaveProvisioner implements Provisioner
             if (!is_array($data)) break;
             $users = $data['users'] ?? [];
             $total = (int)($data['total'] ?? 0);
+            if (empty($users)) break;
             foreach ($users as $u) {
                 if (($u['status'] ?? '') === 'ACTIVE') $out[] = $u;
             }
+            if ($total > 0 && $page * $pageSize >= $total) break;
+            if ($total <= 0 && count($users) < $pageSize) break;
             $page++;
-            if ($page * $pageSize >= max($total, count($users)) || empty($users)) break;
             if ($page > 50) break; // hard cap
         }
         return $out;

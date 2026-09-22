@@ -13,7 +13,7 @@ final class OperationsIntelligence
         if ($at < 1 || $at > time()) throw new BillingError('Можно исследовать только прошедший момент времени.');
         $user=$this->db->one('SELECT id,email,telegram_id,created_at FROM users WHERE id=?',[$userId]);
         if(!$user) throw new BillingError('Пользователь не найден.');
-        $balance=$this->db->one('SELECT COALESCE(SUM(amount_kopeks),0) amount FROM transactions WHERE user_id=? AND created_at<=?',[$userId,$at]);
+        $balance=$this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) amount FROM wallet_ledger_entries WHERE account=? AND created_at<=?",['wallet:user:'.$userId,$at]);
         $subs=$this->db->all("SELECT s.*,COALESCE(pv.name,o.plan_name,p.name) plan_name,pv.version_number,pa.state provisioning_state,pa.last_synced_at,pa.last_error FROM subscriptions s LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id LEFT JOIN plans p ON p.id=s.plan_id LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN provisioning_accounts pa ON pa.subscription_id=s.id WHERE s.user_id=? AND s.created_at<=? ORDER BY s.created_at DESC",[$userId,$at]);
         foreach($subs as &$sub){$sub['historical_status']=(int)$sub['expires_at']>$at ? ($sub['lifecycle_status']??$sub['status']) : 'expired';}
         $payments=$this->db->all('SELECT provider,provider_payment_id,amount_minor,status,paid_at,created_at FROM payments WHERE user_id=? AND created_at<=? ORDER BY created_at DESC LIMIT 10',[$userId,$at]);
@@ -25,7 +25,7 @@ final class OperationsIntelligence
     {
         $user=$this->db->one('SELECT balance_kopeks FROM users WHERE id=?',[$userId]); $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
         if(!$user||!$plan) throw new BillingError('Пользователь или активный тариф не найден.');
-        $promo=max(0,min(99,$promoPercent)); $charge=(int)round((int)$plan['price_minor']*(100-$promo)/100);
+        $promo=max(0,min(99,$promoPercent)); $charge=intdiv((int)$plan['price_minor']*(100-$promo),100);
         $sub=$this->db->one("SELECT * FROM subscriptions WHERE user_id=? ORDER BY expires_at DESC LIMIT 1",[$userId]);
         $base=max(time(),(int)($sub['expires_at']??time())); $after=$base+(int)$plan['duration_days']*86400;
         return ['action'=>$action,'plan'=>$plan,'promo_percent'=>$promo,'charge_minor'=>$charge,'balance_minor'=>(int)$user['balance_kopeks'],'balance_after_minor'=>(int)$user['balance_kopeks']-$charge,'sufficient'=>(int)$user['balance_kopeks']>=$charge,'subscription_before'=>$sub,'expires_after'=>$after,'will_change'=>(int)$user['balance_kopeks']>=$charge];

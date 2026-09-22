@@ -62,6 +62,7 @@ final class SubscriptionMergeService
         ], $corr);
 
         try {
+            $local = $this->db->transaction(function () use ($ops, $op, $userId, $sourceId, $targetId): array {
             // Fixed lock order (by id) avoids deadlocks when two merges race.
             $a = min($sourceId, $targetId);
             $b = max($sourceId, $targetId);
@@ -73,6 +74,7 @@ final class SubscriptionMergeService
             }
             $source = $rowA['id'] === $sourceId ? $rowA : $rowB;
             $target = $rowA['id'] === $targetId ? $rowA : $rowB;
+            $sourcePanelId = (int)($source['remnawave_id'] ?? 0);
 
             $this->assertMergeable($source, $sourceId, $userId, 'исходная');
             $this->assertMergeable($target, $targetId, $userId, 'целевая');
@@ -146,6 +148,11 @@ final class SubscriptionMergeService
                                 'days' => $remainingDays, 'expiry' => $newExpiry]]);
 
             $merged = $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$targetId]);
+            if (!$merged) {
+                throw new BillingError('Не удалось прочитать объединённую подписку.');
+            }
+            return ['merged' => $merged, 'source_panel_id' => $sourcePanelId];
+            });
         } catch (\Throwable $e) {
             if (!($op['existing'] ?? false)) $ops->fail($op['id'], $e);
             throw $e;
@@ -157,8 +164,8 @@ final class SubscriptionMergeService
         // correct merged state; the Reconciler re-runs provisioning recovery,
         // and the deterministic zb_<target> username makes this update safe.
         $this->syncPanel($targetId);
-        $this->disableSourceOnPanel($sourceId);
-        return $merged;
+        $this->disableSourceOnPanel($sourceId, (int)$local['source_panel_id']);
+        return $local['merged'];
     }
 
     private function assertMergeable(array $sub, string $otherId, string $userId, string $label): void
@@ -207,10 +214,14 @@ final class SubscriptionMergeService
         }
     }
 
-    private function disableSourceOnPanel(string $sourceId): void
+    private function disableSourceOnPanel(string $sourceId, int $panelId = 0): void
     {
         if (!$this->provisioner) return;
         try {
+            if ($panelId > 0 && method_exists($this->provisioner, 'disableById')) {
+                $this->provisioner->disableById($panelId);
+                return;
+            }
             if (method_exists($this->provisioner, 'disable')) {
                 $this->provisioner->disable('zb_'.$sourceId);
             }

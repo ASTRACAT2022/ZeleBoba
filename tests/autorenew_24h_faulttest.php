@@ -26,7 +26,7 @@ $subId=Database::id();
 $db->execute("INSERT INTO subscriptions(id,order_id,user_id,plan_id,status,expires_at,created_at,traffic_limit_gb,device_limit,lifecycle_status,starts_at,traffic_limit_bytes,auto_renew,renew_plan_id,renew_price_minor,renew_at,renew_fail_count,updated_at) VALUES(?,?,?,?,'active',?,?,?,?,'active',?,?,1,?,?,?,0,?)",
   [$subId,$origOrderId,$uid,$plan['id'],$now+7200,$now-86400,10,0,$now-86400,0,$plan['id'],$price,$now-50,$now]);
 
-echo "tariff: ".$plan['name']." price=".$plan['price_minor']." day=${price} period=".$plan['duration_days']."д squad=".$plan['squad_uuid']."\n";
+echo "tariff: ".$plan['name']." price=".$plan['price_minor']." day={$price} period=".$plan['duration_days']."д squad=".$plan['squad_uuid']."\n";
 $before=$db->one('SELECT expires_at,renew_order_id FROM subscriptions WHERE id=?',[$subId]);
 $r1=$c->billing->autoRenewFromBalance($subId);
 $balAfter1=$db->one('SELECT balance_kopeks FROM users WHERE id=?',[$uid])['balance_kopeks'];

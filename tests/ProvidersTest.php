@@ -57,7 +57,11 @@ final class ProvidersTest extends TestCase
         $config=['PLATEGA_ENABLED'=>'1','PLATEGA_MERCHANT_ID'=>'shop','PLATEGA_SECRET'=>'secret','APP_ENV'=>'test','APP_URL'=>'http://localhost'];
         $http=new MockHttpClient(function($method,$url,$options)use(&$calls,&$order){
             $calls++;
-            if ($method==='POST') return new MockResponse(json_encode(['transactionId'=>'pay-1','status'=>'PENDING','url'=>'https://pay.platega.io/p/abc','amount'=>199.00]));
+            if ($method==='POST') {
+                $body=json_decode((string)($options['body'] ?? ''),true);
+                self::assertSame('199.00',$body['paymentDetails']['amount'] ?? null);
+                return new MockResponse(json_encode(['transactionId'=>'pay-1','status'=>'PENDING','url'=>'https://pay.platega.io/p/abc','amount'=>199.00]));
+            }
             // GET /transaction/{id} returns the authoritative status.
             return new MockResponse(json_encode(['id'=>'pay-1','transactionId'=>'pay-1','status'=>'CONFIRMED','paymentDetails'=>['amount'=>216.91,'currency'=>'RUB'],'comission'=>17.91]));
         });
@@ -76,7 +80,11 @@ final class ProvidersTest extends TestCase
     {
         $config=['PLATEGA_ENABLED'=>'1','PLATEGA_MERCHANT_ID'=>'shop','PLATEGA_SECRET'=>'secret','APP_ENV'=>'test','APP_URL'=>'http://localhost'];
         $http=new MockHttpClient(function($method,$url,$options){
-            if ($method==='POST') return new MockResponse(json_encode(['transactionId'=>'top-1','status'=>'PENDING','url'=>'https://pay.platega.io/p/top','amount'=>500.00]));
+            if ($method==='POST') {
+                $body=json_decode((string)($options['body'] ?? ''),true);
+                self::assertSame('500.00',$body['paymentDetails']['amount'] ?? null);
+                return new MockResponse(json_encode(['transactionId'=>'top-1','status'=>'PENDING','url'=>'https://pay.platega.io/p/top','amount'=>500.00]));
+            }
             return new MockResponse(json_encode(['id'=>'top-1','transactionId'=>'top-1','status'=>'CONFIRMED','paymentDetails'=>['amount'=>545.00,'currency'=>'RUB'],'comission'=>45.00]));
         });
         $r=$this->registry($config,$http);
