@@ -1,0 +1,25 @@
+<section class="page-title">
+  <div>
+    <p class="eyebrow">Настройки</p>
+    <h1>Аккаунт и окружение</h1>
+    <p>Текущая конфигурация Ruby-кабинета и состояние сессии.</p>
+  </div>
+</section>
+
+<section class="grid settings-grid">
+  <article class="settings-tile">
+    <h2>Профиль</h2>
+    <p><%= h(user["email"] || user["telegram_id"]) %></p>
+    <p>Роль: <strong><%= h(user["role"]) %></strong></p>
+  </article>
+  <article class="settings-tile">
+    <h2>Платежи</h2>
+    <p>Драйвер: <strong><%= h(config["PAYMENT_DRIVER"]) %></strong></p>
+    <p>Покупки: <strong><%= config["PURCHASES_ENABLED"] == "1" ? "включены" : "выключены" %></strong></p>
+  </article>
+  <article class="settings-tile">
+    <h2>Сессии</h2>
+    <p>Активных сессий: <strong><%= session_count %></strong></p>
+    <p>2FA: <strong><%= user["mfa_enabled"].to_i == 1 ? "включена" : "не настроена" %></strong></p>
+  </article>
+</section>

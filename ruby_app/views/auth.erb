@@ -1,0 +1,56 @@
+<div class="auth-shell">
+  <div class="auth-brand">
+    <span class="brand-mark"><img src="/branding/zeleboba-logo.png" alt=""></span>
+    <span><%= h(app_container.config["SITE_NAME"]) %></span>
+  </div>
+  <section class="auth-panel">
+    <div class="auth-card">
+      <p class="eyebrow"><%= mode == "register" ? "Новый кабинет" : "Безопасный вход" %></p>
+      <h1><%= mode == "register" ? "Создайте рабочее пространство" : "Войдите в биллинг" %></h1>
+      <p><%= mode == "register" ? "Кабинет для подписок, платежей, баланса и выдачи доступа." : "Управляйте подписками, заказами и балансом из единого интерфейса." %></p>
+      <% if error %><p class="error"><%= h(error) %></p><% end %>
+      <% if mode == "login" && telegram_enabled? %>
+        <form class="auth-form" method="post" action="/telegram/start">
+          <input type="hidden" name="_csrf" value="<%= h(csrf_token) %>">
+          <button type="submit" class="telegram-button">Войти через Telegram</button>
+        </form>
+        <div class="auth-divider">или по электронной почте</div>
+      <% end %>
+      <form class="auth-form" method="post" action="<%= mode == "register" ? "/register" : "/login" %>">
+        <input type="hidden" name="_csrf" value="<%= h(csrf_token) %>">
+        <label class="field">
+          <span>Email</span>
+          <input class="input" required type="email" name="email" placeholder="owner@example.org">
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input class="input" required type="password" name="password" placeholder="Минимум 12 символов">
+        </label>
+        <button type="submit"><%= mode == "register" ? "Создать аккаунт" : "Войти" %></button>
+      </form>
+      <p>
+        <% if mode == "register" %>
+          Уже есть аккаунт? <a href="/login">Войти</a>
+        <% else %>
+          Нет аккаунта? <a href="/register">Зарегистрироваться</a>
+        <% end %>
+      </p>
+    </div>
+  </section>
+  <aside class="auth-aside">
+    <div class="product-preview">
+      <div class="preview-topbar">
+        <span>Subscription operations</span>
+        <span>Live ledger: balanced</span>
+      </div>
+      <div class="preview-body">
+        <div class="preview-grid">
+          <div class="preview-card"><span class="hint">MRR</span><strong>159 900 ₽</strong></div>
+          <div class="preview-card"><span class="hint">Active subs</span><strong>3 642</strong></div>
+          <div class="preview-card"><span class="hint">Drift</span><strong>0 ₽</strong></div>
+        </div>
+        <div class="preview-flow"></div>
+      </div>
+    </div>
+  </aside>
+</div>

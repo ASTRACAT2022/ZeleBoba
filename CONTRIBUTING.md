@@ -1,46 +1,22 @@
-# Участие в разработке ZeleBoba
+# Contributing
 
-Спасибо, что хотите сделать ZeleBoba надёжнее. Это **система, работающая с деньгами**: изменения в платёжном или биллинговом пути имеют реальные последствия, поэтому мы обкладываем их той же строгостью, что и платёжная платформа.
+ZeleBoba processes payments and subscription rights. Changes to billing,
+payments, provisioning, or authentication must include focused tests.
 
-## Как внести вклад
-
-1. **Сначала откройте issue** по всему, что касается платежей, зачисления, provisioning или безопасности. Обсудите подход до написания кода.
-2. Сделайте форк репозитория.
-3. Создайте ветку: `fix/<краткое-описание>` или `feat/<краткое-описание>`.
-4. Напишите ваше изменение вместе с тестами.
-5. Откройте pull request на `main`.
-
-## Стандарты кода
-
-- **PHP 8.4**, `declare(strict_types=1)` в каждом файле.
-- **Conventional commits**: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`.
-- **Никаких секретов, никогда** — не коммитьте ключи, `.env`, cookies, токены панели или URL подписок. `.gitignore` покрывает известные; если нашли новый секрет-паттерн — добавьте его туда.
-- **Денежные пути транзакционны.** Любое изменение в `BillingService::settle()`, `TopupService::settle()`, `PaymentService::verify()` или `DurableWorkflow` должно сохранять семантику точно-однократного зачисления.
-
-## Тестирование
+## Local checks
 
 ```sh
-composer install
-cp .env.example .env
-php bin/console db:migrate          # требует БД
-composer test                        # PHPUnit
-php bin/console biling:audit
+bundle install
+ruby -Itest test/ruby_port_test.rb
+scripts/e2e_ruby.sh
 ```
 
-Для **fault-injection тестов** (безопасность денег) укажите отдельную БД PostgreSQL:
+Use a separate PostgreSQL database for any production-like integration test.
+Do not commit secrets, cookies, payment identifiers, or customer data.
 
-```sh
-TEST_POSTGRES_DSN=... TEST_POSTGRES_USER=... TEST_POSTGRES_PASSWORD=*** php tests/worker_event_faulttest.php
-```
+## Pull requests
 
-Каждое изменение платёжного пути **обязано** добавить или обновить fault-тест, доказывающий, что инвариант держится (например, нет двойного зачисления при конкурентных webhook).
-
-## Чек-лист pull request
-
-- [ ] `composer test` проходит
-- [ ] `composer validate --strict` проходит
-- [ ] `composer audit` без advisories
-- [ ] `php -l` проходит на каждом изменённом файле
-- [ ] Fault-тест добавлен/обновлён для изменений платёжного пути
-- [ ] CHANGELOG обновлён в разделе [Unreleased]
-- [ ] В диффе нет секретов или операционных артефактов
+- Keep changes scoped to the intended behavior.
+- Add or update tests for billing invariants and idempotency.
+- Run the Ruby unit suite and E2E scenario.
+- Document operational changes in the pull request.

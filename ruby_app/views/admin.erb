@@ -1,0 +1,35 @@
+<section class="page-title">
+  <div>
+    <p class="eyebrow">Admin</p>
+    <h1>Операционный обзор</h1>
+    <p>Базовая админ-поверхность Ruby-порта.</p>
+  </div>
+</section>
+
+<section class="grid metrics">
+  <div class="metric"><p>Пользователи</p><strong><%= users_count %></strong></div>
+  <div class="metric"><p>Заказы</p><strong><%= orders_count %></strong></div>
+  <div class="metric"><p>Подписки</p><strong><%= subscriptions_count %></strong></div>
+  <div class="metric"><p>Outbox</p><strong><%= outbox_pending %></strong></div>
+</section>
+
+<section class="panel" style="margin-top:16px">
+  <div class="panel-header"><h2>Последние заказы</h2></div>
+  <% if latest_orders.empty? %>
+    <div class="empty-state"><h2>Заказов нет</h2></div>
+  <% else %>
+    <table class="data-table">
+      <thead><tr><th>ID</th><th>План</th><th>Статус</th><th>Сумма</th></tr></thead>
+      <tbody>
+        <% latest_orders.each do |order| %>
+          <tr>
+            <td><%= short_id(order["id"]) %></td>
+            <td><%= h(order["plan_name"]) %></td>
+            <td><span class="status <%= status_class(order["status"]) %>"><%= status_label(order["status"]) %></span></td>
+            <td><%= rub(order["price_minor"]) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>

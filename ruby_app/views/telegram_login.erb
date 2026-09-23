@@ -1,0 +1,49 @@
+<div class="auth-shell">
+  <div class="auth-brand">
+    <span class="brand-mark"><img src="/branding/zeleboba-logo.png" alt=""></span>
+    <span><%= h(app_container.config["SITE_NAME"]) %></span>
+  </div>
+  <section class="auth-panel">
+    <div class="auth-card">
+      <p class="eyebrow">Telegram login</p>
+      <h1>Подтвердите вход в боте</h1>
+      <p>Откройте deep-link, нажмите Start в Telegram, затем вернитесь сюда.</p>
+      <% if error %><p class="error"><%= h(error) %></p><% end %>
+      <a class="button" href="<%= h(deep_link) %>">Открыть Telegram</a>
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-body detail-list">
+          <div class="detail-row"><span>Бот</span><strong>@<%= h(telegram_bot_username) %></strong></div>
+          <div class="detail-row"><span>Статус</span><strong>Ожидает подтверждения</strong></div>
+        </div>
+      </div>
+      <% if app_container.config["APP_ENV"] != "prod" %>
+        <form class="auth-form" method="post" action="/telegram/dev-approve">
+          <input type="hidden" name="_csrf" value="<%= h(csrf_token) %>">
+          <input type="hidden" name="token" value="<%= h(token) %>">
+          <label class="field">
+            <span>Dev Telegram ID</span>
+            <input class="input" name="telegram_id" value="100001">
+          </label>
+          <button type="submit" class="secondary">Симулировать подтверждение</button>
+        </form>
+      <% end %>
+      <form class="auth-form" method="get" action="/telegram/finish">
+        <button type="submit">Я подтвердил, войти</button>
+      </form>
+      <p><a href="/login">Войти другим способом</a></p>
+    </div>
+  </section>
+  <aside class="auth-aside">
+    <div class="product-preview">
+      <div class="preview-topbar"><span>Telegram auth</span><span>5 minute challenge</span></div>
+      <div class="preview-body">
+        <div class="preview-grid">
+          <div class="preview-card"><span class="hint">Step 1</span><strong>Link</strong></div>
+          <div class="preview-card"><span class="hint">Step 2</span><strong>Approve</strong></div>
+          <div class="preview-card"><span class="hint">Step 3</span><strong>Session</strong></div>
+        </div>
+        <div class="preview-flow"></div>
+      </div>
+    </div>
+  </aside>
+</div>

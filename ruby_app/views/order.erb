@@ -1,0 +1,39 @@
+<section class="page-title">
+  <div>
+    <p class="eyebrow">Заказ <%= short_id(order["id"]) %></p>
+    <h1><%= h(order["plan_name"]) %></h1>
+    <p>Создан <%= date_time(order["created_at"]) %></p>
+  </div>
+  <span class="status <%= status_class(order["status"]) %>"><%= status_label(order["status"]) %></span>
+</section>
+
+<section class="grid two-col">
+  <div class="panel">
+    <div class="panel-header"><h2>Детали заказа</h2></div>
+    <div class="panel-body detail-list">
+      <div class="detail-row"><span>Стоимость</span><strong><%= rub(order["price_minor"]) %></strong></div>
+      <div class="detail-row"><span>Провайдер</span><strong><%= h(order["provider"]) %></strong></div>
+      <div class="detail-row"><span>Срок</span><strong><%= h(order["duration_days"]) %> дн.</strong></div>
+      <div class="detail-row"><span>Устройств</span><strong><%= h(order["devices"]) %></strong></div>
+      <div class="detail-row"><span>ID заказа</span><strong><%= h(order["id"]) %></strong></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header"><h2>Следующее действие</h2></div>
+    <div class="panel-body">
+      <% if order["status"] == "pending" && order["provider"] == "demo" %>
+        <p class="hint">Демо-провайдер завершит оплату локально и сразу создаст подписку.</p>
+        <form method="post" action="/orders/<%= h(order["id"]) %>/demo-pay">
+          <input type="hidden" name="_csrf" value="<%= h(csrf_token) %>">
+          <button type="submit">Оплатить демо</button>
+        </form>
+      <% elsif subscription %>
+        <p>Подписка активна до <strong><%= date_time(subscription["expires_at"]) %></strong>.</p>
+        <p class="hint">Осталось: <%= days_left(subscription["expires_at"]) %></p>
+      <% else %>
+        <p class="hint">Дополнительных действий сейчас нет.</p>
+      <% end %>
+    </div>
+  </div>
+</section>

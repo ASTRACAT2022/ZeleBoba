@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+
+require_relative "../ruby_app/zeleboba"
+
+options = { once: false, poll_interval: 60.0 }
+OptionParser.new do |parser|
+  parser.banner = "Usage: bin/scheduler-ruby [--once] [--poll-interval SECONDS]"
+  parser.on("--once", "Run one scheduling pass") { options[:once] = true }
+  parser.on("--poll-interval SECONDS", Float, "Interval between passes, default: 60 seconds") do |value|
+    options[:poll_interval] = value.clamp(5.0, 3600.0)
+  end
+end.parse!
+
+scheduler = Zeleboba::Container.new.scheduler
+if options[:once]
+  scheduler.run_once
+  exit 0
+end
+
+stopping = false
+Signal.trap("TERM") { stopping = true }
+Signal.trap("INT") { stopping = true }
+until stopping
+  begin
+    scheduler.run_once
+    sleep(options[:poll_interval]) unless stopping
+  rescue StandardError => e
+    warn "scheduler error: #{e.class}: #{e.message}"
+    sleep(options[:poll_interval])
+  end
+end

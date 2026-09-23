@@ -1,1 +1,0 @@
-{% extends 'base.html.twig' %}{% block title %}Не удалось выполнить действие{% endblock %}{% block content %}<section class="panel detail error"><p class="eyebrow">ПРОВЕРЬТЕ ЗАПРОС</p><h1>Нужно немного внимания.</h1><p>{{ message }}</p><a class="button" href="{{ user ? '/' : '/login' }}">{{ user ? 'В кабинет' : 'Ко входу' }} →</a></section>{% endblock %}

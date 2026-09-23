@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "io/console"
+require "optparse"
+
+require_relative "../ruby_app/zeleboba"
+
+ROOT = File.expand_path("..", __dir__)
+
+def container
+  @container ||= Zeleboba::Container.new
+end
+
+def usage
+  warn <<~TEXT
+    Usage: bin/console-ruby <command>
+
+      db:migrate                 Apply SQL migrations
+      db:seed                    Create example plans
+      app:install EMAIL          Create initial owner
+      app:health                 Check migrated database
+      app:readiness              Print production readiness checks
+      telegram:webhook           Register the Telegram webhook
+  TEXT
+end
+
+command = ARGV.shift
+
+case command
+when "db:migrate"
+  container.db.migrate(File.join(ROOT, "migrations"))
+  puts "Migrations applied."
+when "db:seed"
+  plans = [
+    ["basic", "Старт", 19_900, 30, 100 * 1_073_741_824, 3],
+    ["plus", "Свобода", 49_900, 90, 0, 5],
+    ["max", "Горизонт", 159_900, 365, 0, 10]
+  ]
+  plans.each do |id, name, price, days, traffic, devices|
+    container.db.execute(
+      "INSERT INTO plans(id,name,price_minor,currency,duration_days,traffic_bytes,devices,active) VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(id) DO NOTHING",
+      [id, name, price, "RUB", days, traffic, devices]
+    )
+  end
+  puts "Plans seeded."
+when "app:install"
+  email = ARGV.shift
+  unless email
+    usage
+    exit 64
+  end
+  if container.db.one("SELECT id FROM users WHERE role='admin' LIMIT 1")
+    warn "An administrator already exists."
+    exit 1
+  end
+  print "Initial administrator password (12+ characters): "
+  password = STDIN.noecho(&:gets).to_s.chomp
+  puts
+  uid = container.auth.register(email, password)
+  container.db.execute("UPDATE users SET role='admin' WHERE id=?", [uid])
+  container.billing.audit("cli", "owner.created", uid)
+  puts "Owner created."
+when "app:health"
+  missing = Dir[File.join(ROOT, "migrations", "*.sql")].reject do |file|
+    container.db.one("SELECT version FROM migrations WHERE version=?", [File.basename(file)])
+  end
+  if missing.empty?
+    puts "healthy"
+  else
+    warn "missing migrations: #{missing.map { |path| File.basename(path) }.join(", ")}"
+    exit 1
+  end
+when "app:readiness"
+  checks = Zeleboba::Settings::Readiness.report(container)
+  checks.each { |check| puts "#{check["ok"] ? "OK" : "FAIL"}  #{check["name"]}: #{check["detail"]}" }
+  exit 1 unless checks.all? { |check| check["ok"] }
+when "telegram:webhook"
+  secret = container.config["TELEGRAM_WEBHOOK_SECRET"].to_s
+  url = "#{container.config.fetch("APP_URL").to_s.sub(%r{/+\z}, "")}/webhooks/telegram"
+  container.telegram_client.set_webhook(url: url, secret_token: secret)
+  puts "Telegram webhook registered: #{url}"
+else
+  usage
+  exit 64
+end

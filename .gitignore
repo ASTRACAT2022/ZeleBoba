@@ -5,11 +5,9 @@
 /scripts/__pycache__/
 
 # ---- Dependencies & build ----
-/vendor/
 /node_modules/
 /var/*
 !/var/.gitkeep
-/.phpunit.cache/
 /package-lock.json
 /package.json
 
@@ -91,10 +89,6 @@ Thumbs.db
 /astracat_fix.sh
 /test_delete.sh
 /freeze_writes.sh
-/fkmicro.php
-/fkprobe*.php
-/migrate_stealthnet.php
-/scripts/fk_*.php
 /scripts/reconcile_pending.*
 /scripts/backup_pg*.sh
 /scripts/backup_sqlite.sh
