@@ -15,10 +15,13 @@ final class RemnawaveSync
     public function run(int $limit=100, bool $fix=true): array
     {
         $report=['checked'=>0,'fixed'=>0,'disabled'=>0,'reprovisioned'=>0,'missing'=>0,'errors'=>0,'details'=>[]];
+        // NOTE: do NOT compute (traffic_limit_gb+purchased_traffic_gb)*1073741824 in SQL:
+        // big plans overflow PostgreSQL int4 (e.g. 268200 GB -> integer out of range).
+        // Compute traffic bytes in PHP below (same approach as Worker::subscription()).
         $subs=$this->db->all(
             "SELECT s.*,
-                    COALESCE(o.traffic_bytes,s.traffic_limit_bytes,CASE WHEN s.traffic_limit_gb=0 THEN 0 ELSE (s.traffic_limit_gb+s.purchased_traffic_gb)*1073741824 END) AS traffic_bytes,
-                    COALESCE(o.devices,s.device_limit,1) AS devices,
+                    o.traffic_bytes AS order_traffic_bytes,
+                    o.devices AS order_devices,
                     COALESCE(o.squad_uuid,p.squad_uuid,'') AS squad_uuid
                FROM subscriptions s
                LEFT JOIN orders o ON o.id=s.order_id
@@ -28,6 +31,20 @@ final class RemnawaveSync
               LIMIT ?",
             [$limit]
         );
+        foreach($subs as &$s){
+            // devices: order overrides subscription device_limit; default 1
+            $s['devices']=(int)($s['order_devices'] ?? $s['device_limit'] ?? 1);
+            if ($s['devices']<=0) $s['devices']=1;
+            // traffic bytes: order.traffic_bytes > subscription.traffic_limit_bytes > computed GB
+            $t=(int)($s['order_traffic_bytes'] ?? $s['traffic_limit_bytes'] ?? 0);
+            if ($t<=0) {
+                $t=(int)$s['traffic_limit_gb']+ (int)$s['purchased_traffic_gb'];
+                $t = (int)$s['traffic_limit_gb']===0 ? 0 : $t*1073741824;
+            }
+            $s['traffic_bytes']=$t;
+            unset($s['order_traffic_bytes'],$s['order_devices']);
+        }
+        unset($s);
         foreach($subs as $s){
             $report['checked']++;
             $username='zb_'.$s['id'];
