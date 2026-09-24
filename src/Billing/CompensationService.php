@@ -234,4 +234,25 @@ final class CompensationService
         unset($row);
         return $rows;
     }
+
+    /** Read-only panel check. A completed outbox row alone is not proof of delivery. */
+    public function auditPage(string $compensationId, int $page, \App\Observability\InvestigationService $investigations): array
+    {
+        $campaign=$this->db->one('SELECT * FROM compensations WHERE id=?',[$compensationId]);
+        if (!$campaign) throw new BillingError('Компенсация не найдена.');
+        $page=max(1,$page);
+        $size=10;
+        $prefix='comp-days:'.$compensationId.':%';
+        $total=(int)($this->db->one("SELECT COUNT(*) AS n FROM outbox WHERE topic IN ('subscription.extend','subscription.provision') AND dedup_key LIKE ?",[$prefix])['n']??0);
+        $jobs=$this->db->all("SELECT id,dedup_key,status,last_error FROM outbox WHERE topic IN ('subscription.extend','subscription.provision') AND dedup_key LIKE ? ORDER BY CASE WHEN last_error IS NULL THEN 1 ELSE 0 END,dedup_key LIMIT ? OFFSET ?",[$prefix,$size,($page-1)*$size]);
+        $rows=[];$blocked=false;
+        foreach($jobs as $job){
+            if(!preg_match('/^comp-days:[0-9a-f]+:([0-9a-f]+)$/iD',(string)$job['dedup_key'],$match))continue;
+            $comparison=$investigations->expectedActual($match[1]);
+            $state=$comparison===null?'missing_local':(($comparison['error']??null)!==null?($comparison['error']==='Пользователь не найден в Remnawave'?'missing_panel':'unavailable'):(array_reduce($comparison['rows'],fn(bool $ok,array $row):bool=>$ok&&$row['ok'],true)?'matched':'drift'));
+            $rows[]=['subscription_id'=>$match[1],'job_status'=>$job['status'],'state'=>$state,'comparison'=>$comparison];
+            if($state==='unavailable'){$blocked=true;break;}
+        }
+        return ['campaign'=>$campaign,'rows'=>$rows,'page'=>$page,'total'=>$total,'page_size'=>$size,'blocked'=>$blocked];
+    }
 }

@@ -115,6 +115,7 @@ trait AdminActions
             $this->app->broadcasts->create($input->get('target_type',''),$input->get('message_text',''),$uid,$this->user['email']??'admin',$input->get('category','system'));return new RedirectResponse('/admin/broadcasts',303);
         }
         if($handler==='admin-compensations')return $this->render('admin-compensations',['compensations'=>$this->app->compensations->list(),'plans'=>$db->all('SELECT id,name FROM plans WHERE active=1 ORDER BY name'),'request_key'=>Database::id()]);
+        if($handler==='admin-compensation-audit')return $this->render('admin-compensation-audit',$this->app->compensations->auditPage($id,max(1,$this->request->query->getInt('page',1)),$this->app->investigations));
         if($handler==='admin-compensation-create'){
             $kind=$input->get('kind','');
             $value=$input->getInt('value',0);

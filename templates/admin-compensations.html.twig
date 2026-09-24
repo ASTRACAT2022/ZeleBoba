@@ -56,9 +56,9 @@
         <td>{{ c.skipped_count }}</td>
         <td>{{ c.failed_count }}</td>
         <td>{% if c.kind == 'balance' %}—{% else %}{{ c.sync_pending_count }} в очереди · {{ c.sync_failed_count }} ошибок{% endif %}</td>
-        <td><span class="badge {{ c.status == 'completed' and c.sync_failed_count == 0 and c.sync_pending_count == 0 ? 'fulfilled' : 'pending' }}">{{ c.queue_error or c.failed_count > 0 or c.sync_failed_count > 0 ? 'Нужна проверка' : (c.status == 'completed' and c.sync_pending_count == 0 ? (c.skipped_count > 0 ? 'С пропусками' : 'Завершена') : 'В работе') }}</span></td>
+        <td><span class="badge {{ c.status == 'completed' and c.sync_failed_count == 0 and c.sync_pending_count == 0 ? 'fulfilled' : 'pending' }}">{{ c.queue_error or c.failed_count > 0 or c.sync_failed_count > 0 ? 'Нужна проверка' : (c.status == 'completed' and c.sync_pending_count == 0 ? (c.kind == 'days' ? 'Начислена в Billing' : (c.skipped_count > 0 ? 'С пропусками' : 'Завершена')) : 'В работе') }}</span></td>
         <td>{{ c.created_at|date('d.m.Y H:i') }}</td>
-        <td>{% if c.failed_count > 0 or c.queue_error or c.sync_failed_count > 0 %}<form method="post" action="/admin/compensations/{{ c.id }}/retry"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button secondary small">Повторить ошибки</button></form>{% endif %}</td>
+        <td>{% if c.kind == 'days' %}<a href="/admin/compensations/{{ c.id }}/audit" class="button secondary small">Сверить с Remnawave</a>{% endif %}{% if c.failed_count > 0 or c.queue_error or c.sync_failed_count > 0 %}<form method="post" action="/admin/compensations/{{ c.id }}/retry"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button secondary small">Повторить ошибки</button></form>{% endif %}</td>
       </tr>
     {% endfor %}</tbody>
   </table></div>

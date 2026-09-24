@@ -1,0 +1,27 @@
+{% extends 'base.html.twig' %}
+{% block title %}Сверка компенсации{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">КОМПЕНСАЦИИ</p><h1>Сверка с Remnawave.</h1><p class="muted">Живая проверка текущего срока, лимита и статуса. Статус задачи «done» сам по себе не подтверждает выдачу.</p></div></header>
+{% include '_admin-nav.html.twig' %}
+<section class="panel detail">
+  <p><a href="/admin/compensations">← К компенсациям</a></p>
+  <h2>{{ campaign.reason }}</h2>
+  <p class="muted">Проверяется страница {{ page }} · {{ total }} задач синхронизации. Проверка ничего не начисляет и не меняет в панели.</p>
+  {% if blocked %}<p class="notice error">Remnawave не ответил на один из запросов. Проверка этой страницы остановлена; результат для остальных подписок неизвестен.</p>{% endif %}
+  {% if rows %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Подписка</th><th>Задача</th><th>Фактическое состояние</th><th>Срок в Billing</th><th>Срок в Remnawave</th></tr></thead>
+    <tbody>{% for row in rows %}
+      <tr>
+        <td><a href="/admin/subscriptions/{{ row.subscription_id }}">{{ row.subscription_id|slice(0, 12) }}…</a></td>
+        <td>{{ row.job_status }}</td>
+        <td>{% if row.state == 'matched' %}Совпадает{% elseif row.state == 'missing_panel' %}Пользователь не найден в панели{% elseif row.state == 'drift' %}Есть расхождение{% elseif row.state == 'missing_local' %}Нет подписки в Billing{% else %}Не удалось проверить{% endif %}</td>
+        <td>{{ row.comparison ? row.comparison.rows[0].expected : '—' }}</td>
+        <td>{{ row.comparison ? row.comparison.rows[0].actual : '—' }}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">На этой странице нет задач синхронизации.</p>{% endif %}
+  <p>{% if page > 1 %}<a href="?page={{ page - 1 }}">← Предыдущая</a>{% endif %} {% if page * page_size < total %}<a href="?page={{ page + 1 }}">Следующая →</a>{% endif %}</p>
+</section>
+{% endblock %}

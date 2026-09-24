@@ -5,6 +5,10 @@ use PHPUnit\Framework\TestCase;
 use App\Infrastructure\{Database,Outbox};
 use App\Billing\{BillingService,Wallet,CompensationService};
 use App\Identity\Auth;
+use App\Integration\RemnawaveProvisioner;
+use App\Observability\InvestigationService;
+use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\Response\MockResponse;
 final class CompensationTest extends TestCase
 {
     private Database $db; private Outbox $outbox; private Wallet $wallet; private CompensationService $svc; private string $uid; private string $uid2; private string $adminUid;
@@ -230,6 +234,25 @@ final class CompensationTest extends TestCase
         self::assertSame('pending',$this->db->one('SELECT status FROM outbox WHERE dedup_key=?',[$key])['status']);
         self::assertSame((int)$sub['expires_at'],(int)$this->db->one('SELECT expires_at FROM subscriptions WHERE id=?',[$sub['id']])['expires_at']);
         self::assertSame(1,(int)$this->db->one('SELECT processed_count FROM compensations WHERE id=?',[$c['id']])['processed_count']);
+    }
+
+    public function testAuditReportsMissingPanelAccountEvenWhenJobIsDone():void
+    {
+        $billing=new BillingService($this->db,$this->outbox,'demo');
+        $order=$billing->order($this->uid,'basic','comp-audit');
+        $billing->settle($order['id'],'demo','demo_audit',19900,'RUB');
+        $c=$this->svc->create('all','days',3,'За сбой',$this->adminUid,'admin');
+        $this->svc->run($c['id']);
+        $this->svc->grant($c['id'],$this->uid);
+        $sub=$this->db->one('SELECT id FROM subscriptions WHERE user_id=?',[$this->uid]);
+        $this->db->execute("UPDATE outbox SET status='done' WHERE dedup_key=?",['comp-days:'.$c['id'].':'.$sub['id']]);
+        $http=new MockHttpClient(fn()=>new MockResponse('{}',['http_code'=>404]));
+        $investigations=new InvestigationService($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad'));
+        $audit=$this->svc->auditPage($c['id'],1,$investigations);
+        self::assertSame(1,$audit['total']);
+        self::assertSame('done',$audit['rows'][0]['job_status']);
+        self::assertSame('missing_panel',$audit['rows'][0]['state']);
+        self::assertSame('done',$this->db->one('SELECT status FROM outbox WHERE dedup_key=?',['comp-days:'.$c['id'].':'.$sub['id']])['status']);
     }
 
     public function testOutboxExhaustionMarksGrantFailedAndCanRetry():void
