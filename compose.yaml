@@ -1,67 +1,94 @@
-name: zeleboba
-
-x-ruby-app: &ruby-app
+x-app: &app
   build: .
   environment:
-    APP_ENV: ${APP_ENV:-prod}
-    APP_URL: ${APP_URL:?Set APP_URL in .env}
     DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
     DATABASE_USER: billing
     DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    APP_URL: ${APP_URL:?Set APP_URL in .env}
+    APP_ENV: ${APP_ENV:-prod}
+    OTEL_PHP_AUTOLOAD_ENABLED: "true"
+    OTEL_SERVICE_NAME: zeleboba-billing
+    OTEL_TRACES_EXPORTER: otlp
+    OTEL_METRICS_EXPORTER: "none"
+    OTEL_LOGS_EXPORTER: "none"
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    OTEL_TRACES_SAMPLER: parentbased_traceidratio
+    OTEL_TRACES_SAMPLER_ARG: "1.0"
   depends_on:
-    db:
-      condition: service_healthy
+    db: {condition: service_healthy}
   restart: unless-stopped
   init: true
-  volumes:
-    - app-secrets:/app/var
-  security_opt:
-    - no-new-privileges:true
-
+  volumes: ["app-secrets:/app/var"]
+  security_opt: ["no-new-privileges:true"]
+  stop_grace_period: 45s
 services:
   db:
     image: postgres:17
     environment:
       POSTGRES_DB: billing
       POSTGRES_USER: billing_owner
-      POSTGRES_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set a separate DATABASE_MIGRATION_PASSWORD in .env}
       BILLING_RUNTIME_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
-    volumes:
-      - postgres:/var/lib/postgresql/data
-      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+    volumes: ["postgres:/var/lib/postgresql/data", "./infra/postgres:/docker-entrypoint-initdb.d:ro"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U billing_owner -d billing"]
       interval: 5s
       timeout: 3s
       retries: 20
     restart: unless-stopped
-
   migrate:
-    <<: *ruby-app
+    <<: *app
     profiles: [maintenance]
     restart: "no"
     environment:
-      APP_ENV: ${APP_ENV:-prod}
-      APP_URL: ${APP_URL:?Set APP_URL in .env}
       DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
       DATABASE_USER: billing_owner
-      DATABASE_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD in .env}
-    command: ["ruby", "bin/console-ruby", "db:migrate"]
-
+      DATABASE_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD}
+    command: ["sh", "-c", "php bin/console db:migrate && php bin/console db:grant-runtime"]
+  # Single all-in-one container: php-fpm (web) + outbox worker + reconcile
+  # scheduler + telegram long-poll supervised by infra/merge-entrypoint.sh.
+  # nginx reaches FPM via the `app` network alias on fastcgi_pass app:9000.
   app:
-    <<: *ruby-app
+    <<: *app
+    command: ["sh", "/app/infra/merge-entrypoint.sh"]
+    environment:
+      DATABASE_DSN: pgsql:host=db;port=5432;dbname=billing
+      DATABASE_USER: billing
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      APP_URL: ${APP_URL:?Set APP_URL in .env}
+      APP_ENV: ${APP_ENV:-prod}
+      RECONCILE_SECONDS: "60"
+    healthcheck:
+      test: ["CMD-SHELL", "php bin/console app:health && php bin/console app:health worker && php bin/console app:health scheduler && php bin/console app:health telegram"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+  web:
+    profiles: [legacy]
+    image: nginx:1.28-bookworm@sha256:552e7481ca93ffccd046aa658dbbed22caefbc09c66fa7cd247cbb90b8a5c609
+    ports: ["127.0.0.1:${BILLING_HTTP_PORT:-8099}:80"]
+    volumes: ["./public:/app/public:ro", "./infra/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on: [app]
+    restart: unless-stopped
+    networks:
+      - default
+      - proxy
+  otel-collector:
+    profiles: [legacy]
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    user: "0"
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - "./infra/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro"
+      - "/var/lib/docker/containers:/var/lib/docker/containers:ro"
     ports:
-      - "127.0.0.1:${BILLING_HTTP_PORT:-9292}:9292"
-    command: ["bundle", "exec", "rackup", "--host", "0.0.0.0", "--port", "9292", "config.ru"]
-
-  worker:
-    <<: *ruby-app
-    command: ["ruby", "bin/worker-ruby"]
-
-  scheduler:
-    <<: *ruby-app
-    command: ["ruby", "bin/scheduler-ruby"]
-
+      - "127.0.0.1:4317:4317"   # OTLP gRPC (loopback, internal use)
+      - "127.0.0.1:4318:4318"   # OTLP HTTP (loopback, internal use)
+    restart: unless-stopped
+networks:
+  proxy:
+    external: true
 volumes:
   postgres:
   app-secrets:

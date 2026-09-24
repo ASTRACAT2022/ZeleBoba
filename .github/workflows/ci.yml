@@ -1,16 +1,27 @@
 name: billing
-
 on: [push, pull_request]
-
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: {POSTGRES_DB: billing_test, POSTGRES_USER: billing, POSTGRES_PASSWORD: test-only}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U billing -d billing_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "4.0"
-          bundler-cache: true
-      - run: ruby -Itest test/ruby_port_test.rb
-      - run: scripts/e2e_ruby.sh
-      - run: docker build -t zeleboba-ruby-ci .
+      - uses: shivammathur/setup-php@v2
+        with: {php-version: '8.4', extensions: 'pdo_sqlite, pdo_pgsql, mbstring, pcntl, sodium', coverage: none}
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer validate --strict
+      - run: find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: composer test
+        env:
+          TEST_POSTGRES_DSN: pgsql:host=127.0.0.1;port=5432;dbname=billing_test
+          TEST_POSTGRES_USER: billing
+          TEST_POSTGRES_PASSWORD: test-only
+      - run: composer audit
+      - run: docker build -t billing-ci .

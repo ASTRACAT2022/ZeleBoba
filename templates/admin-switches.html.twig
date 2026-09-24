@@ -1,0 +1,31 @@
+{% extends 'base.html.twig' %}{% block title %}Аварийные переключатели{% endblock %}{% block content %}<header><div><p class="eyebrow">УПРАВЛЕНИЕ СИСТЕМОЙ</p><h1>Аварийные переключатели и circuit breaker.</h1><p class="muted">Safe mode полностью останавливает покупки и вывод. Kill switches действуют мгновенно. Проверяйте после каждого изменения.</p></div><a class="button light" href="/">← В кабинет</a></header>{% include '_admin-nav.html.twig' %}
+
+<section class="panel detail">
+<h2>Safe mode</h2>
+<form method="post" action="/admin/switches"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="name" value="__safe_mode__">
+<p class="muted">Полное замораживание всей финансовой поверхности (покупки + выводы). Чтение и админка остаются доступными.</p>
+<select name="enabled"><option value="1" {{ data.safe_mode ? 'selected' : '' }}>Включено</option><option value="0" {{ not data.safe_mode ? 'selected' : '' }}>Выключено</option></select>
+<input name="reason" placeholder="Причина (в журнал)" maxlength="200"><button class="button small">Применить</button></form>
+</section>
+
+<section class="panel detail">
+<h2>Kill switches</h2>
+<table><thead><tr><th>Переключатель</th><th>Состояние</th><th>Причина</th><th></th></tr></thead><tbody>
+{% for s in data.switches %}
+<tr><form method="post" action="/admin/switches"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="name" value="{{ s.name }}">
+<td><strong>{{ s.name }}</strong><br><small>{{ s.actor }} · {{ s.created_at|date('d.m H:i') }}</small></td>
+<td><select name="enabled"><option value="1" {{ s.enabled ? 'selected' : '' }}>Включено</option><option value="0" {{ not s.enabled ? 'selected' : '' }}>Выключено</option></select></td>
+<td><input name="reason" value="{{ s.reason }}" maxlength="200"></td>
+<td><button class="button small">Сохранить</button></td></form></tr>
+{% else %}<tr><td colspan="4">Нет переключателей.</td></tr>{% endfor %}
+</tbody></table></section>
+
+<section class="panel detail">
+<h2>Circuit breakers</h2>
+<table><thead><tr><th>Канал</th><th>Состояние</th><th>Ошибки</th><th></th></tr></thead><tbody>
+{% for b in breakers %}
+<tr><td><strong>{{ b.name }}</strong></td><td><span class="badge {{ b.state }}">{{ b.state }}</span>{% if b.opened_at %}<br><small>открыт {{ b.opened_at|date('d.m H:i') }}</small>{% endif %}</td><td>{{ b.failures }}</td>
+<td><form method="post" action="/admin/switches/breaker"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="name" value="{{ b.name }}"><button class="button small">Сбросить</button></form></td></tr>
+{% else %}<tr><td colspan="4">Нет каналов.</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}
