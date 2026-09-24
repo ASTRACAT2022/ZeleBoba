@@ -44,7 +44,6 @@ final class RemnawaveSync
             $username='zb_'.$s['id'];
             $panelId=(int)($s['remnawave_id']??0);
             if($panelId<=0 && ctype_digit((string)($s['remote_id']??'')))$panelId=(int)$s['remote_id'];
-            $hasKnownRemote=$panelId>0 || !empty($s['remote_id']);
             try {
                 $remote=$this->provisioner->resolve($s);
                 if($s['status']==='expired'){
@@ -56,13 +55,18 @@ final class RemnawaveSync
                 }
                 // active
                 if(!$remote){
+                    // Panel user not found (neither by zb_<id> nor by stored
+                    // remote_id/remnawave_id). A stored remote id that no longer
+                    // resolves on the panel is stale (orphan): clear it and
+                    // re-provision, otherwise the sub stays active with a dead
+                    // link (Billing shows +N days, panel has nobody).
                     $report['missing']++;
-                    if($hasKnownRemote){$report['errors']++;$report['details'][]="$username: known panel account missing; manual review required";continue;}
                     if($fix){
+                        $this->db->execute('UPDATE subscriptions SET remote_id=NULL,remnawave_id=NULL WHERE id=?',[$s['id']]);
                         $result=$this->provisioner->provision($s);
                         $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[$result['id'],$result['url'],$s['id']]);
                         $this->markActive($s['id'],(string)$result['id']);
-                        $report['reprovisioned']++; $report['details'][]="$username: reprovisioned";
+                        $report['reprovisioned']++; $report['details'][]="$username: orphan remote_id re-provisioned";
                     } else {
                         $report['details'][]="$username: missing on panel";
                     }
