@@ -57,18 +57,11 @@ final class Worker
     {
         try {
             $this->send(['chat_id' => $chatId, 'text' => $text]);
-            if ($this->broadcasts) $this->broadcasts->markSent($id, true);
         } catch (JobPermanentFailure $e) {
-            // Bot blocked / chat not found / user deactivated: retrying can
-            // never deliver. Count as failed and let the queue dead-letter it
-            // right away so a mass broadcast of dead chats doesn't stall the
-            // worker or pile up retries.
-            if ($this->broadcasts) $this->broadcasts->markSent($id, false);
+            // The outbox records the terminal result with its current lease.
             throw $e;
         } catch (\Throwable $e) {
-            // Transient (429 rate-limit, 5xx, network/timeout): count once for
-            // the progress bar and keep the existing retry/backoff path.
-            if ($this->broadcasts) $this->broadcasts->markSent($id, false);
+            // A temporary failure is still pending; count only its final outcome.
             throw new \RuntimeException('Broadcast send failed', 0, $e);
         }
     }

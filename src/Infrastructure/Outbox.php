@@ -58,38 +58,56 @@ final class Outbox
             if(str_starts_with($json,'enc:'))$json=$this->vault?->open('outbox:'.$job['topic'],substr($json,4))??throw new \RuntimeException('Outbox decryption unavailable');
             $payload=json_decode($json,true,512,JSON_THROW_ON_ERROR);
             $handler($job['topic'], $payload);
-            $this->db->execute("UPDATE outbox SET status='done',locked_until=NULL,last_error=NULL,payload='{}' WHERE id=? AND lock_token=?", [$job['id'],$job['lock_token']]);
-            if($operation)$operations->event($operation['id'],'outbox.completed','success','Outbox job completed',['metadata'=>['topic'=>$job['topic']]]);
+            $changed=$this->db->transaction(function() use($job,$payload) {
+                $changed=$this->db->execute("UPDATE outbox SET status='done',locked_until=NULL,lock_token=NULL,last_error=NULL,payload='{}' WHERE id=? AND status='processing' AND lock_token=?", [$job['id'],$job['lock_token']]);
+                if($changed)$this->recordBroadcastOutcome($job,$payload,true);
+                return $changed;
+            });
+            if($changed && $operation)$operations->event($operation['id'],'outbox.completed','success','Outbox job completed',['metadata'=>['topic'=>$job['topic']]]);
         } catch (JobDeferred $e) {
             // Maintenance and global safety mode are expected operational
             // states, not failures. Do not exhaust attempts or dead-letter a
             // valid money/provisioning command while an integration is paused.
-            $this->db->execute("UPDATE outbox SET status='pending',attempts=CASE WHEN attempts>0 THEN attempts-1 ELSE 0 END,available_at=?,locked_until=NULL,lock_token=NULL,last_error=NULL WHERE id=? AND lock_token=?",[
+            $changed=$this->db->execute("UPDATE outbox SET status='pending',attempts=CASE WHEN attempts>0 THEN attempts-1 ELSE 0 END,available_at=?,locked_until=NULL,lock_token=NULL,last_error=NULL WHERE id=? AND status='processing' AND lock_token=?",[
                 time()+max(1,$e->delaySeconds),$job['id'],$job['lock_token']
             ]);
-            if($operation)$operations->event($operation['id'],'outbox.deferred','processing','Outbox job deferred by operational control',['metadata'=>['topic'=>$job['topic']]]);
+            if($changed && $operation)$operations->event($operation['id'],'outbox.deferred','processing','Outbox job deferred by operational control',['metadata'=>['topic'=>$job['topic']]]);
         } catch (JobPermanentFailure $e) {
             // Terminal, non-recoverable failure (e.g. Telegram permanently
             // refuses a chat). Resolve the job as done so it leaves the live
             // queue and stops flagging "Workers need attention": the outcome
-            // is already recorded by the handler (e.g. broadcast failed_count)
-            // and retrying would never deliver. Keep a permanent: marker for
+            // is recorded with the queue acknowledgement below and retrying
+            // would never deliver. Keep a permanent: marker for
             // diagnostics. available_at stays NOT NULL (already set).
-            $this->db->execute("UPDATE outbox SET status='done',locked_until=NULL,last_error=?,payload='{}' WHERE id=? AND lock_token=?", ['permanent:'.get_class($e), $job['id'], $job['lock_token']]);
-            if ($operation) $operations->event($operation['id'], 'outbox.done', 'success', 'Outbox job permanently failed (expected)', ['metadata' => ['topic' => $job['topic'], 'error_class' => get_class($e)]]);
+            $changed=$this->db->transaction(function() use($job,$payload,$e) {
+                $changed=$this->db->execute("UPDATE outbox SET status='done',locked_until=NULL,lock_token=NULL,last_error=?,payload='{}' WHERE id=? AND status='processing' AND lock_token=?", ['permanent:'.get_class($e), $job['id'], $job['lock_token']]);
+                if($changed)$this->recordBroadcastOutcome($job,$payload,false);
+                return $changed;
+            });
+            if ($changed && $operation) $operations->event($operation['id'], 'outbox.done', 'success', 'Outbox job permanently failed (expected)', ['metadata' => ['topic' => $job['topic'], 'error_class' => get_class($e)]]);
         } catch (\Throwable $e) {
             $attempt = (int)$job['attempts']+1;
             // Never persist raw HTTP errors: they may contain tokens or subscription URLs.
-            $this->db->execute('UPDATE outbox SET status=?, available_at=?, locked_until=NULL,last_error=? WHERE id=? AND lock_token=?', [$attempt>=8?'dead':'pending',time()+min(3600,2**$attempt)+random_int(0,5),get_class($e),$job['id'],$job['lock_token']]);
-            if (in_array($job['topic'],['subscription.provision','subscription.extend'],true) && isset($payload['subscription_id'])) {
-                $state=$attempt>=8?'failed':'retry';
-                $this->db->execute('UPDATE provisioning_accounts SET state=?,last_error=?,updated_at=? WHERE subscription_id=? AND state<>\'active\'',[
-                    $state,get_class($e),time(),(string)$payload['subscription_id']
-                ]);
-            }
-            if($operation)$operations->event($operation['id'],'outbox.retry','warning','Outbox retry scheduled',['metadata'=>['topic'=>$job['topic'],'attempt'=>$attempt,'error_class'=>get_class($e)]]);
-            error_log(json_encode(['event'=>'job.failed','job_id'=>$job['id'],'type'=>get_class($e),'attempt'=>$attempt]));
+            $changed=$this->db->transaction(function() use($job,$payload,$attempt,$e) {
+                $changed=$this->db->execute('UPDATE outbox SET status=?, available_at=?, locked_until=NULL,lock_token=NULL,last_error=? WHERE id=? AND status=\'processing\' AND lock_token=?', [$attempt>=8?'dead':'pending',time()+min(3600,2**$attempt)+random_int(0,5),get_class($e),$job['id'],$job['lock_token']]);
+                if($changed && $attempt>=8)$this->recordBroadcastOutcome($job,$payload,false);
+                if($changed && in_array($job['topic'],['subscription.provision','subscription.extend'],true) && isset($payload['subscription_id'])) {
+                    $state=$attempt>=8?'failed':'retry';
+                    $this->db->execute('UPDATE provisioning_accounts SET state=?,last_error=?,updated_at=? WHERE subscription_id=? AND state<>\'active\'',[
+                        $state,get_class($e),time(),(string)$payload['subscription_id']
+                    ]);
+                }
+                return $changed;
+            });
+            if($changed && $operation)$operations->event($operation['id'],'outbox.retry','warning','Outbox retry scheduled',['metadata'=>['topic'=>$job['topic'],'attempt'=>$attempt,'error_class'=>get_class($e)]]);
+            if($changed)error_log(json_encode(['event'=>'job.failed','job_id'=>$job['id'],'type'=>get_class($e),'attempt'=>$attempt]));
         }
         return true;
+    }
+    private function recordBroadcastOutcome(array $job,array $payload,bool $ok): void
+    {
+        if($job['topic']==='broadcast.send' && isset($payload['broadcast_id'],$payload['chat_id'])) {
+            (new \App\Billing\BroadcastService($this->db,$this))->markSent((string)$payload['broadcast_id'],(string)$payload['chat_id'],$ok);
+        }
     }
 }

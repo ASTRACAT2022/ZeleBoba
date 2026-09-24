@@ -12,12 +12,14 @@ final class BroadcastService
         if (!in_array($targetType, ['all','active','inactive','paid','trial','telegram','email'], true)) throw new BillingError('Некорректный сегмент.');
         $id = Database::id();
         $now = time();
-        $this->db->execute(
-            'INSERT INTO broadcast_history(id,target_type,message_text,total_count,status,admin_id,admin_name,category,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
-            [$id, $targetType, $text, 0, 'in_progress', $adminId, $adminName, $category, $now]
-        );
-        $this->outbox->enqueue('broadcast.run', 'broadcast:'.$id.':1', ['broadcast_id' => $id]);
-        $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $adminId, 'broadcast.created', $id, $now]);
+        $this->db->transaction(function () use ($id,$targetType,$text,$adminId,$adminName,$category,$now) {
+            $this->db->execute(
+                'INSERT INTO broadcast_history(id,target_type,message_text,total_count,status,admin_id,admin_name,category,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                [$id, $targetType, $text, 0, 'in_progress', $adminId, $adminName, $category, $now]
+            );
+            $this->outbox->enqueue('broadcast.run', 'broadcast:'.$id.':1', ['broadcast_id' => $id]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $adminId, 'broadcast.created', $id, $now]);
+        });
         return $this->db->one('SELECT * FROM broadcast_history WHERE id=?', [$id]);
     }
     /** How many per-user broadcast sends to enqueue per broadcast.run tick. */
@@ -47,7 +49,10 @@ final class BroadcastService
             $this->outbox->enqueue('broadcast.send', 'bsend:'.$broadcastId.':'.$tgId, ['broadcast_id' => $broadcastId, 'chat_id' => $tgId, 'text' => $b['message_text']]);
             $enqueued++;
         }
-        if ($enqueued === 0) return;
+        if ($enqueued === 0) {
+            $this->completeIfFinished($broadcastId);
+            return;
+        }
         // More recipients remain: schedule the next chunk after a pause instead of flooding
         // the queue. Dedup keeps every recipient queued exactly once across ticks; each
         // continuation tick gets its own dedup key (broadcast:<id>:<n>) because the first
@@ -76,13 +81,21 @@ final class BroadcastService
         return array_values(array_filter(array_map(fn($r) => (string)($r['telegram_id'] ?? ''), $rows), fn($v) => $v !== ''));
     }
     /** Mark a single send as delivered or failed. */
-    public function markSent(string $broadcastId, bool $ok): void
+    public function markSent(string $broadcastId, string $chatId, bool $ok): void
     {
-        $this->db->execute('UPDATE broadcast_history SET sent_count=sent_count+1 WHERE id=?', [$broadcastId]);
-        if (!$ok) $this->db->execute('UPDATE broadcast_history SET failed_count=failed_count+1 WHERE id=?', [$broadcastId]);
+        $this->db->transaction(function () use ($broadcastId,$chatId,$ok) {
+            $inserted=$this->db->execute('INSERT INTO broadcast_deliveries(broadcast_id,chat_id,outcome,completed_at) VALUES(?,?,?,?) ON CONFLICT(broadcast_id,chat_id) DO NOTHING',[$broadcastId,$chatId,$ok?'sent':'failed',time()]);
+            if (!$inserted) return;
+            $column=$ok?'sent_count':'failed_count';
+            $this->db->execute("UPDATE broadcast_history SET $column=$column+1 WHERE id=?",[$broadcastId]);
+            $this->completeIfFinished($broadcastId);
+        });
+    }
+    private function completeIfFinished(string $broadcastId): void
+    {
         $b = $this->db->one('SELECT * FROM broadcast_history WHERE id=?', [$broadcastId]);
-        if ($b && (int)$b['sent_count'] + (int)$b['failed_count'] >= (int)$b['total_count']) {
-            $this->db->execute("UPDATE broadcast_history SET status='completed',completed_at=? WHERE id=?", [time(), $broadcastId]);
+        if ($b && $b['status']==='running' && (int)$b['sent_count'] + (int)$b['failed_count'] >= (int)$b['total_count']) {
+            $this->db->execute("UPDATE broadcast_history SET status='completed',completed_at=? WHERE id=? AND status='running'", [time(), $broadcastId]);
         }
     }
     public function list(int $limit = 50): array

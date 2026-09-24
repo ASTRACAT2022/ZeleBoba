@@ -19,12 +19,12 @@ final class Branding
     public function color(): string
     {
         $c = (string)($this->config['BRAND_COLOR'] ?? '');
-        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#135d45';
+        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#635bff';
     }
     public function accent(): string
     {
         $c = (string)($this->config['BRAND_COLOR_ACCENT'] ?? '');
-        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#d8f784';
+        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#e9e7ff';
     }
     public function footerText(): string
     {
@@ -47,6 +47,6 @@ final class Branding
     {
         $color = $this->color();
         $accent = $this->accent();
-        return '--ink:#182c29;--muted:#687773;--line:#dee6e2;--green:'.$color.';--lime:'.$accent.';--bg:#f5f7f6';
+        return '--ink:#0a2540;--muted:#425466;--line:#e3e9f1;--green:'.$color.';--lime:'.$accent.';--bg:#f6f9fc';
     }
 }

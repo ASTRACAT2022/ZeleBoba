@@ -16,12 +16,14 @@ final class CompensationService
         if (mb_strlen($reason) < 3 || mb_strlen($reason) > 200) throw new BillingError('Причина: 3–200 символов.');
         $id = Database::id();
         $now = time();
-        $this->db->execute(
-            'INSERT INTO compensations(id,segment,kind,value,reason,total_count,processed_count,status,admin_id,admin_name,created_at) VALUES(?,?,?,?,?,0,0,?,?,?,?)',
-            [$id, $segment, $kind, $value, $reason, 'in_progress', $adminId, $adminName, $now]
-        );
-        $this->outbox->enqueue('compensation.run', 'compensation:'.$id, ['compensation_id' => $id]);
-        $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $adminId, 'compensation.created', $id, $now]);
+        $this->db->transaction(function() use($id,$segment,$kind,$value,$reason,$adminId,$adminName,$now) {
+            $this->db->execute(
+                'INSERT INTO compensations(id,segment,kind,value,reason,total_count,processed_count,status,admin_id,admin_name,created_at) VALUES(?,?,?,?,?,0,0,?,?,?,?)',
+                [$id, $segment, $kind, $value, $reason, 'in_progress', $adminId, $adminName, $now]
+            );
+            $this->outbox->enqueue('compensation.run', 'compensation:'.$id, ['compensation_id' => $id]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $adminId, 'compensation.created', $id, $now]);
+        });
         return $this->db->one('SELECT * FROM compensations WHERE id=?', [$id]);
     }
     /** Run a compensation: pick recipients and enqueue per-user grants. */
@@ -30,13 +32,15 @@ final class CompensationService
         $c = $this->db->one('SELECT * FROM compensations WHERE id=?', [$compensationId]);
         if (!$c || $c['status'] !== 'in_progress') return;
         $recipients = $this->recipients($c['segment']);
-        $this->db->execute('UPDATE compensations SET total_count=? WHERE id=?', [count($recipients), $compensationId]);
-        foreach ($recipients as $userId) {
-            $this->outbox->enqueue('compensation.grant', 'cgrant:'.$compensationId.':'.$userId, [
-                'compensation_id' => $compensationId, 'user_id' => $userId,
-            ]);
-        }
-        $this->db->execute("UPDATE compensations SET status='running' WHERE id=?", [$compensationId]);
+        $this->db->transaction(function() use($recipients,$compensationId) {
+            $this->db->execute('UPDATE compensations SET total_count=? WHERE id=? AND status=\'in_progress\'', [count($recipients), $compensationId]);
+            foreach ($recipients as $userId) {
+                $this->outbox->enqueue('compensation.grant', 'cgrant:'.$compensationId.':'.$userId, [
+                    'compensation_id' => $compensationId, 'user_id' => $userId,
+                ]);
+            }
+            $this->db->execute('UPDATE compensations SET status=? WHERE id=? AND status=\'in_progress\'', [$recipients===[]?'completed':'running',$compensationId]);
+        });
     }
     /** Grant compensation to a single user. Idempotent per (compensation, user). */
     public function grant(string $compensationId, string $userId): void
@@ -57,6 +61,7 @@ final class CompensationService
                 $this->grantTraffic($userId, $value, $reason);
             }
             $this->db->execute('UPDATE compensations SET processed_count=processed_count+1 WHERE id=?', [$compensationId]);
+            $this->db->execute("UPDATE compensations SET status='completed' WHERE id=? AND status='running' AND processed_count>=total_count",[$compensationId]);
         });
     }
     private function grantDays(string $userId, int $days, string $reason): void

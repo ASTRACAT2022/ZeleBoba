@@ -7,7 +7,7 @@ final class Settings
 {
     public const DEFAULTS=[
         'APP_ENV'=>'dev','APP_URL'=>'http://127.0.0.1:8080','SITE_NAME'=>'ZeleBoba','SUPPORT_URL'=>'',
-        'BRAND_LOGO'=>'','BRAND_FAVICON'=>'','BRAND_COLOR'=>'#135d45','BRAND_COLOR_ACCENT'=>'#d8f784','BRAND_FOOTER_TEXT'=>'',
+        'BRAND_LOGO'=>'','BRAND_FAVICON'=>'','BRAND_COLOR'=>'#635bff','BRAND_COLOR_ACCENT'=>'#e9e7ff','BRAND_FOOTER_TEXT'=>'',
         'BRAND_WELCOME_TEXT'=>'','BRAND_HELP_TEXT'=>'',
         'PURCHASES_ENABLED'=>'0','REGISTRATION_ENABLED'=>'1',
         'PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo',

@@ -136,4 +136,62 @@ final class MarketingTest extends TestCase
         $svc->run($b['id']);
         self::assertSame(3,(int)$this->db->one("SELECT count(*) c FROM outbox WHERE topic='broadcast.send'")['c']);
     }
+
+    public function testBroadcastOutcomeIsCountedOncePerRecipient():void
+    {
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['12345',$this->uid]);
+        $svc=new BroadcastService($this->db,$this->outbox);
+        $b=$svc->create('all','Привет',$this->uid,'admin');
+        $svc->run($b['id']);
+        $svc->markSent($b['id'],'12345',true);
+        $svc->markSent($b['id'],'12345',true);
+        $svc->markSent($b['id'],'12345',false);
+        $row=$this->db->one('SELECT sent_count,failed_count,status FROM broadcast_history WHERE id=?',[$b['id']]);
+        self::assertSame(1,(int)$row['sent_count']);
+        self::assertSame(0,(int)$row['failed_count']);
+        self::assertSame('completed',$row['status']);
+    }
+
+    public function testOutboxAcknowledgementRecordsSuccessfulBroadcast():void
+    {
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['12345',$this->uid]);
+        $svc=new BroadcastService($this->db,$this->outbox);
+        $b=$svc->create('all','Привет',$this->uid,'admin');
+        $svc->run($b['id']);
+        $this->outbox->runOne(function(string $topic):void {
+            self::assertSame('broadcast.send',$topic);
+        });
+        $row=$this->db->one('SELECT sent_count,failed_count,status FROM broadcast_history WHERE id=?',[$b['id']]);
+        self::assertSame(1,(int)$row['sent_count']);
+        self::assertSame(0,(int)$row['failed_count']);
+        self::assertSame('completed',$row['status']);
+    }
+
+    public function testBroadcastTemporaryErrorsDoNotCountUntilRetriesExhausted():void
+    {
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['12345',$this->uid]);
+        $svc=new BroadcastService($this->db,$this->outbox);
+        $b=$svc->create('all','Привет',$this->uid,'admin');
+        $svc->run($b['id']);
+        for($n=0;$n<8;$n++) {
+            $this->outbox->runOne(function($topic) { if($topic==='broadcast.send') throw new \RuntimeException('temporary'); });
+            $row=$this->db->one('SELECT sent_count,failed_count,status FROM broadcast_history WHERE id=?',[$b['id']]);
+            if($n<7) {
+                self::assertSame(0,(int)$row['failed_count']);
+                $this->db->execute("UPDATE outbox SET available_at=0 WHERE topic='broadcast.send'");
+            }
+        }
+        $row=$this->db->one('SELECT sent_count,failed_count,status FROM broadcast_history WHERE id=?',[$b['id']]);
+        self::assertSame(0,(int)$row['sent_count']);
+        self::assertSame(1,(int)$row['failed_count']);
+        self::assertSame('completed',$row['status']);
+    }
+
+    public function testEmptyBroadcastCompletes():void
+    {
+        $svc=new BroadcastService($this->db,$this->outbox);
+        $b=$svc->create('all','Привет',$this->uid,'admin');
+        $svc->run($b['id']);
+        self::assertSame('completed',$this->db->one('SELECT status FROM broadcast_history WHERE id=?',[$b['id']])['status']);
+    }
 }

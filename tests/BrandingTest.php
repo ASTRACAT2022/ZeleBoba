@@ -41,12 +41,12 @@ final class BrandingTest extends TestCase
     {
         $b = new Branding($this->c->config);
         self::assertSame('ZeleBoba', $b->name());
-        self::assertSame('#135d45', $b->color());
-        self::assertSame('#d8f784', $b->accent());
+        self::assertSame('#635bff', $b->color());
+        self::assertSame('#e9e7ff', $b->accent());
         self::assertSame('', $b->logo());
         self::assertStringContainsString('дублер', $b->welcomeText());
         self::assertStringContainsString('/plans', $b->helpText());
-        self::assertStringContainsString('--green:#135d45', $b->cssVars());
+        self::assertStringContainsString('--green:#635bff', $b->cssVars());
     }
     public function testCustomBrandingApplied(): void
     {

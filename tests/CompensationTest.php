@@ -44,6 +44,23 @@ final class CompensationTest extends TestCase
         self::assertSame(10000,$this->wallet->balance($this->uid)['balance_kopeks']);
         self::assertSame(1,(int)$this->db->one('SELECT processed_count FROM compensations')['processed_count']);
     }
+    public function testCompensationCompletesAfterEveryGrant():void
+    {
+        $c=$this->svc->create('all','balance',100,'Бонус',$this->adminUid,'admin');
+        $this->svc->run($c['id']);
+        foreach([$this->uid,$this->uid2,$this->adminUid] as $userId) $this->svc->grant($c['id'],$userId);
+        $this->svc->grant($c['id'],$this->uid);
+        $row=$this->db->one('SELECT status,processed_count,total_count FROM compensations WHERE id=?',[$c['id']]);
+        self::assertSame('completed',$row['status']);
+        self::assertSame(3,(int)$row['processed_count']);
+        self::assertSame(3,(int)$row['total_count']);
+    }
+    public function testEmptyCompensationCompletes():void
+    {
+        $c=$this->svc->create('active','balance',100,'Бонус',$this->adminUid,'admin');
+        $this->svc->run($c['id']);
+        self::assertSame('completed',$this->db->one('SELECT status FROM compensations WHERE id=?',[$c['id']])['status']);
+    }
     public function testDaysCompensationExtendsSubscription():void
     {
         $billing=new BillingService($this->db,$this->outbox,'demo');
