@@ -81,10 +81,28 @@ final class BillingTest extends TestCase
         $worker->handle('subscription.provision',['subscription_id'=>$id]);$worker->handle('subscription.provision',['subscription_id'=>$id]);
         self::assertSame('active',$this->db->one('SELECT status FROM subscriptions')['status']);self::assertSame('fulfilled',$this->db->one('SELECT status FROM orders')['status']);
     }
+    public function testTrafficSyncWaitsUntilRemoteAccountExists():void
+    {
+        $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,purchased_traffic_gb,device_limit) VALUES('pending-remote',NULL,?,'provisioning',?,?,?,?,3)",[$this->uid,time()+86400,time(),10,5]);
+        $http=new MockHttpClient();
+        $worker=new Worker($this->db,$this->outbox,new Payments($this->db,$this->billing,$http,[]),new DemoProvisioner(),$http,'',defaultProvisionDriver:'remnawave');
+        $this->expectException(JobDeferred::class);
+        $worker->handle('subscription.traffic',['subscription_id'=>'pending-remote','traffic_gb'=>5]);
+    }
     public function testRemnawaveRecoversPreviouslyCreatedUser():void
     {
-        $calls=0;$http=new MockHttpClient(function($method,$url)use(&$calls){$calls++;self::assertSame('GET',$method);self::assertStringContainsString('/api/users/by-username/zb_abc',$url);return new MockResponse(json_encode(['response'=>['username'=>'zb_abc','id'=>123,'shortUuid'=>'abc123','subscriptionUrl'=>'https://sub.example/key']]));});
-        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');$result=$p->provision(['id'=>'abc']);self::assertSame('123',$result['id']);self::assertSame(1,$calls);
+        $calls=[];$patched=null;
+        $http=new MockHttpClient(function($method,$url,$options)use(&$calls,&$patched){
+            $calls[]=$method;
+            if($method==='PATCH'){$patched=json_decode((string)$options['body'],true);return new MockResponse('{}');}
+            self::assertStringContainsString('/api/users/by-username/zb_abc',$url);
+            return new MockResponse(json_encode(['response'=>['username'=>'zb_abc','id'=>123,'shortUuid'=>'abc123','subscriptionUrl'=>'https://sub.example/key']]));
+        });
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $result=$p->provision(['id'=>'abc','expires_at'=>time()+86400,'traffic_bytes'=>10*1073741824,'devices'=>3]);
+        self::assertSame('123',$result['id']);
+        self::assertSame(['GET','PATCH'],$calls);
+        self::assertSame(10*1073741824,$patched['trafficLimitBytes']);
     }
     public function testProviderStatusIsFetchedBeforeSettlement():void
     {

@@ -26,6 +26,7 @@ final class Worker
                 'subscription.daily'=>$this->dailyCharge($payload['subscription_id']),
                 'subscription.traffic'=>$this->traffic($payload['subscription_id'],(int)($payload['traffic_gb']??0)),
                 'subscription.devices'=>$this->devices($payload['subscription_id'],(int)($payload['devices']??0)),
+                'subscription.admin_sync'=>$this->adminSync($payload['subscription_id']),
                 'gift.create'=>$this->giftCreate($payload),
                 'broadcast.run'=>$this->broadcastRun($payload['broadcast_id']),
                 'broadcast.send'=>$this->broadcastSend($payload['broadcast_id'],$payload['chat_id'],$payload['text']),
@@ -114,6 +115,7 @@ final class Worker
     {
         if($this->provisioningPaused()) throw new JobDeferred($this->provisioningDelay());
         $s=$this->subscription($id);
+        if ($s && $s['provision_driver']!=='demo' && in_array($s['status'],['active','provisioning'],true) && $s['remote_id']===null) throw new JobDeferred(30);
         if (!$s || $s['status']!=='active' || $s['provision_driver']==='demo') return;
         $this->provisioner->setTraffic($s,0);
     }
@@ -121,8 +123,22 @@ final class Worker
     {
         if($this->provisioningPaused()) throw new JobDeferred($this->provisioningDelay());
         $s=$this->subscription($id);
+        if ($s && $s['provision_driver']!=='demo' && in_array($s['status'],['active','provisioning'],true) && $s['remote_id']===null) throw new JobDeferred(30);
         if (!$s || $s['status']!=='active' || $s['provision_driver']==='demo') return;
         $this->provisioner->setDevices($s,0);
+    }
+    private function adminSync(string $id): void
+    {
+        if($this->provisioningPaused()) throw new JobDeferred($this->provisioningDelay());
+        $s=$this->subscription($id);
+        if (!$s || $s['status']!=='active' || $s['provision_driver']==='demo') return;
+        if ((int)($s['remnawave_id']??0)>0) {
+            if (!method_exists($this->provisioner,'updateById')) throw new \RuntimeException('Provisioner cannot sync legacy subscription by id');
+            $this->provisioner->updateById((int)$s['remnawave_id'],(int)$s['traffic_bytes'],(int)$s['devices'],(int)$s['expires_at']);
+            return;
+        }
+        if ($s['remote_id']===null) throw new JobDeferred(30);
+        $this->provisioner->extend($s);
     }
     private function giftCreate(array $payload): void
     {
@@ -178,6 +194,7 @@ final class Worker
         $flag=$this->db->one("SELECT enabled FROM feature_flags WHERE name='provisioning.enabled'");
         if($flag && (int)$flag['enabled']===0) throw new \RuntimeException('Provisioning disabled by kill switch');
         $s=$this->subscription($id);
+        if ($s && $s['status']==='provisioning') throw new JobDeferred(30);
         if (!$s || $s['status']!=='active') return;
         $this->db->execute("UPDATE provisioning_accounts SET state='processing',updated_at=? WHERE subscription_id=? AND provider=?",[time(),$id,$s['provision_driver']]);
         $this->operationEvent($id,'provisioning.started','processing','Provisioning synchronization started');

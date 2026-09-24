@@ -63,17 +63,19 @@ final class UserAdminService
             $sub = $this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status IN ('active','trial','provisioning') ORDER BY created_at DESC LIMIT 1" . $this->db->lock(), [$userId]);
             if ($sub) {
                 $base = max(time(), (int)$sub['expires_at']);
-                $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$base + $days * 86400, time(), $sub['id']]);
-                $this->outbox?->enqueue('subscription.extend','admin-extend:'.Database::id(),['subscription_id'=>$sub['id']]);
+                $provisioning=$sub['status']==='provisioning';
+                $this->db->execute('UPDATE subscriptions SET expires_at=?,status=?,updated_at=? WHERE id=?', [$base + $days * 86400, $provisioning?'provisioning':'active', time(), $sub['id']]);
+                $this->outbox?->enqueue($provisioning?'subscription.provision':'subscription.extend','admin-extend:'.Database::id(),['subscription_id'=>$sub['id']]);
                 $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.days_granted', $userId, time()]);
                 return $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$sub['id']]);
             }
-            $plan = $planId ? $this->db->one('SELECT * FROM plans WHERE id=?', [$planId]) : null;
+            $plan = $planId ? $this->db->one('SELECT * FROM plans WHERE id=? AND active=1', [$planId]) : null;
+            if (!$plan) throw new BillingError('Для новой подписки выберите активный тариф.');
             $id = Database::id();
             $now = time();
             $this->db->execute(
-                "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,plan_id,traffic_limit_gb,device_limit,is_trial,start_date,updated_at) VALUES(?,NULL,?,'active',?,?,?,?,?,0,?,?)",
-                [$id, $userId, $now + $days * 86400, $now, $plan['id'] ?? null, $plan ? (int)$plan['traffic_bytes'] / 1073741824 : 0, $plan ? (int)$plan['devices'] : 1, $now, $now]
+                "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,plan_id,traffic_limit_gb,device_limit,is_trial,start_date,updated_at) VALUES(?,NULL,?,'provisioning',?,?,?,?,?,0,?,?)",
+                [$id, $userId, $now + $days * 86400, $now, $plan['id'], intdiv((int)$plan['traffic_bytes'],1073741824), (int)$plan['devices'], $now, $now]
             );
             $this->outbox?->enqueue('subscription.provision','provision:'.$id,['subscription_id'=>$id]);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.days_granted', $userId, time()]);
@@ -130,9 +132,10 @@ final class UserAdminService
             $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
             if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
             $this->db->execute('UPDATE subscriptions SET traffic_limit_gb=? WHERE id=?', [$trafficGb, $subscriptionId]);
+            $this->queuePanelSync($subscriptionId);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_traffic_changed', $userId, time()]);
         });
-        $this->applyPanelChanges($subscriptionId);
+        if (!$this->outbox) $this->applyPanelChanges($subscriptionId);
     }
     /** Update subscription device limit locally + push to Remnawave (0 = unlimited). */
     public function updateSubscriptionDevices(string $userId, string $subscriptionId, int $devices, string $actor): void
@@ -142,9 +145,10 @@ final class UserAdminService
             $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
             if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
             $this->db->execute('UPDATE subscriptions SET device_limit=? WHERE id=?', [$devices, $subscriptionId]);
+            $this->queuePanelSync($subscriptionId);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_devices_changed', $userId, time()]);
         });
-        $this->applyPanelChanges($subscriptionId);
+        if (!$this->outbox) $this->applyPanelChanges($subscriptionId);
     }
     /** Extend subscription by N days (from now or from current expiry), sync panel expiry. */
     public function extendSubscription(string $userId, string $subscriptionId, int $days, string $actor): void
@@ -155,9 +159,10 @@ final class UserAdminService
             if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
             $base = max(time(), (int)$sub['expires_at']);
             $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$base + $days * 86400, time(), $subscriptionId]);
+            $this->queuePanelSync($subscriptionId);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_extended', $userId, time()]);
         });
-        $this->applyPanelChanges($subscriptionId);
+        if (!$this->outbox) $this->applyPanelChanges($subscriptionId);
     }
     /** Set an exact expiration datetime (UTC timestamp) for one subscription. */
     public function setSubscriptionExpiry(string $userId, string $subscriptionId, int $expiresAt, string $actor): void
@@ -169,9 +174,10 @@ final class UserAdminService
             $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?' . $this->db->lock(), [$subscriptionId]);
             if (!$sub || $sub['user_id'] !== $userId) throw new BillingError('Подписка не найдена.');
             $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$expiresAt, time(), $subscriptionId]);
+            $this->queuePanelSync($subscriptionId);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $actor, 'user.subscription_expiry_set', $userId, time()]);
         });
-        $this->applyPanelChanges($subscriptionId);
+        if (!$this->outbox) $this->applyPanelChanges($subscriptionId);
     }
     /** Reset used traffic on panel (bytesUsed back to 0). */
     public function resetSubscriptionTraffic(string $userId, string $subscriptionId, string $actor): void
@@ -185,12 +191,20 @@ final class UserAdminService
         $this->applyPanelChanges($subscriptionId);
     }
     /** Push current local values (traffic/devices/expiry) to Remnawave panel. */
+    private function queuePanelSync(string $subscriptionId): void
+    {
+        if ($this->provisioner && $this->outbox) {
+            $this->outbox->enqueue('subscription.admin_sync','admin-sync:'.Database::id(),['subscription_id'=>$subscriptionId]);
+        }
+    }
     private function applyPanelChanges(string $subscriptionId): void
     {
         if (!$this->provisioner) return;
         $sub = $this->db->one('SELECT * FROM subscriptions WHERE id=?', [$subscriptionId]);
         if (!$sub || $sub['status']!=='active') return;
-        $sub['traffic_bytes'] = (int)$sub['traffic_limit_gb'] * 1073741824;
+        $sub['traffic_bytes'] = (int)$sub['traffic_limit_gb']===0
+            ? 0
+            : ((int)$sub['traffic_limit_gb']+(int)$sub['purchased_traffic_gb'])*1073741824;
         $sub['devices'] = (int)$sub['device_limit'];
         try {
             $panel = null;

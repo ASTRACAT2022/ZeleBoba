@@ -5,6 +5,9 @@ use PHPUnit\Framework\TestCase;
 use App\Infrastructure\{Database,Outbox};
 use App\Billing\{BillingService,Wallet,UserAdminService,ReportingService,CustomerTimeline};
 use App\Identity\Auth;
+use App\Infrastructure\Worker;
+use App\Integration\{Payments,RemnawaveProvisioner};
+use Symfony\Component\HttpClient\{MockHttpClient,Response\MockResponse};
 final class UserAdminTest extends TestCase
 {
     private Database $db; private Outbox $outbox; private Wallet $wallet; private UserAdminService $svc; private string $uid; private string $adminUid;
@@ -72,9 +75,39 @@ final class UserAdminTest extends TestCase
     public function testGrantDaysCreatesNew():void
     {
         $sub=$this->svc->grantDays($this->uid,7,'basic',$this->adminUid);
-        self::assertSame('active',$sub['status']);
+        self::assertSame('provisioning',$sub['status']);
         self::assertSame(7,(int)round(((int)$sub['expires_at']-time())/86400));
         self::assertSame('basic',$sub['plan_id']);
+    }
+    public function testGrantDaysRequiresPlanForNewSubscription():void
+    {
+        $this->expectException(\App\Billing\BillingError::class);
+        $this->svc->grantDays($this->uid,7,null,$this->adminUid);
+    }
+    public function testGrantDaysKeepsPendingProvisioningState():void
+    {
+        $sub=$this->svc->grantDays($this->uid,7,'basic',$this->adminUid);
+        $extended=$this->svc->grantDays($this->uid,3,'basic',$this->adminUid);
+        self::assertSame($sub['id'],$extended['id']);
+        self::assertSame('provisioning',$extended['status']);
+        self::assertSame(10,(int)round(((int)$extended['expires_at']-time())/86400));
+    }
+    public function testAdminTrafficChangeQueuesAndSyncsPurchasedTraffic():void
+    {
+        $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,purchased_traffic_gb,device_limit,remote_id) VALUES('admin-sub',NULL,?,'active',?,?,?,?,3,'123')",[$this->uid,time()+86400,time(),10,5]);
+        $patched=null;
+        $http=new MockHttpClient(function($method,$url,$options)use(&$patched){
+            if($method==='PATCH') {$patched=json_decode((string)$options['body'],true,512,JSON_THROW_ON_ERROR);return new MockResponse('{}');}
+            return new MockResponse(json_encode(['response'=>['id'=>123,'username'=>'zb_admin-sub']]));
+        });
+        $provisioner=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $admin=new UserAdminService($this->db,$this->wallet,$provisioner,$this->outbox);
+        $admin->updateSubscriptionTraffic($this->uid,'admin-sub',20,$this->adminUid);
+        self::assertSame('subscription.admin_sync',$this->db->one('SELECT topic FROM outbox')['topic']);
+        $worker=new Worker($this->db,$this->outbox,new Payments($this->db,new BillingService($this->db,$this->outbox,'demo'),$http,[]),$provisioner,$http,'',defaultProvisionDriver:'remnawave');
+        $this->outbox->runOne(fn($topic,$payload)=>$worker->handle($topic,$payload));
+        self::assertSame(25*1073741824,$patched['trafficLimitBytes']);
+        self::assertSame('done',$this->db->one('SELECT status FROM outbox')['status']);
     }
     public function testSetAndClearDiscount():void
     {

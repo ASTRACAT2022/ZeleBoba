@@ -159,7 +159,7 @@ trait AdminActions
             }
             $this->app->polls->create(['title'=>$input->get('title',''),'description'=>$input->get('description',''),'reward_amount_kopeks'=>$input->get('reward_amount_kopeks','0'),'questions'=>$questions],$uid);return new RedirectResponse('/admin/polls',303);
         }
-        if($handler==='admin-campaigns')return $this->render('admin-campaigns',['campaigns'=>$this->app->campaigns->list()]);
+        if($handler==='admin-campaigns')return $this->render('admin-campaigns',['campaigns'=>$this->app->campaigns->list(),'plans'=>$db->all('SELECT id,name FROM plans WHERE active=1 ORDER BY name')]);
         if($handler==='admin-campaign-create'){
             $this->app->campaigns->create($input->all(),$uid);return new RedirectResponse('/admin/campaigns',303);
         }

@@ -62,7 +62,9 @@ final class PromoCodeService
             if (!$claimed) return ['success' => false, 'error' => 'used'];
             $this->db->execute('INSERT INTO promocode_uses VALUES(?,?,?,?)', [Database::id(), $promo['id'], $userId, $now]);
             try {
-                $description = $this->applyEffects($user, $promo);
+                // A combined promo can extend days before traffic validation fails.
+                // Roll back every effect (including queued sync jobs) together.
+                $description = $this->db->transaction(fn() => $this->applyEffects($user, $promo));
             } catch (BillingError $e) {
                 $this->db->execute('UPDATE promocodes SET current_uses=current_uses-1 WHERE id=?', [$promo['id']]);
                 $this->db->execute('DELETE FROM promocode_uses WHERE user_id=? AND promocode_id=?', [$userId, $promo['id']]);

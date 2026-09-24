@@ -20,8 +20,6 @@ final class RemnawaveSync
         // Compute traffic bytes in PHP below (same approach as Worker::subscription()).
         $subs=$this->db->all(
             "SELECT s.*,
-                    o.traffic_bytes AS order_traffic_bytes,
-                    o.devices AS order_devices,
                     COALESCE(o.squad_uuid,p.squad_uuid,'') AS squad_uuid
                FROM subscriptions s
                LEFT JOIN orders o ON o.id=s.order_id
@@ -32,17 +30,13 @@ final class RemnawaveSync
             [$limit]
         );
         foreach($subs as &$s){
-            // devices: order overrides subscription device_limit; default 1
-            $s['devices']=(int)($s['order_devices'] ?? $s['device_limit'] ?? 1);
-            if ($s['devices']<=0) $s['devices']=1;
-            // traffic bytes: order.traffic_bytes > subscription.traffic_limit_bytes > computed GB
-            $t=(int)($s['order_traffic_bytes'] ?? $s['traffic_limit_bytes'] ?? 0);
-            if ($t<=0) {
-                $t=(int)$s['traffic_limit_gb']+ (int)$s['purchased_traffic_gb'];
-                $t = (int)$s['traffic_limit_gb']===0 ? 0 : $t*1073741824;
-            }
-            $s['traffic_bytes']=$t;
-            unset($s['order_traffic_bytes'],$s['order_devices']);
+            // Current subscription limits include purchased add-ons and merges;
+            // the immutable order snapshot does not.
+            $s['devices']=(int)($s['device_limit'] ?? 1);
+            if ($s['devices']<0) $s['devices']=1;
+            $s['traffic_bytes']=(int)$s['traffic_limit_gb']===0
+                ? 0
+                : ((int)$s['traffic_limit_gb']+(int)$s['purchased_traffic_gb'])*1073741824;
         }
         unset($s);
         foreach($subs as $s){
@@ -141,18 +135,19 @@ final class RemnawaveSync
                 $exp = strtotime((string)($u['expireAt'] ?? ''));
                 if (!$exp || $exp <= 0) { $report['errors']++; continue; }
                 $tb = (int)($u['trafficLimitBytes'] ?? 0);
-                $dev = (int)($u['hwidDeviceLimit'] ?? 1); if ($dev <= 0) $dev = 1;
+                $dev = (int)($u['hwidDeviceLimit'] ?? 1); if ($dev < 0) $dev = 1;
                 $now = time();
                 $id = Database::id();
                 $su = (string)($u['shortUuid'] ?? '');
                 $url = (string)($u['subscriptionUrl'] ?? '');
                 $vu = (string)($u['vlessUuid'] ?? '');
-                $this->db->execute(
-                    "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,purchased_traffic_gb,device_limit,is_trial,autopay_enabled,is_daily_paused,modem_enabled,traffic_used_gb,auto_renew,renew_fail_count,lifecycle_status,version,remote_id,remnawave_id,remnawave_uuid,remnawave_short_uuid,subscription_url,start_date,traffic_limit_bytes) VALUES(?,NULL,?,'active',?,?,?,0,?,0,0,0,0,0,0,0,'active',0,?,?,?,?,?,?,?)",
-                    [$id, $userId, $exp, $now, (int)($tb / 1073741824), $dev, (string)$rnId, $rnId, $vu, $su, $url, $now, $tb]
-                );
-                if (!empty($url)) $this->db->execute('UPDATE subscriptions SET subscription_url=? WHERE id=?', [$url, $id]);
-                $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,external_user_id,state,created_at,updated_at) VALUES(?,?,'remnawave',?,'active',?,?)", [Database::id(), $id, (string)$rnId, $now, $now]);
+                $this->db->transaction(function() use ($id,$userId,$exp,$now,$tb,$dev,$rnId,$vu,$su,$url) {
+                    $this->db->execute(
+                        "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,purchased_traffic_gb,device_limit,is_trial,autopay_enabled,is_daily_paused,modem_enabled,traffic_used_gb,auto_renew,renew_fail_count,lifecycle_status,version,remote_id,remnawave_id,remnawave_uuid,remnawave_short_uuid,subscription_url,start_date,traffic_limit_bytes) VALUES(?,NULL,?,'active',?,?,?,0,?,0,0,0,0,0,0,0,'active',0,?,?,?,?,?,?,?)",
+                        [$id, $userId, $exp, $now, intdiv($tb,1073741824), $dev, (string)$rnId, $rnId, $vu, $su, $url, $now, $tb]
+                    );
+                    $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,external_user_id,state,created_at,updated_at) VALUES(?,?,'remnawave',?,'active',?,?)", [Database::id(), $id, (string)$rnId, $now, $now]);
+                });
                 $known[$rnId] = true;
                 $report['imported']++;
                 $report['details'][] = "id=$rnId imported";

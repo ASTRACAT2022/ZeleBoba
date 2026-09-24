@@ -101,6 +101,46 @@ final class MarketingTest extends TestCase
         self::assertSame(10000,$this->wallet->balance($this->uid)['balance_kopeks']);
         self::assertNull($svc->register($this->uid,'unknown'));
     }
+    public function testCampaignSubscriptionRequiresPlanAndCreatesProvisioningJob():void
+    {
+        $svc=new CampaignService($this->db,$this->outbox,$this->wallet);
+        $input=['name'=>'Пробный доступ','start_parameter'=>'access2026','bonus_type'=>'subscription','balance_bonus_kopeks'=>'0','subscription_duration_days'=>'7','subscription_traffic_gb'=>'','subscription_device_limit'=>'','plan_id'=>'','partner_user_id'=>''];
+        try {$svc->create($input,$this->uid);self::fail('Expected missing plan rejection');}
+        catch(\App\Billing\BillingError $e){self::assertStringContainsString('тариф',$e->getMessage());}
+        $input['plan_id']='basic';
+        $campaign=$svc->create($input,$this->uid);
+        $svc->register($this->uid,$campaign['start_parameter']);
+        $sub=$this->db->one('SELECT status,plan_id FROM subscriptions WHERE user_id=?',[$this->uid]);
+        self::assertSame('provisioning',$sub['status']);
+        self::assertSame('basic',$sub['plan_id']);
+        self::assertCount(1,$this->db->all("SELECT id FROM outbox WHERE topic='subscription.provision'"));
+    }
+    public function testLegacyCampaignWithMissingBonusCannotBeMarkedGranted():void
+    {
+        $svc=new CampaignService($this->db,$this->outbox,$this->wallet);
+        $campaign=$svc->create(['name'=>'Legacy','start_parameter'=>'legacy-bonus','bonus_type'=>'balance','balance_bonus_kopeks'=>100],$this->uid);
+        $this->db->execute('UPDATE advertising_campaigns SET balance_bonus_kopeks=0 WHERE id=?',[$campaign['id']]);
+        $this->expectException(\App\Billing\BillingError::class);
+        try {$svc->register($this->uid,'legacy-bonus');}
+        finally {self::assertCount(0,$this->db->all('SELECT id FROM advertising_campaign_registrations'));}
+    }
+    public function testContestCannotRecordUnpayablePrize():void
+    {
+        $svc=new ContestService($this->db,$this->outbox,$this->wallet);
+        $t=$svc->createTemplate(['name'=>'Трафик','slug'=>'traffic-prize','prize_type'=>'traffic','prize_value'=>'5','max_winners'=>'1','times_per_day'=>'1'],$this->uid);
+        $round=$svc->startRound($t['id'],$this->uid);
+        $this->expectException(\App\Billing\BillingError::class);
+        try {$svc->attempt($this->uid,$round['id']);}
+        finally {self::assertCount(0,$this->db->all('SELECT id FROM contest_attempts'));}
+    }
+    public function testPollRejectsAnswerOutsideOptionsWithoutReward():void
+    {
+        $svc=new PollService($this->db,$this->outbox,$this->wallet);
+        $poll=$svc->create(['title'=>'Выбор','reward_amount_kopeks'=>'5000','questions'=>[['text'=>'Оценка','options'=>['5','4']]]],$this->uid);
+        $this->expectException(\App\Billing\BillingError::class);
+        try {$svc->submit($this->uid,$poll['id'],['другое']);}
+        finally {self::assertSame(0,$this->wallet->balance($this->uid)['balance_kopeks']);}
+    }
     public function testPriorityDrainsPersonalTelegramBeforeBroadcast():void
     {
         // Personal telegram.send must be processed before a mass broadcast, even when older.

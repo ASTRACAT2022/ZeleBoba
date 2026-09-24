@@ -18,6 +18,7 @@ final class Outbox
         'subscription.renew' => 80,
         'subscription.traffic' => 80,
         'subscription.devices' => 80,
+        'subscription.admin_sync' => 80,
         'gift.create' => 70,
         'telegram.send' => 60,
         'telegram.answer' => 60,

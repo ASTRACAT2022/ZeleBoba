@@ -92,6 +92,20 @@ final class PromoCodeTest extends TestCase
         self::assertSame('no_subscription_for_days',$r['error']);
         self::assertSame(0,(int)$this->db->one('SELECT current_uses FROM promocodes')['current_uses']);
     }
+    public function testCombinedPromoRollsBackDaysWhenTrafficCannotApply():void
+    {
+        $this->make(['type'=>'balance_and_days','subscription_days'=>'10','traffic_gb'=>'5']);
+        $now=time();
+        $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb) VALUES('unlimited',NULL,?,'active',?,?,0)",[$this->uid,$now+86400,$now]);
+        $result=$this->promos->activate($this->uid,'SUMMER2026');
+        self::assertFalse($result['success']);
+        self::assertSame('traffic_not_applicable',$result['error']);
+        self::assertSame($now+86400,(int)$this->db->one("SELECT expires_at FROM subscriptions WHERE id='unlimited'")['expires_at']);
+        self::assertSame(0,$this->wallet->balance($this->uid)['balance_kopeks']);
+        self::assertSame(0,(int)$this->db->one('SELECT current_uses FROM promocodes')['current_uses']);
+        self::assertCount(0,$this->db->all('SELECT * FROM promocode_uses'));
+        self::assertCount(0,$this->db->all("SELECT * FROM outbox WHERE topic='subscription.extend'"));
+    }
     public function testTrialPromoCreatesTrialSubscription():void
     {
         $this->make(['type'=>'trial_subscription','subscription_days'=>'7','plan_id'=>'basic','balance_bonus_kopeks'=>'0']);

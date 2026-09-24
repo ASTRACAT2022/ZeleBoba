@@ -6,6 +6,7 @@ use App\Infrastructure\Database;
 use App\Billing\BillingService;
 use App\Integration\RemnawaveSync;
 use App\Integration\RemnawaveProvisioner;
+use App\Infrastructure\CircuitBreaker;
 use Symfony\Component\HttpClient\{MockHttpClient,Response\MockResponse};
 
 final class RemnawaveSyncTest extends TestCase
@@ -41,6 +42,88 @@ final class RemnawaveSyncTest extends TestCase
         self::assertSame(1,$report['checked']);
         self::assertSame(1,$report['fixed']);
         self::assertSame(0,$report['errors']);
+    }
+    public function testSyncPreservesPurchasedTrafficAndDeviceAddons(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute('UPDATE subscriptions SET traffic_limit_gb=10,purchased_traffic_gb=20,device_limit=5 WHERE id=?',[$sub['id']]);
+        $patched=null;
+        $http=new MockHttpClient(function($method,$url,$options)use($sub,&$patched){
+            if($method==='PATCH') {
+                $patched=json_decode((string)$options['body'],true,512,JSON_THROW_ON_ERROR);
+                return new MockResponse('{}');
+            }
+            return new MockResponse(json_encode(['response'=>[
+                'id'=>100,'username'=>'zb_'.$sub['id'],'status'=>'ACTIVE',
+                'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$sub['expires_at']),
+                'trafficLimitBytes'=>10*1073741824,'hwidDeviceLimit'=>3,'subscriptionUrl'=>'https://sub.example/k',
+            ]]));
+        });
+        $report=(new RemnawaveSync($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->run(10,true);
+        self::assertSame(1,$report['fixed']);
+        self::assertSame(30*1073741824,$patched['trafficLimitBytes']);
+        self::assertSame(5,$patched['hwidDeviceLimit']);
+    }
+    public function testSyncPreservesUnlimitedDeviceSetting(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute('UPDATE subscriptions SET device_limit=0 WHERE id=?',[$sub['id']]);
+        $patched=null;
+        $http=new MockHttpClient(function($method,$url,$options)use($sub,&$patched){
+            if($method==='PATCH') {
+                $patched=json_decode((string)$options['body'],true,512,JSON_THROW_ON_ERROR);
+                return new MockResponse('{}');
+            }
+            return new MockResponse(json_encode(['response'=>[
+                'id'=>100,'username'=>'zb_'.$sub['id'],'status'=>'ACTIVE',
+                'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$sub['expires_at']),
+                'trafficLimitBytes'=>0,'hwidDeviceLimit'=>3,'subscriptionUrl'=>'https://sub.example/k',
+            ]]));
+        });
+        $report=(new RemnawaveSync($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->run(10,true);
+        self::assertSame(1,$report['fixed']);
+        self::assertSame(0,$patched['hwidDeviceLimit']);
+    }
+    public function testListActiveUsersFailsIfLaterPageFails(): void
+    {
+        $calls=0;
+        $http=new MockHttpClient(function()use(&$calls){
+            $calls++;
+            if($calls===2) return new MockResponse('{}',['http_code'=>503]);
+            return new MockResponse(json_encode(['response'=>['users'=>[['id'=>1,'status'=>'ACTIVE']],'total'=>2]]));
+        });
+        $this->expectException(\RuntimeException::class);
+        (new RemnawaveProvisioner($http,'https://panel.example','token','squad'))->listActiveUsers(1);
+    }
+    public function testPatchFailureIsReportedInsteadOfMarkedSynced(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute('UPDATE subscriptions SET traffic_limit_gb=10 WHERE id=?',[$sub['id']]);
+        $http=new MockHttpClient(function($method)use($sub){
+            if($method==='PATCH') return new MockResponse('failure',['http_code'=>503]);
+            return new MockResponse(json_encode(['response'=>[
+                'id'=>100,'username'=>'zb_'.$sub['id'],'status'=>'ACTIVE',
+                'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$sub['expires_at']),
+                'trafficLimitBytes'=>0,'hwidDeviceLimit'=>3,'subscriptionUrl'=>'https://sub.example/k',
+            ]]));
+        });
+        $report=(new RemnawaveSync($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->run(10,true);
+        self::assertSame(0,$report['fixed']);
+        self::assertSame(1,$report['errors']);
+    }
+    public function testExpectedMissingUserDoesNotTripCircuitBreaker(): void
+    {
+        $http=new MockHttpClient(function($method){
+            if($method==='GET') return new MockResponse('{}',['http_code'=>404]);
+            return new MockResponse(json_encode(['response'=>[
+                'id'=>123,'username'=>'zb_new','subscriptionUrl'=>'https://sub.example/new',
+            ]]));
+        });
+        $breaker=new CircuitBreaker($this->db,1,300);
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad',$breaker);
+        $result=$p->provision(['id'=>'new','expires_at'=>time()+86400,'traffic_bytes'=>0,'devices'=>1]);
+        self::assertSame('123',$result['id']);
+        self::assertSame(CircuitBreaker::CLOSED,$breaker->state('remnawave_api')['state']);
     }
     public function testSyncReprovisionsMissingUser(): void
     {
@@ -136,6 +219,17 @@ final class RemnawaveSyncTest extends TestCase
         self::assertNotNull($sub);
         self::assertSame('888',(string)$sub['remote_id']);
         self::assertSame('remnawave',$this->db->one('SELECT provider FROM provisioning_accounts WHERE subscription_id=?',[$sub['id']])['provider']);
+    }
+    public function testImportMissingRollsBackSubscriptionWhenAccountInsertFails(): void
+    {
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['43','u']);
+        $this->db->execute("CREATE TRIGGER reject_import_account BEFORE INSERT ON provisioning_accounts BEGIN SELECT RAISE(ABORT, 'simulated failure'); END");
+        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['response'=>['users'=>[
+            ['id'=>889,'status'=>'ACTIVE','telegram_id'=>'43','expireAt'=>'2030-01-01T00:00:00Z','trafficLimitBytes'=>0,'hwidDeviceLimit'=>0],
+        ],'total'=>1]])));
+        $report=(new RemnawaveSync($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->importMissing(200,true);
+        self::assertSame(1,$report['errors']);
+        self::assertNull($this->db->one('SELECT id FROM subscriptions WHERE remnawave_id=?',[889]));
     }
     public function testListActiveUsersPaginatesAllPages(): void
     {
