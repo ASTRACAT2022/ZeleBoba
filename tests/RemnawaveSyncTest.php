@@ -92,6 +92,20 @@ final class RemnawaveSyncTest extends TestCase
         self::assertSame(0,$result['freshness']);
         self::assertFalse($result['rows'][0]['ok']);
     }
+    public function testInvestigationResolvesStalePanelIdByShortUuid(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute("UPDATE subscriptions SET remnawave_id=777,remote_id='777',remnawave_short_uuid='knownShort' WHERE id=?",[$sub['id']]);
+        $http=new MockHttpClient(function($method,$url)use($sub){
+            self::assertSame('GET',$method);
+            if(str_ends_with($url,'/api/users/777'))return new MockResponse('{}',['http_code'=>404]);
+            self::assertStringEndsWith('/api/users/by-short-uuid/knownShort',$url);
+            return new MockResponse(json_encode(['response'=>['id'=>999,'shortUuid'=>'knownShort','status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$sub['expires_at']),'trafficLimitBytes'=>0]]));
+        });
+        $result=(new InvestigationService($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->expectedActual($sub['id']);
+        self::assertNull($result['error']);
+        self::assertTrue($result['rows'][0]['ok']);
+    }
     public function testSyncPreservesPurchasedTrafficAndDeviceAddons(): void
     {
         $sub=$this->seedActiveSubscription(time()+30*86400);

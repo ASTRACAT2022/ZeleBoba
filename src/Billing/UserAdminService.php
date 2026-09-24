@@ -106,11 +106,7 @@ final class UserAdminService
         $panel = null;
         if ($this->provisioner) {
             try {
-                if ((int)($sub['remnawave_id'] ?? 0) > 0) {
-                    $panel = $this->provisioner->fetchById((int)$sub['remnawave_id']);
-                } else {
-                    $panel = $this->provisioner->fetch('zb_'.$sub['id']);
-                }
+                $panel = $this->provisioner->resolve($sub);
             } catch (\Throwable $e) {}
         }
         $panelTrafficUsed = 0;

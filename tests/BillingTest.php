@@ -147,6 +147,27 @@ final class BillingTest extends TestCase
         self::assertSame(999,(int)$this->db->one("SELECT remnawave_id FROM subscriptions WHERE id='legacy-sub'")['remnawave_id']);
         self::assertSame(1,(int)$this->db->one("SELECT COUNT(*) AS n FROM outbox WHERE topic='telegram.send'")['n']);
     }
+    public function testStalePanelIdFallsBackToStoredShortUuid():void
+    {
+        $expiry=time()+86400;
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['12345',$this->uid]);
+        $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,remote_id,remnawave_id,remnawave_short_uuid) VALUES('legacy-sub',NULL,?,'active',?,?,10,3,'777',777,'legacyShort')",[$this->uid,$expiry,time()]);
+        $patched=null;
+        $http=new MockHttpClient(function($method,$url,$options)use($expiry,&$patched){
+            if($method==='PATCH'){$patched=json_decode((string)$options['body'],true,512,JSON_THROW_ON_ERROR);return new MockResponse('{}');}
+            if(str_ends_with($url,'/api/users/777'))return new MockResponse('{}',['http_code'=>404]);
+            if(str_ends_with($url,'/api/users/by-short-uuid/legacyShort')||str_ends_with($url,'/api/users/999')) {
+                return new MockResponse(json_encode(['response'=>['id'=>999,'shortUuid'=>'legacyShort','username'=>'legacy_name','status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',$expiry)]]));
+            }
+            self::fail('Unexpected Remnawave lookup: '.$url);
+        });
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $worker=new Worker($this->db,$this->outbox,new Payments($this->db,$this->billing,$http,[]),$p,$http,'',defaultProvisionDriver:'remnawave');
+        $worker->handle('subscription.extend',['subscription_id'=>'legacy-sub']);
+        self::assertSame(999,$patched['id']);
+        self::assertSame(999,(int)$this->db->one("SELECT remnawave_id FROM subscriptions WHERE id='legacy-sub'")['remnawave_id']);
+        self::assertSame(1,(int)$this->db->one("SELECT COUNT(*) AS n FROM outbox WHERE topic='telegram.send'")['n']);
+    }
     public function testRemnawaveRecoversPreviouslyCreatedUser():void
     {
         $calls=[];$patched=null;

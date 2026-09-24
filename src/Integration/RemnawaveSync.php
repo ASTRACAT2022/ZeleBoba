@@ -46,12 +46,7 @@ final class RemnawaveSync
             if($panelId<=0 && ctype_digit((string)($s['remote_id']??'')))$panelId=(int)$s['remote_id'];
             $hasKnownRemote=$panelId>0 || !empty($s['remote_id']);
             try {
-                $remote=$panelId>0?$this->provisioner->fetchById($panelId):$this->provisioner->resolve($s);
-                if(!$remote && $panelId>0){
-                    $canonical='zb_'.$s['id'];
-                    $candidate=$this->provisioner->fetch($canonical);
-                    if($candidate && ($candidate['username']??null)===$canonical)$remote=$candidate;
-                }
+                $remote=$this->provisioner->resolve($s);
                 if($s['status']==='expired'){
                     if($remote && ($remote['status']??'')==='ACTIVE'){
                         if($fix){ $this->provisioner->disableById((int)$remote['id']); $report['disabled']++; $report['details'][]="$username: disabled expired"; }

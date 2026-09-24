@@ -72,6 +72,11 @@ final class RemnawaveProvisioner implements Provisioner
             $u=$this->fetchById($id);
             if ($u) return $u;
         }
+        $shortUuid=(string)($subscription['remnawave_short_uuid']??'');
+        if ($shortUuid!=='' && preg_match('/^[A-Za-z0-9_-]+$/D',$shortUuid)) {
+            $u=$this->fetchByShortUuid($shortUuid);
+            if ($u && ($u['shortUuid']??null)===$shortUuid) return $u;
+        }
         $username='zb_'.($subscription['id']??'');
         if ($username!=='zb_') {
             $u=$this->fetch($username);
@@ -120,6 +125,15 @@ final class RemnawaveProvisioner implements Provisioner
     public function fetchById(int $id): ?array
     {
         $response=$this->request('GET','/api/users/'.$id);
+        if ($response->getStatusCode()===404) return null;
+        $this->requireSuccess($response);
+        $data=$response->toArray()['response']??null;
+        return $data===null||$data===[] ? null : $data;
+    }
+    public function fetchByShortUuid(string $shortUuid): ?array
+    {
+        if (!preg_match('/^[A-Za-z0-9_-]+$/D',$shortUuid)) return null;
+        $response=$this->request('GET','/api/users/by-short-uuid/'.$shortUuid);
         if ($response->getStatusCode()===404) return null;
         $this->requireSuccess($response);
         $data=$response->toArray()['response']??null;

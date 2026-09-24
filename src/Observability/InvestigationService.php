@@ -41,8 +41,7 @@ final class InvestigationService
         $remote=null;$error=null;
         if ($this->remnawave !== null) {
             try {
-                $panelId=(int)($s['remnawave_id']??0);
-                $remote=$panelId>0?$this->remnawave->fetchById($panelId):$this->remnawave->fetch('zb_'.$subscriptionId);
+                $remote=$this->remnawave->resolve($s);
                 if ($remote===null) $error='Пользователь не найден в Remnawave';
             } catch (\Throwable $e) {
                 $error='Не удалось получить текущие данные Remnawave';
