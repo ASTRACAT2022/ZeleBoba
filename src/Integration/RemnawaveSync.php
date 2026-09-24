@@ -42,36 +42,31 @@ final class RemnawaveSync
         foreach($subs as $s){
             $report['checked']++;
             $username='zb_'.$s['id'];
+            $panelId=(int)($s['remnawave_id']??0);
+            if($panelId<=0 && ctype_digit((string)($s['remote_id']??'')))$panelId=(int)$s['remote_id'];
+            $hasKnownRemote=$panelId>0 || !empty($s['remote_id']);
             try {
-                $remote=$this->provisioner->fetch($username);
+                $remote=$panelId>0?$this->provisioner->fetchById($panelId):$this->provisioner->resolve($s);
                 if($s['status']==='expired'){
                     if($remote && ($remote['status']??'')==='ACTIVE'){
-                        if($fix){ $this->provisioner->disable($username); $report['disabled']++; $report['details'][]="$username: disabled expired"; }
+                        if($fix){ $this->provisioner->disableById((int)$remote['id']); $report['disabled']++; $report['details'][]="$username: disabled expired"; }
                         else { $report['details'][]="$username: would disable expired"; }
                     }
                     continue;
                 }
                 // active
                 if(!$remote){
-                    // Not found under canonical zb_<id>; try the stored remote_id
-                    // before declaring missing — legacy subs may live in the
-                    // panel under a different username. Fallback prevents
-                    // duplicate reprovision of an existing panel user.
-                    $remote=$this->provisioner->resolve($s);
-                    if ($remote){
-                        $report['details'][]="$username: found by remote_id (id=".($remote['id']??'?').")";
+                    $report['missing']++;
+                    if($hasKnownRemote){$report['errors']++;$report['details'][]="$username: known panel account missing; manual review required";continue;}
+                    if($fix){
+                        $result=$this->provisioner->provision($s);
+                        $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[$result['id'],$result['url'],$s['id']]);
+                        $this->markActive($s['id'],(string)$result['id']);
+                        $report['reprovisioned']++; $report['details'][]="$username: reprovisioned";
                     } else {
-                        $report['missing']++;
-                        if($fix){
-                            $result=$this->provisioner->provision($s);
-                            $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[$result['id'],$result['url'],$s['id']]);
-                            $this->markActive($s['id'],(string)$result['id']);
-                            $report['reprovisioned']++; $report['details'][]="$username: reprovisioned";
-                        } else {
-                            $report['details'][]="$username: missing on panel";
-                        }
-                        continue;
+                        $report['details'][]="$username: missing on panel";
                     }
+                    continue;
                 }
                 // Compare expireAt (panel is ISO8601), traffic, devices
                 $panelExpire=strtotime($remote['expireAt']??'');
@@ -81,7 +76,12 @@ final class RemnawaveSync
                 $needsFix=$drift>60 || $panelTraffic!==(int)$s['traffic_bytes'] || $panelDevices!==(int)$s['devices'] || ($remote['status']??'')!=='ACTIVE';
                 if($needsFix){
                     if($fix){
-                        $this->provisioner->extend($s);
+                        $remoteId=(int)($remote['id']??0);
+                        if($remoteId<=0)throw new \RuntimeException('Remnawave user id missing');
+                        $this->provisioner->updateById($remoteId,(int)$s['traffic_bytes'],(int)$s['devices'],(int)$s['expires_at']);
+                        $verified=$this->provisioner->fetchById($remoteId);
+                        $verifiedExpiry=is_array($verified)?strtotime((string)($verified['expireAt']??'')):false;
+                        if(!$verifiedExpiry || abs($verifiedExpiry-(int)$s['expires_at'])>60 || ($verified['status']??null)!=='ACTIVE')throw new \RuntimeException('Remnawave sync readback failed');
                         // Also ensure subscriptionUrl is stored
                         if(empty($s['subscription_url']) && !empty($remote['subscriptionUrl'])){
                             $this->db->execute('UPDATE subscriptions SET subscription_url=? WHERE id=?',[$remote['subscriptionUrl'],$s['id']]);

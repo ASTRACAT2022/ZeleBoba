@@ -16,6 +16,7 @@ final class Reconciler
         });
         if(!$taken)return 0;
         try{
+            if (isset($this->app->compensations)) $this->app->compensations->reconcileStatus();
             $money=(new \App\Observability\ConsistencyChecker($db))->run();
             // Some operational tests/tools construct a minimal Container.
             // `isset` is safe for an uninitialized typed property.

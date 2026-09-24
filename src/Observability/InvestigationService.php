@@ -3,11 +3,12 @@ declare(strict_types=1);
 namespace App\Observability;
 use App\Infrastructure\Database;
 use App\Billing\BillingError;
+use App\Integration\RemnawaveProvisioner;
 
 /** A durable support workspace; notes never change billing state. */
 final class InvestigationService
 {
-    public function __construct(private Database $db) {}
+    public function __construct(private Database $db, private ?RemnawaveProvisioner $remnawave=null) {}
     public function start(string $type,string $id,string $title,string $actor): array
     {
         if(!in_array($type,['user','subscription','payment','incident'],true)||$id==='')throw new BillingError('Некорректный объект расследования.');
@@ -37,10 +38,25 @@ final class InvestigationService
     public function expectedActual(string $subscriptionId): ?array
     {
         $s=$this->db->one('SELECT s.*,COALESCE(p.name,o.plan_name) plan_name,pa.state,pa.last_synced_at,pa.last_error,pa.external_user_id FROM subscriptions s LEFT JOIN plans p ON p.id=s.plan_id LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN provisioning_accounts pa ON pa.subscription_id=s.id WHERE s.id=?',[$subscriptionId]);if(!$s)return null;
-        $expected=['Статус подписки'=>$s['lifecycle_status']??$s['status'],'Срок действия'=>gmdate('d.m.Y H:i',(int)$s['expires_at']),'Лимит трафика'=>((int)($s['traffic_limit_gb']??0)===0?'Безлимит':$s['traffic_limit_gb'].' ГБ'),'Выдача VPN'=>'active'];
-        $actual=['Статус подписки'=>$s['status'],'Срок действия'=>gmdate('d.m.Y H:i',(int)$s['expires_at']),'Лимит трафика'=>((int)($s['traffic_limit_gb']??0)===0?'Безлимит':$s['traffic_limit_gb'].' ГБ'),'Выдача VPN'=>$s['state']??'не создана'];
-        $rows=[];foreach($expected as $name=>$want)$rows[]=['name'=>$name,'expected'=>$want,'actual'=>$actual[$name],'ok'=>$want===$actual[$name]||($name==='Выдача VPN'&&$actual[$name]==='active')];
-        return ['subscription'=>$s,'rows'=>$rows,'freshness'=>$s['last_synced_at']?max(0,time()-(int)$s['last_synced_at']):null];
+        $remote=null;$error=null;
+        if ($this->remnawave !== null) {
+            try {
+                $panelId=(int)($s['remnawave_id']??0);
+                $remote=$panelId>0?$this->remnawave->fetchById($panelId):$this->remnawave->fetch('zb_'.$subscriptionId);
+                if ($remote===null) $error='Пользователь не найден в Remnawave';
+            } catch (\Throwable $e) {
+                $error='Не удалось получить текущие данные Remnawave';
+            }
+        }
+        $expiry=$remote!==null?strtotime((string)($remote['expireAt']??'')):false;
+        $expectedBytes=(int)($s['traffic_limit_gb']??0)===0?0:((int)$s['traffic_limit_gb']+(int)($s['purchased_traffic_gb']??0))*1073741824;
+        $actualBytes=$remote!==null&&isset($remote['trafficLimitBytes'])?(int)$remote['trafficLimitBytes']:null;
+        $rows=[
+            ['name'=>'Срок действия','expected'=>gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC','actual'=>$expiry?gmdate('d.m.Y H:i',$expiry).' UTC':'Не проверено','ok'=>$expiry!==false&&abs($expiry-(int)$s['expires_at'])<=60],
+            ['name'=>'Лимит трафика','expected'=>$expectedBytes===0?'Безлимит':round($expectedBytes/1073741824).' ГБ','actual'=>$actualBytes===null?'Не проверено':($actualBytes===0?'Безлимит':round($actualBytes/1073741824).' ГБ'),'ok'=>$actualBytes!==null&&$actualBytes===$expectedBytes],
+            ['name'=>'Статус VPN','expected'=>'ACTIVE','actual'=>$remote['status']??'Не проверено','ok'=>($remote['status']??null)==='ACTIVE'],
+        ];
+        return ['subscription'=>$s,'rows'=>$rows,'freshness'=>$remote!==null?0:null,'error'=>$error??($this->remnawave===null?'Сверка с Remnawave не настроена':null)];
     }
     public function whyNotRenewed(string $subscriptionId): array
     {

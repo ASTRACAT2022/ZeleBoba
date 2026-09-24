@@ -213,6 +213,12 @@ final class CompensationService
         $this->db->execute("UPDATE compensations SET status='completed',completed_at=? WHERE id=? AND status='running' AND processed_count+skipped_count=total_count AND failed_count=0", [time(),$id]);
     }
 
+    /** Repair campaigns completed by an older worker before it set the final status. */
+    public function reconcileStatus(): void
+    {
+        $this->db->execute("UPDATE compensations SET status='completed',completed_at=? WHERE status='running' AND processed_count+skipped_count=total_count AND failed_count=0",[time()]);
+    }
+
     public function list(int $limit = 50): array
     {
         $rows = $this->db->all('SELECT * FROM compensations ORDER BY created_at DESC LIMIT ?', [$limit]);

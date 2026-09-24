@@ -215,6 +215,22 @@ final class CompensationTest extends TestCase
         self::assertSame(500,$this->wallet->balance($this->uid)['balance_kopeks']);
         self::assertSame(0,(int)$this->db->one('SELECT failed_count FROM compensations WHERE id=?',[$c['id']])['failed_count']);
     }
+    public function testRetryingDeadPanelSyncDoesNotGrantDaysAgain():void
+    {
+        $billing=new BillingService($this->db,$this->outbox,'demo');
+        $order=$billing->order($this->uid,'basic','comp-retry-sync');
+        $billing->settle($order['id'],'demo','demo_retry_sync',19900,'RUB');
+        $c=$this->svc->create('all','days',3,'За сбой',$this->adminUid,'admin');
+        $this->svc->run($c['id']);
+        $this->svc->grant($c['id'],$this->uid);
+        $sub=$this->db->one('SELECT id,expires_at FROM subscriptions WHERE user_id=?',[$this->uid]);
+        $key='comp-days:'.$c['id'].':'.$sub['id'];
+        $this->db->execute("UPDATE outbox SET status='dead',attempts=8 WHERE dedup_key=?",[$key]);
+        self::assertSame(1,$this->svc->retryFailed($c['id'],$this->adminUid));
+        self::assertSame('pending',$this->db->one('SELECT status FROM outbox WHERE dedup_key=?',[$key])['status']);
+        self::assertSame((int)$sub['expires_at'],(int)$this->db->one('SELECT expires_at FROM subscriptions WHERE id=?',[$sub['id']])['expires_at']);
+        self::assertSame(1,(int)$this->db->one('SELECT processed_count FROM compensations WHERE id=?',[$c['id']])['processed_count']);
+    }
 
     public function testOutboxExhaustionMarksGrantFailedAndCanRetry():void
     {

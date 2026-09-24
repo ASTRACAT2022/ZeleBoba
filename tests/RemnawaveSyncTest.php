@@ -6,6 +6,7 @@ use App\Infrastructure\Database;
 use App\Billing\BillingService;
 use App\Integration\RemnawaveSync;
 use App\Integration\RemnawaveProvisioner;
+use App\Observability\InvestigationService;
 use App\Infrastructure\CircuitBreaker;
 use Symfony\Component\HttpClient\{MockHttpClient,Response\MockResponse};
 
@@ -31,17 +32,50 @@ final class RemnawaveSyncTest extends TestCase
     public function testSyncFixesExpiryDrift(): void
     {
         $sub=$this->seedActiveSubscription(time()+30*86400);
-        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['response'=>[
-            'id'=>100,'username'=>'zb_'.$sub['id'],'status'=>'ACTIVE',
-            'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',time()+35*86400),
-            'trafficLimitBytes'=>0,'hwidDeviceLimit'=>3,'subscriptionUrl'=>'https://sub.example/k',
-        ]])));
+        $expiry=time()+35*86400;
+        $http=new MockHttpClient(function($method,$url,$options)use($sub,&$expiry){
+            if($method==='PATCH'){
+                $body=json_decode((string)$options['body'],true,512,JSON_THROW_ON_ERROR);
+                $expiry=strtotime($body['expireAt']);
+                return new MockResponse('{}');
+            }
+            return new MockResponse(json_encode(['response'=>[
+                'id'=>100,'username'=>'zb_'.$sub['id'],'status'=>'ACTIVE',
+                'expireAt'=>gmdate('Y-m-d\TH:i:s\Z',$expiry),
+                'trafficLimitBytes'=>0,'hwidDeviceLimit'=>3,'subscriptionUrl'=>'https://sub.example/k',
+            ]]));
+        });
         $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
         $sync=new RemnawaveSync($this->db,$p);
         $report=$sync->run(10,true);
         self::assertSame(1,$report['checked']);
         self::assertSame(1,$report['fixed']);
         self::assertSame(0,$report['errors']);
+    }
+    public function testLegacySyncUsesPanelIdWithoutCreatingDuplicate(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute("UPDATE subscriptions SET remnawave_id=777,remote_id='777' WHERE id=?",[$sub['id']]);
+        $expiry=time()+25*86400;$calls=[];
+        $http=new MockHttpClient(function($method,$url,$options)use($sub,&$expiry,&$calls){
+            $calls[]=$method.' '.$url;
+            if($method==='PATCH'){$body=json_decode((string)$options['body'],true,512,JSON_THROW_ON_ERROR);self::assertSame(777,$body['id']);$expiry=strtotime($body['expireAt']);return new MockResponse('{}');}
+            self::assertStringEndsWith('/api/users/777',$url);
+            return new MockResponse(json_encode(['response'=>['id'=>777,'username'=>'mack_6666','status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',$expiry),'trafficLimitBytes'=>0,'hwidDeviceLimit'=>3]]));
+        });
+        $report=(new RemnawaveSync($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->run(10,true);
+        self::assertSame(1,$report['fixed']);
+        self::assertSame(0,$report['reprovisioned']);
+        self::assertCount(3,$calls);
+    }
+    public function testInvestigationShowsPanelExpiryMismatch(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute('UPDATE subscriptions SET remnawave_id=777 WHERE id=?',[$sub['id']]);
+        $http=new MockHttpClient(fn()=>new MockResponse(json_encode(['response'=>['id'=>777,'status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',time()+27*86400),'trafficLimitBytes'=>0]])));
+        $result=(new InvestigationService($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->expectedActual($sub['id']);
+        self::assertSame(0,$result['freshness']);
+        self::assertFalse($result['rows'][0]['ok']);
     }
     public function testSyncPreservesPurchasedTrafficAndDeviceAddons(): void
     {

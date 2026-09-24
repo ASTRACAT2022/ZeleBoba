@@ -89,6 +89,39 @@ final class BillingTest extends TestCase
         $this->expectException(JobDeferred::class);
         $worker->handle('subscription.traffic',['subscription_id'=>'pending-remote','traffic_gb'=>5]);
     }
+    public function testLegacyExtensionUsesPanelIdAndNotifiesOnlyAfterReadback():void
+    {
+        $expiry=time()+86400;
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['12345',$this->uid]);
+        $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,remote_id,remnawave_id) VALUES('legacy-sub',NULL,?,'active',?,?,10,3,NULL,777)",[$this->uid,$expiry,time()]);
+        $patched=null;
+        $http=new MockHttpClient(function($method,$url,$options)use($expiry,&$patched){
+            self::assertStringContainsString('/api/users', $url);
+            if ($method==='PATCH') {$patched=json_decode((string)$options['body'],true,512,JSON_THROW_ON_ERROR);return new MockResponse('{}');}
+            self::assertStringEndsWith('/api/users/777',$url);
+            return new MockResponse(json_encode(['response'=>['id'=>777,'status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',$expiry)]]));
+        });
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $worker=new Worker($this->db,$this->outbox,new Payments($this->db,$this->billing,$http,[]),$p,$http,'',defaultProvisionDriver:'remnawave');
+        $worker->handle('subscription.extend',['subscription_id'=>'legacy-sub']);
+        self::assertSame(777,$patched['id']);
+        self::assertSame(1,(int)$this->db->one("SELECT COUNT(*) AS n FROM outbox WHERE topic='telegram.send'")['n']);
+    }
+    public function testExtensionDoesNotNotifyWhenPanelDidNotChangeExpiry():void
+    {
+        $expiry=time()+86400;
+        $this->db->execute('UPDATE users SET telegram_id=? WHERE id=?',['12345',$this->uid]);
+        $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,remote_id,remnawave_id) VALUES('legacy-sub',NULL,?,'active',?,?,10,3,'777',777)",[$this->uid,$expiry,time()]);
+        $http=new MockHttpClient(function($method)use($expiry){
+            if ($method==='PATCH') return new MockResponse('{}');
+            return new MockResponse(json_encode(['response'=>['id'=>777,'status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',$expiry-86400)]]));
+        });
+        $p=new RemnawaveProvisioner($http,'https://panel.example','token','squad');
+        $worker=new Worker($this->db,$this->outbox,new Payments($this->db,$this->billing,$http,[]),$p,$http,'',defaultProvisionDriver:'remnawave');
+        $this->expectException(\RuntimeException::class);
+        try {$worker->handle('subscription.extend',['subscription_id'=>'legacy-sub']);}
+        finally {self::assertSame(0,(int)$this->db->one("SELECT COUNT(*) AS n FROM outbox WHERE topic='telegram.send'")['n']);}
+    }
     public function testRemnawaveRecoversPreviouslyCreatedUser():void
     {
         $calls=[];$patched=null;

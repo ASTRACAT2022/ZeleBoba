@@ -79,7 +79,6 @@ final class Container
         $this->workflows=new DurableWorkflow($this->db,$this->outbox);
         $this->operations=new OperationsService($this->db);
         $this->intelligence=new OperationsIntelligence($this->db,new ConsistencyChecker($this->db));
-        $this->investigations=new InvestigationService($this->db);
         $this->demoEvents=new DemoEvents($this->db);
         $this->timeline=new CustomerTimeline($this->db);
         $this->billing=new BillingService($this->db,$this->outbox,$config['PAYMENT_DRIVER'],$config,$this->timeline);
@@ -117,6 +116,7 @@ final class Container
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
         $remnawave=new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID'],$this->circuitBreaker);
+        $this->investigations=new InvestigationService($this->db,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null);
         $this->userAdmin=new UserAdminService($this->db,$this->wallet,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->outbox,$this->timeline);
         $this->merger=new \App\Subscriptions\SubscriptionMergeService($this->db,$this->outbox,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->timeline);
         $this->providers=new ProviderRegistry($http,$config);

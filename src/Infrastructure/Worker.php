@@ -202,19 +202,40 @@ final class Worker
             $this->markExtended($s,$orderId);
             return;
         }
-        if ($s['remote_id']===null) { $this->provision($id); return; }
-        $this->provisioner->extend($s);
+        if ($s['remote_id']===null && (int)($s['remnawave_id']??0)<=0) { $this->provision($id); return; }
+        if ((int)($s['remnawave_id']??0)>0) {
+            if (!method_exists($this->provisioner,'updateById')) throw new \RuntimeException('Provisioner cannot extend legacy account by id');
+            $this->provisioner->updateById((int)$s['remnawave_id'],(int)$s['traffic_bytes'],(int)$s['devices'],(int)$s['expires_at']);
+        } else {
+            $this->provisioner->extend($s);
+        }
+        $this->verifyExtended($s);
         $this->markExtended($s,$orderId);
         $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
         $this->operationEvent($id,'provisioning.completed','success','Remnawave synchronization successful',['expires_at'=>$s['expires_at']]);
         $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
         if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','renewed:'.$id.':'.$s['expires_at'],['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
     }
+    private function verifyExtended(array $s): void
+    {
+        if ((int)($s['remnawave_id']??0)>0) {
+            if (!method_exists($this->provisioner,'fetchById')) throw new \RuntimeException('Provisioner cannot verify legacy account');
+            $remote=$this->provisioner->fetchById((int)$s['remnawave_id']);
+        } else {
+            if (!method_exists($this->provisioner,'fetch')) throw new \RuntimeException('Provisioner cannot verify account');
+            $remote=$this->provisioner->fetch('zb_'.$s['id']);
+        }
+        $expiry=is_array($remote)?strtotime((string)($remote['expireAt']??'')):false;
+        if (!$expiry || abs($expiry-(int)$s['expires_at'])>60 || ($remote['status']??null)!=='ACTIVE') {
+            throw new \RuntimeException('Remnawave expiry verification failed');
+        }
+    }
     private function markExtended(array $s, ?string $orderId): void
     {
         $now=time();
         $this->db->transaction(function() use($s,$now,$orderId) {
             if ($orderId!==null) $this->db->execute("UPDATE orders SET status='fulfilled',workflow_status='fulfilled' WHERE id=? AND status='paid'",[$orderId]);
+            if ((int)($s['remnawave_id']??0)>0 && $s['remote_id']===null) $this->db->execute('UPDATE subscriptions SET remote_id=? WHERE id=?',[(string)$s['remnawave_id'],$s['id']]);
             $this->db->execute("UPDATE provisioning_accounts SET state='active',last_synced_at=?,last_error=NULL,updated_at=? WHERE subscription_id=? AND provider=?",[$now,$now,$s['id'],$s['provision_driver']]);
         });
     }
