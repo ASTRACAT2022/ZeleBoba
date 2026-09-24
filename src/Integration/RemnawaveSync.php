@@ -47,6 +47,11 @@ final class RemnawaveSync
             $hasKnownRemote=$panelId>0 || !empty($s['remote_id']);
             try {
                 $remote=$panelId>0?$this->provisioner->fetchById($panelId):$this->provisioner->resolve($s);
+                if(!$remote && $panelId>0){
+                    $canonical='zb_'.$s['id'];
+                    $candidate=$this->provisioner->fetch($canonical);
+                    if($candidate && ($candidate['username']??null)===$canonical)$remote=$candidate;
+                }
                 if($s['status']==='expired'){
                     if($remote && ($remote['status']??'')==='ACTIVE'){
                         if($fix){ $this->provisioner->disableById((int)$remote['id']); $report['disabled']++; $report['details'][]="$username: disabled expired"; }
@@ -94,6 +99,9 @@ final class RemnawaveSync
                 // Ensure local remote_id/url are populated
                 if($fix && (empty($s['remote_id']) || empty($s['subscription_url']))){
                     $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[(string)($remote['id']??$s['remote_id']),$remote['subscriptionUrl']??$s['subscription_url'],$s['id']]);
+                }
+                if($fix && (int)($remote['id']??0)>0 && $panelId>0 && $panelId!==(int)$remote['id']){
+                    $this->db->execute('UPDATE subscriptions SET remote_id=?,remnawave_id=? WHERE id=?',[(string)$remote['id'],(int)$remote['id'],$s['id']]);
                 }
                 if ($fix) $this->markActive($s['id'],(string)($remote['id']??$s['remote_id']));
             } catch (\Throwable $e) {

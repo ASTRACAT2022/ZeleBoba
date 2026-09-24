@@ -61,23 +61,21 @@ final class RemnawaveProvisioner implements Provisioner
             'status'=>'ACTIVE',
         ]));
     }
-    /**
-     * Resolve the panel user for a subscription: try canonical zb_<id> first,
-     * then fall back to stored remote_id/remnawave_id (legacy usernames).
-     * Returns the panel user array or null when not found anywhere.
-     */
+    /** Resolve a known panel id first; the canonical username is a recovery fallback. */
     public function resolve(array $subscription): ?array
     {
+        $tried=[];
+        foreach (['remnawave_id','remote_id'] as $k) {
+            $id=(int)($subscription[$k]??0);
+            if ($id<=0 || isset($tried[$id])) continue;
+            $tried[$id]=true;
+            $u=$this->fetchById($id);
+            if ($u) return $u;
+        }
         $username='zb_'.($subscription['id']??'');
         if ($username!=='zb_') {
             $u=$this->fetch($username);
-            if ($u) return $u;
-        }
-        foreach (['remote_id','remnawave_id'] as $k) {
-            $id=(int)($subscription[$k]??0);
-            if ($id<=0) continue;
-            $u=$this->fetchById($id);
-            if ($u) return $u;
+            if ($u && ($u['username']??null)===$username) return $u;
         }
         // Some legacy rows store the panel id in remote_id as a string uuid; try once more as raw fetch.
         $raw=(string)($subscription['remote_id']??'');

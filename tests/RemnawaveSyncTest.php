@@ -68,6 +68,21 @@ final class RemnawaveSyncTest extends TestCase
         self::assertSame(0,$report['reprovisioned']);
         self::assertCount(3,$calls);
     }
+    public function testSyncRecoversStalePanelIdThroughCanonicalUsername(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute("UPDATE subscriptions SET remnawave_id=777,remote_id='777' WHERE id=?",[$sub['id']]);
+        $http=new MockHttpClient(function($method,$url)use($sub){
+            self::assertSame('GET',$method);
+            if(str_ends_with($url,'/api/users/777'))return new MockResponse('{}',['http_code'=>404]);
+            self::assertStringEndsWith('/api/users/by-username/zb_'.$sub['id'],$url);
+            return new MockResponse(json_encode(['response'=>['id'=>999,'username'=>'zb_'.$sub['id'],'status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$sub['expires_at']),'trafficLimitBytes'=>0,'hwidDeviceLimit'=>3,'subscriptionUrl'=>'https://sub.example/new']]));
+        });
+        $report=(new RemnawaveSync($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->run(10,true);
+        self::assertSame(0,$report['reprovisioned']);
+        self::assertSame(0,$report['errors']);
+        self::assertSame(999,(int)$this->db->one('SELECT remnawave_id FROM subscriptions WHERE id=?',[$sub['id']])['remnawave_id']);
+    }
     public function testInvestigationShowsPanelExpiryMismatch(): void
     {
         $sub=$this->seedActiveSubscription(time()+30*86400);
