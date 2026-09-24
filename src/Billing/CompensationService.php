@@ -1,112 +1,236 @@
 <?php
 declare(strict_types=1);
 namespace App\Billing;
+
 use App\Infrastructure\{Database,Outbox};
+
 final class CompensationService
 {
     public const SEGMENTS = ['all','active','inactive','paid','trial','telegram'];
     public const KINDS = ['balance','days','traffic'];
+    private const BATCH_SIZE = 200;
+
     public function __construct(private Database $db, private Outbox $outbox, private Wallet $wallet) {}
-    /** Create a mass compensation job. Returns the row. */
-    public function create(string $segment, string $kind, int $value, string $reason, string $adminId, string $adminName): array
+
+    /** Freeze the recipients and terms when the administrator submits the form. */
+    public function create(string $segment, string $kind, int $value, string $reason, string $adminId, string $adminName, ?string $planId = null, ?string $requestKey = null): array
     {
+        if ($requestKey !== null && !preg_match('/^[a-f0-9]{32}$/D', $requestKey)) throw new BillingError('Обновите форму компенсации.');
+        $id = $requestKey ?? Database::id();
+        if ($requestKey !== null && ($existing = $this->db->one('SELECT * FROM compensations WHERE id=?', [$id]))) return $existing;
         if (!in_array($segment, self::SEGMENTS, true)) throw new BillingError('Некорректный сегмент.');
         if (!in_array($kind, self::KINDS, true)) throw new BillingError('Некорректный тип компенсации.');
-        if ($value < 1 || $value > 100000000) throw new BillingError('Значение: от 1 до 100 000 000.');
+        $maximum = match ($kind) { 'balance' => 100000000, 'days' => 3650, 'traffic' => 100000 };
+        if ($value < 1 || $value > $maximum) throw new BillingError('Значение компенсации вне допустимого диапазона.');
+        $reason = trim($reason);
         if (mb_strlen($reason) < 3 || mb_strlen($reason) > 200) throw new BillingError('Причина: 3–200 символов.');
-        $id = Database::id();
+        $plan = null;
+        if ($kind === 'days') {
+            $plan = $planId ? $this->db->one('SELECT id,traffic_bytes,devices FROM plans WHERE id=? AND active=1', [$planId]) : null;
+            if (!$plan) throw new BillingError('Для компенсации днями выберите активный тариф.');
+        }
         $now = time();
-        $this->db->transaction(function() use($id,$segment,$kind,$value,$reason,$adminId,$adminName,$now) {
-            $this->db->execute(
-                'INSERT INTO compensations(id,segment,kind,value,reason,total_count,processed_count,status,admin_id,admin_name,created_at) VALUES(?,?,?,?,?,0,0,?,?,?,?)',
-                [$id, $segment, $kind, $value, $reason, 'in_progress', $adminId, $adminName, $now]
+        $this->db->transaction(function () use ($id,$segment,$kind,$value,$reason,$adminId,$adminName,$plan,$now) {
+            $inserted = $this->db->execute(
+                'INSERT INTO compensations(id,segment,kind,value,reason,total_count,processed_count,status,admin_id,admin_name,created_at,plan_id,plan_traffic_gb,plan_devices) VALUES(?,?,?,?,?,0,0,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+                [$id,$segment,$kind,$value,$reason,'in_progress',$adminId,$adminName,$now,$plan['id'] ?? null,$plan ? intdiv((int)$plan['traffic_bytes'],1073741824) : null,$plan ? (int)$plan['devices'] : null]
             );
-            $this->outbox->enqueue('compensation.run', 'compensation:'.$id, ['compensation_id' => $id]);
-            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), $adminId, 'compensation.created', $id, $now]);
+            if (!$inserted) return;
+            $this->snapshot($id,$segment,$kind,$now);
+            $count = (int)$this->db->one('SELECT COUNT(*) AS n FROM compensation_targets WHERE compensation_id=?', [$id])['n'];
+            $this->db->execute('UPDATE compensations SET total_count=? WHERE id=?', [$count,$id]);
+            $this->outbox->enqueue('compensation.run', 'compensation:'.$id.':0', ['compensation_id' => $id]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(),$adminId,'compensation.created',$id,$now]);
         });
         return $this->db->one('SELECT * FROM compensations WHERE id=?', [$id]);
     }
-    /** Run a compensation: pick recipients and enqueue per-user grants. */
+
+    /** Queue a bounded batch; a committed continuation survives worker crashes. */
     public function run(string $compensationId): void
     {
-        $c = $this->db->one('SELECT * FROM compensations WHERE id=?', [$compensationId]);
-        if (!$c || $c['status'] !== 'in_progress') return;
-        $recipients = $this->recipients($c['segment']);
-        $this->db->transaction(function() use($recipients,$compensationId) {
-            $this->db->execute('UPDATE compensations SET total_count=? WHERE id=? AND status=\'in_progress\'', [count($recipients), $compensationId]);
-            foreach ($recipients as $userId) {
-                $this->outbox->enqueue('compensation.grant', 'cgrant:'.$compensationId.':'.$userId, [
-                    'compensation_id' => $compensationId, 'user_id' => $userId,
-                ]);
+        $this->db->transaction(function () use ($compensationId) {
+            $c = $this->db->one('SELECT * FROM compensations WHERE id=?'.$this->db->lock(), [$compensationId]);
+            if (!$c || !in_array($c['status'], ['in_progress','running'], true)) return;
+            // Jobs created before migration 039 did not have a recipient snapshot.
+            if ($c['status'] === 'in_progress' && (int)$c['total_count'] === 0) {
+                $this->snapshot($compensationId,$c['segment'],$c['kind'],(int)$c['created_at']);
+                $count = (int)$this->db->one('SELECT COUNT(*) AS n FROM compensation_targets WHERE compensation_id=?', [$compensationId])['n'];
+                $this->db->execute('UPDATE compensations SET total_count=? WHERE id=?', [$count,$compensationId]);
+                $c['total_count'] = $count;
             }
-            $this->db->execute('UPDATE compensations SET status=? WHERE id=? AND status=\'in_progress\'', [$recipients===[]?'completed':'running',$compensationId]);
+            if ((int)$c['total_count'] === 0) {
+                $this->db->execute("UPDATE compensations SET status='completed',completed_at=? WHERE id=?", [time(),$compensationId]);
+                return;
+            }
+            $rows = $this->db->all('SELECT user_id FROM compensation_targets WHERE compensation_id=? AND user_id>? ORDER BY user_id LIMIT ?', [$compensationId,(string)$c['last_queued_user_id'],self::BATCH_SIZE]);
+            foreach ($rows as $row) {
+                $userId = (string)$row['user_id'];
+                $this->outbox->enqueue('compensation.grant', 'cgrant:'.$compensationId.':'.$userId, ['compensation_id'=>$compensationId,'user_id'=>$userId]);
+            }
+            $queued = (int)$c['queued_count'] + count($rows);
+            $cursor = $rows ? (string)$rows[count($rows)-1]['user_id'] : (string)$c['last_queued_user_id'];
+            $this->db->execute("UPDATE compensations SET queued_count=?,last_queued_user_id=?,status='running',queue_error=0 WHERE id=?", [$queued,$cursor,$compensationId]);
+            if ($queued < (int)$c['total_count']) {
+                $this->outbox->enqueue('compensation.run', 'compensation:'.$compensationId.':'.$queued, ['compensation_id'=>$compensationId]);
+            }
         });
     }
-    /** Grant compensation to a single user. Idempotent per (compensation, user). */
+
+    /** Local grant and its receipt commit together; replay cannot issue it twice. */
     public function grant(string $compensationId, string $userId): void
     {
-        $c = $this->db->one('SELECT * FROM compensations WHERE id=?', [$compensationId]);
-        if (!$c) return;
-        $this->db->transaction(function () use ($c, $compensationId, $userId) {
-            if ($this->db->one('SELECT id FROM compensation_grants WHERE compensation_id=? AND user_id=?', [$compensationId, $userId])) return;
-            $this->db->execute('INSERT INTO compensation_grants(id,compensation_id,user_id,created_at) VALUES(?,?,?,?)', [Database::id(), $compensationId, $userId, time()]);
-            $kind = $c['kind'];
-            $value = (int)$c['value'];
-            $reason = 'Компенсация: '.$c['reason'];
-            if ($kind === 'balance') {
-                $this->wallet->credit($userId, $value, 'manual_adjust', $reason);
-            } elseif ($kind === 'days') {
-                $this->grantDays($userId, $value, $reason);
-            } elseif ($kind === 'traffic') {
-                $this->grantTraffic($userId, $value, $reason);
+        $this->db->transaction(function () use ($compensationId,$userId) {
+            $target = $this->db->one('SELECT status FROM compensation_targets WHERE compensation_id=? AND user_id=?'.$this->db->lock(), [$compensationId,$userId]);
+            $c = $this->db->one('SELECT * FROM compensations WHERE id=?', [$compensationId]);
+            if (!$c || $c['status'] !== 'running') return;
+            if (!$target && (int)$c['queued_count'] === 0 && (int)$c['total_count'] > 0) {
+                // Drain a pre-migration batch already present in the outbox.
+                $this->db->execute("INSERT INTO compensation_targets(compensation_id,user_id,status) VALUES(?,?,'pending') ON CONFLICT(compensation_id,user_id) DO NOTHING", [$compensationId,$userId]);
+                $target = ['status'=>'pending'];
             }
-            $this->db->execute('UPDATE compensations SET processed_count=processed_count+1 WHERE id=?', [$compensationId]);
-            $this->db->execute("UPDATE compensations SET status='completed' WHERE id=? AND status='running' AND processed_count>=total_count",[$compensationId]);
+            if (!$target || $target['status'] !== 'pending') return;
+            $user = $this->db->one('SELECT disabled FROM users WHERE id=?', [$userId]);
+            $detail = null;
+            if (!$user || (int)$user['disabled'] !== 0) {
+                $detail = 'account_disabled';
+            } elseif ($c['kind'] === 'balance') {
+                $this->wallet->credit($userId,(int)$c['value'],'manual_adjust','Компенсация: '.$c['reason'],null,'compensation:'.$compensationId);
+            } elseif ($c['kind'] === 'days') {
+                $this->grantDays($c,$userId);
+            } elseif ($c['kind'] === 'traffic') {
+                $detail = $this->grantTraffic($c,$userId);
+            } else {
+                throw new BillingError('Некорректный тип компенсации.');
+            }
+            $status = $detail === null ? 'applied' : 'skipped';
+            if ($status === 'applied') {
+                $this->db->execute('INSERT INTO compensation_grants(id,compensation_id,user_id,created_at) VALUES(?,?,?,?) ON CONFLICT(compensation_id,user_id) DO NOTHING', [Database::id(),$compensationId,$userId,time()]);
+            }
+            $this->db->execute('UPDATE compensation_targets SET status=?,detail=?,completed_at=? WHERE compensation_id=? AND user_id=?', [$status,$detail,time(),$compensationId,$userId]);
+            $counter = $status === 'applied' ? 'processed_count' : 'skipped_count';
+            $this->db->execute("UPDATE compensations SET $counter=$counter+1 WHERE id=?", [$compensationId]);
+            $this->completeIfFinished($compensationId);
         });
     }
-    private function grantDays(string $userId, int $days, string $reason): void
+
+    /** Called only when the outbox has exhausted its retries. */
+    public function markFailed(string $compensationId, string $userId): void
     {
-        $sub = $this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status IN ('active','trial','provisioning') ORDER BY created_at DESC LIMIT 1" . $this->db->lock(), [$userId]);
-        if ($sub) {
-            $base = max(time(), (int)$sub['expires_at']);
-            $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',updated_at=? WHERE id=?", [$base + $days * 86400, time(), $sub['id']]);
-            $this->outbox->enqueue('subscription.extend', 'extend:'.$sub['id'].':'.Database::id(), ['subscription_id' => $sub['id']]);
-        } else {
-            $id = Database::id();
-            $now = time();
-            $this->db->execute(
-                "INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,is_trial,start_date,updated_at) VALUES(?,NULL,?,'active',?,?,0,?,?)",
-                [$id, $userId, $now + $days * 86400, $now, $now, $now]
-            );
-            $this->outbox->enqueue('subscription.provision', 'provision:'.$id, ['subscription_id' => $id]);
-        }
-        $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), 'system', 'compensation.days', $userId, time()]);
+        $this->db->transaction(function () use ($compensationId,$userId) {
+            $c = $this->db->one('SELECT queued_count,total_count,status FROM compensations WHERE id=?', [$compensationId]);
+            if ($c && $c['status']==='running' && (int)$c['queued_count']===0 && (int)$c['total_count']>0) {
+                $this->db->execute("INSERT INTO compensation_targets(compensation_id,user_id,status) VALUES(?,?,'pending') ON CONFLICT(compensation_id,user_id) DO NOTHING", [$compensationId,$userId]);
+            }
+            $changed = $this->db->execute("UPDATE compensation_targets SET status='failed',detail='worker_retry_exhausted',completed_at=? WHERE compensation_id=? AND user_id=? AND status='pending'", [time(),$compensationId,$userId]);
+            if ($changed) $this->db->execute('UPDATE compensations SET failed_count=failed_count+1 WHERE id=?', [$compensationId]);
+        });
     }
-    private function grantTraffic(string $userId, int $gb, string $reason): void
+
+    public function markRunFailed(string $compensationId): void
     {
-        $sub = $this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status IN ('active','trial','provisioning') ORDER BY created_at DESC LIMIT 1" . $this->db->lock(), [$userId]);
-        if (!$sub) return;
-        if ((int)$sub['traffic_limit_gb'] === 0) return;
-        $this->db->execute('UPDATE subscriptions SET purchased_traffic_gb = purchased_traffic_gb + ? WHERE id=?', [$gb, $sub['id']]);
-        $this->outbox->enqueue('subscription.traffic', 'traffic:'.$sub['id'].':'.Database::id(), ['subscription_id' => $sub['id'], 'traffic_gb' => $gb]);
-        $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), 'system', 'compensation.traffic', $userId, time()]);
+        $this->db->execute("UPDATE compensations SET queue_error=1 WHERE id=? AND status IN ('in_progress','running')", [$compensationId]);
     }
-    private function recipients(string $segment): array
+
+    public function retryFailed(string $compensationId, string $adminId): int
+    {
+        return $this->db->transaction(function () use ($compensationId,$adminId) {
+            $c = $this->db->one('SELECT status FROM compensations WHERE id=?'.$this->db->lock(), [$compensationId]);
+            if (!$c) throw new BillingError('Компенсация не найдена.');
+            $rows = $this->db->all("SELECT user_id FROM compensation_targets WHERE compensation_id=? AND status='failed'", [$compensationId]);
+            $retried = 0;
+            foreach ($rows as $row) {
+                $userId = (string)$row['user_id'];
+                $changed = $this->db->execute("UPDATE outbox SET status='pending',attempts=0,available_at=?,locked_until=NULL,lock_token=NULL,last_error=NULL WHERE dedup_key=? AND status='dead'", [time(),'cgrant:'.$compensationId.':'.$userId]);
+                if (!$changed) continue;
+                $this->db->execute("UPDATE compensation_targets SET status='pending',detail=NULL,completed_at=NULL WHERE compensation_id=? AND user_id=?", [$compensationId,$userId]);
+                $retried++;
+            }
+            $runJobs = $this->db->execute("UPDATE outbox SET status='pending',attempts=0,available_at=?,locked_until=NULL,lock_token=NULL,last_error=NULL WHERE topic='compensation.run' AND dedup_key LIKE ? AND status='dead'", [time(),'compensation:'.$compensationId.':%']);
+            $syncJobs = $this->db->execute("UPDATE outbox SET status='pending',attempts=0,available_at=?,locked_until=NULL,lock_token=NULL,last_error=NULL WHERE topic IN ('subscription.extend','subscription.provision','subscription.traffic') AND (dedup_key LIKE ? OR dedup_key LIKE ?) AND status='dead'", [time(),'comp-days:'.$compensationId.':%','comp-traffic:'.$compensationId.':%']);
+            if ($retried) {
+                $this->db->execute("UPDATE compensations SET failed_count=failed_count-?,status='running',completed_at=NULL WHERE id=?", [$retried,$compensationId]);
+            }
+            if ($runJobs) $this->db->execute('UPDATE compensations SET queue_error=0 WHERE id=?', [$compensationId]);
+            if ($retried || $runJobs || $syncJobs) {
+                $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(),$adminId,'compensation.retried',$compensationId,time()]);
+            }
+            return $retried + $runJobs + $syncJobs;
+        });
+    }
+
+    private function grantDays(array $c, string $userId): void
     {
         $now = time();
-        $rows = match ($segment) {
-            'all' => $this->db->all('SELECT id FROM users WHERE disabled=0'),
-            'active' => $this->db->all("SELECT DISTINCT s.user_id AS id FROM subscriptions s WHERE s.status IN ('active','trial') AND s.expires_at>?", [$now]),
-            'inactive' => $this->db->all("SELECT id FROM users WHERE disabled=0 AND id NOT IN (SELECT user_id FROM subscriptions WHERE status IN ('active','trial') AND expires_at>?)", [$now]),
-            'paid' => $this->db->all('SELECT id FROM users WHERE disabled=0 AND has_had_paid_subscription=1'),
-            'trial' => $this->db->all("SELECT DISTINCT s.user_id AS id FROM subscriptions s WHERE s.is_trial=1 AND s.status IN ('active','trial')"),
-            'telegram' => $this->db->all('SELECT id FROM users WHERE disabled=0 AND telegram_id IS NOT NULL'),
-            default => [],
-        };
-        return array_values(array_filter(array_map(fn($r) => (string)($r['id'] ?? ''), $rows), fn($v) => $v !== ''));
+        $sub = $this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status IN ('active','trial','provisioning') AND expires_at>? ORDER BY expires_at DESC LIMIT 1".$this->db->lock(), [$userId,$now]);
+        if ($sub) {
+            $newExpiry = (int)$sub['expires_at'] + (int)$c['value'] * 86400;
+            $status = $sub['status'] === 'provisioning' ? 'provisioning' : 'active';
+            $this->db->execute('UPDATE subscriptions SET expires_at=?,status=?,updated_at=? WHERE id=?', [$newExpiry,$status,$now,$sub['id']]);
+            $topic = $status === 'provisioning' ? 'subscription.provision' : 'subscription.extend';
+            $this->outbox->enqueue($topic,'comp-days:'.$c['id'].':'.$sub['id'],['subscription_id'=>$sub['id']]);
+        } else {
+            if (!$c['plan_id']) {
+                // Jobs started before the plan choice was introduced.
+                $plan = $this->db->one('SELECT id,traffic_bytes,devices FROM plans WHERE active=1 ORDER BY id LIMIT 1');
+                if (!$plan) throw new BillingError('Для новой подписки не указан тариф.');
+                $c['plan_id'] = $plan['id'];
+                $c['plan_traffic_gb'] = intdiv((int)$plan['traffic_bytes'],1073741824);
+                $c['plan_devices'] = (int)$plan['devices'];
+            }
+            $id = Database::id();
+            $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,plan_id,traffic_limit_gb,device_limit,is_trial,start_date,updated_at,lifecycle_status) VALUES(?,NULL,?,'provisioning',?,?,?,?,?,0,?,?,'pending')", [$id,$userId,$now+(int)$c['value']*86400,$now,$c['plan_id'],(int)$c['plan_traffic_gb'],(int)$c['plan_devices'],$now,$now]);
+            $this->outbox->enqueue('subscription.provision','comp-days:'.$c['id'].':'.$id,['subscription_id'=>$id]);
+        }
+        $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(),'system','compensation.days',$userId,$now]);
     }
+
+    /** Returns a skip reason if there is no finite active subscription. */
+    private function grantTraffic(array $c, string $userId): ?string
+    {
+        $now = time();
+        $sub = $this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status IN ('active','provisioning') AND expires_at>? AND traffic_limit_gb>0 ORDER BY expires_at DESC LIMIT 1".$this->db->lock(), [$userId,$now]);
+        if (!$sub) return 'no_limited_active_subscription';
+        $this->db->execute('UPDATE subscriptions SET purchased_traffic_gb=purchased_traffic_gb+?,updated_at=? WHERE id=?', [(int)$c['value'],$now,$sub['id']]);
+        $this->outbox->enqueue('subscription.traffic','comp-traffic:'.$c['id'].':'.$sub['id'],['subscription_id'=>$sub['id'],'traffic_gb'=>(int)$c['value']]);
+        $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(),'system','compensation.traffic',$userId,$now]);
+        return null;
+    }
+
+    private function snapshot(string $id, string $segment, string $kind, int $now): void
+    {
+        $condition = match ($segment) {
+            'all' => '1=1',
+            'active' => "EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id=u.id AND s.status IN ('active','trial') AND s.expires_at>$now)",
+            'inactive' => "NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id=u.id AND s.status IN ('active','trial') AND s.expires_at>$now)",
+            'paid' => 'u.has_had_paid_subscription=1',
+            'trial' => "EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id=u.id AND s.is_trial=1 AND s.status IN ('active','trial') AND s.expires_at>$now)",
+            'telegram' => 'u.telegram_id IS NOT NULL',
+            default => throw new BillingError('Некорректный сегмент.'),
+        };
+        if ($kind === 'traffic') {
+            $condition .= " AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id=u.id AND s.status IN ('active','provisioning') AND s.expires_at>$now AND s.traffic_limit_gb>0)";
+        }
+        $this->db->execute("INSERT INTO compensation_targets(compensation_id,user_id,status) SELECT ?,u.id,'pending' FROM users u WHERE u.disabled=0 AND $condition ON CONFLICT(compensation_id,user_id) DO NOTHING", [$id]);
+    }
+
+    private function completeIfFinished(string $id): void
+    {
+        $this->db->execute("UPDATE compensations SET status='completed',completed_at=? WHERE id=? AND status='running' AND processed_count+skipped_count=total_count AND failed_count=0", [time(),$id]);
+    }
+
     public function list(int $limit = 50): array
     {
-        return $this->db->all('SELECT * FROM compensations ORDER BY created_at DESC LIMIT ?', [$limit]);
+        $rows = $this->db->all('SELECT * FROM compensations ORDER BY created_at DESC LIMIT ?', [$limit]);
+        foreach ($rows as &$row) {
+            $sync = $this->db->all("SELECT status,COUNT(*) AS n FROM outbox WHERE topic IN ('subscription.extend','subscription.provision','subscription.traffic') AND (dedup_key LIKE ? OR dedup_key LIKE ?) GROUP BY status", ['comp-days:'.$row['id'].':%','comp-traffic:'.$row['id'].':%']);
+            $row['sync_pending_count'] = 0;
+            $row['sync_failed_count'] = 0;
+            foreach ($sync as $item) {
+                if ($item['status'] === 'dead') $row['sync_failed_count'] += (int)$item['n'];
+                if (in_array($item['status'], ['pending','processing'], true)) $row['sync_pending_count'] += (int)$item['n'];
+            }
+        }
+        unset($row);
+        return $rows;
     }
 }

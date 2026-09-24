@@ -95,6 +95,24 @@ $config=['APP_ENV'=>'test','PURCHASES_ENABLED'=>'1','APP_URL'=>'http://localhost
         self::assertSame(303,$this->request('/admin/config','POST',['_csrf'=>$this->csrf,'revision'=>'0','SITE_NAME'=>'Test service'])->getStatusCode());
         self::assertSame('Test service',$this->c->settings->values()['SITE_NAME']);
     }
+    public function testAdminCompensationFormAndWorkerIssueOneBalanceCredit():void
+    {
+        self::assertSame(403,$this->request('/admin/compensations')->getStatusCode());
+        $this->c->db->execute("UPDATE users SET role='admin',totp_secret='fixture' WHERE id=?",[$this->uid]);
+        $this->c->mfa->stepUp($this->session);
+        $page=$this->request('/admin/compensations');
+        self::assertSame(200,$page->getStatusCode());
+        self::assertStringContainsString('Компенсации',$page->getContent());
+        preg_match('/name="request_key" value="([a-f0-9]{32})"/',$page->getContent(),$match);
+        self::assertNotEmpty($match[1]??null);
+        $form=['_csrf'=>$this->csrf,'request_key'=>$match[1],'segment'=>'all','kind'=>'balance','value'=>'500','reason'=>'За простой'];
+        self::assertSame(303,$this->request('/admin/compensations','POST',$form)->getStatusCode());
+        self::assertSame(303,$this->request('/admin/compensations','POST',$form)->getStatusCode());
+        while($this->c->outbox->runOne($this->c->worker->handle(...))){}
+        self::assertCount(1,$this->c->db->all('SELECT id FROM compensations'));
+        self::assertSame(50000,$this->c->wallet->balance($this->uid)['balance_kopeks']);
+        self::assertStringContainsString('Завершена',$this->request('/admin/compensations')->getContent());
+    }
     public function testTelegramHttpEntryAndOneTimeFinish():void
     {
         $guest=str_repeat('a',64);

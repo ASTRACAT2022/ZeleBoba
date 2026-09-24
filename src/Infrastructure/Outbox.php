@@ -90,7 +90,15 @@ final class Outbox
             // Never persist raw HTTP errors: they may contain tokens or subscription URLs.
             $changed=$this->db->transaction(function() use($job,$payload,$attempt,$e) {
                 $changed=$this->db->execute('UPDATE outbox SET status=?, available_at=?, locked_until=NULL,lock_token=NULL,last_error=? WHERE id=? AND status=\'processing\' AND lock_token=?', [$attempt>=8?'dead':'pending',time()+min(3600,2**$attempt)+random_int(0,5),get_class($e),$job['id'],$job['lock_token']]);
-                if($changed && $attempt>=8)$this->recordBroadcastOutcome($job,$payload,false);
+                if($changed && $attempt>=8) {
+                    $this->recordBroadcastOutcome($job,$payload,false);
+                    if ($job['topic']==='compensation.grant' && isset($payload['compensation_id'],$payload['user_id'])) {
+                        (new \App\Billing\CompensationService($this->db,$this,new \App\Billing\Wallet($this->db)))->markFailed((string)$payload['compensation_id'],(string)$payload['user_id']);
+                    }
+                    if ($job['topic']==='compensation.run' && isset($payload['compensation_id'])) {
+                        (new \App\Billing\CompensationService($this->db,$this,new \App\Billing\Wallet($this->db)))->markRunFailed((string)$payload['compensation_id']);
+                    }
+                }
                 if($changed && in_array($job['topic'],['subscription.provision','subscription.extend'],true) && isset($payload['subscription_id'])) {
                     $state=$attempt>=8?'failed':'retry';
                     $this->db->execute('UPDATE provisioning_accounts SET state=?,last_error=?,updated_at=? WHERE subscription_id=? AND state<>\'active\'',[

@@ -1,1 +1,67 @@
-{% extends 'base.html.twig' %}{% block title %}Компенсации{% endblock %}{% block content %}<header><div><p class="eyebrow">МАССОВЫЕ ОПЕРАЦИИ</p><h1>Компенсации.</h1><p class="muted">Массовое начисление денег, дней или трафика по сегментам пользователей.</p></div></header>{% include '_admin-nav.html.twig' %}<section class="panel detail"><h2>Новая компенсация</h2><form method="post" action="/admin/compensations" class="admin-form"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><label>Сегмент<select name="segment"><option value="all">Все пользователи</option><option value="active">С активной подпиской</option><option value="inactive">Без активной подписки</option><option value="paid">Оплачивавшие</option><option value="trial">На триале</option><option value="telegram">С Telegram</option></select></label><label>Тип<select name="kind"><option value="balance">Деньги на баланс</option><option value="days">Дни подписки</option><option value="traffic">Трафик, ГБ</option></select></label><label>Значение<input type="number" name="value" min="1" max="100000000" required placeholder="500 (₽/дней/ГБ)"></label><label class="span-two">Причина<input name="reason" required maxlength="200" placeholder="Компенсация за простой 10.09"></label><button class="button">Запустить компенсацию →</button></form><p class="muted">Дни начисляются к активной подписке или создают новую. Трафик — только к активной подписке с лимитом. Каждый пользователь получает компенсацию ровно один раз.</p></section><section class="panel detail"><h2>История</h2>{% if compensations %}<table><thead><tr><th>Сегмент</th><th>Тип</th><th>Значение</th><th>Причина</th><th>Обработано</th><th>Статус</th><th>Дата</th></tr></thead><tbody>{% for c in compensations %}<tr><td>{{ c.segment }}</td><td>{{ c.kind }}</td><td>{{ c.value }}</td><td><small>{{ c.reason }}</small></td><td>{{ c.processed_count }}/{{ c.total_count }}</td><td><span class="badge {{ c.status == 'completed' ? 'fulfilled' : 'pending' }}">{{ c.status }}</span></td><td>{{ c.created_at|date('d.m.Y H:i') }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="muted">Компенсаций пока нет.</p>{% endif %}</section>{% endblock %}
+{% extends 'base.html.twig' %}
+{% block title %}Компенсации{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">МАССОВЫЕ ОПЕРАЦИИ</p><h1>Компенсации.</h1><p class="muted">Баланс, дни подписки или трафик для выбранных клиентов.</p></div></header>
+{% include '_admin-nav.html.twig' %}
+<section class="panel detail">
+  <h2>Новая компенсация</h2>
+  <form method="post" action="/admin/compensations" class="admin-form">
+    <input type="hidden" name="_csrf" value="{{ user.csrf }}">
+    <input type="hidden" name="request_key" value="{{ request_key }}">
+    <label>Кому
+      <select name="segment">
+        <option value="all">Всем активным аккаунтам</option>
+        <option value="active">С действующей подпиской</option>
+        <option value="inactive">Без действующей подписки</option>
+        <option value="paid">Оплачивавшим подписку</option>
+        <option value="trial">С действующим пробным периодом</option>
+        <option value="telegram">С Telegram</option>
+      </select>
+    </label>
+    <label>Что начислить
+      <select name="kind">
+        <option value="balance">Деньги на баланс</option>
+        <option value="days">Дни подписки</option>
+        <option value="traffic">Трафик</option>
+      </select>
+    </label>
+    <label>Количество: ₽, дней или ГБ
+      <input type="number" name="value" min="1" step="1" required placeholder="Например, 500 ₽ или 7 дней">
+    </label>
+    <label>Тариф для новой подписки при выдаче дней
+      <select name="plan_id">
+        <option value="">Выберите для компенсации днями</option>
+        {% for plan in plans %}<option value="{{ plan.id }}">{{ plan.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="span-two">Причина
+      <input name="reason" required minlength="3" maxlength="200" placeholder="Например, компенсация за простой 10.09">
+    </label>
+    <button class="button">Выдать компенсацию →</button>
+  </form>
+  <p class="muted">Список получателей фиксируется при запуске. Деньги пополняют баланс, дни продлевают действующую подписку или создают новую с выбранным тарифом. Трафик получают только клиенты с действующей или создаваемой подпиской и ограничением по ГБ. Каждое начисление выполняется один раз; ошибки можно повторить.</p>
+  <p class="muted">Лимиты на одну операцию: до 1 000 000 ₽, 3650 дней или 100 000 ГБ. Выдачу самого VPN проверяйте в разделе <a href="/admin/provisioning">«Выдача VPN»</a>.</p>
+</section>
+<section class="panel detail">
+  <h2>История и прогресс</h2>
+  {% if compensations %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Сегмент</th><th>Компенсация</th><th>Причина</th><th>Начислено</th><th>Пропущено</th><th>Ошибки</th><th>Синхронизация VPN</th><th>Статус</th><th>Дата</th><th></th></tr></thead>
+    <tbody>{% for c in compensations %}
+      <tr>
+        <td>{{ c.segment }}</td>
+        <td>{% if c.kind == 'balance' %}{{ c.value|rub }}{% elseif c.kind == 'days' %}{{ c.value }} дн.{% else %}{{ c.value }} ГБ{% endif %}</td>
+        <td><small>{{ c.reason }}</small></td>
+        <td>{{ c.processed_count }}/{{ c.total_count }}</td>
+        <td>{{ c.skipped_count }}</td>
+        <td>{{ c.failed_count }}</td>
+        <td>{% if c.kind == 'balance' %}—{% else %}{{ c.sync_pending_count }} в очереди · {{ c.sync_failed_count }} ошибок{% endif %}</td>
+        <td><span class="badge {{ c.status == 'completed' and c.sync_failed_count == 0 and c.sync_pending_count == 0 ? 'fulfilled' : 'pending' }}">{{ c.queue_error or c.failed_count > 0 or c.sync_failed_count > 0 ? 'Нужна проверка' : (c.status == 'completed' and c.sync_pending_count == 0 ? (c.skipped_count > 0 ? 'С пропусками' : 'Завершена') : 'В работе') }}</span></td>
+        <td>{{ c.created_at|date('d.m.Y H:i') }}</td>
+        <td>{% if c.failed_count > 0 or c.queue_error or c.sync_failed_count > 0 %}<form method="post" action="/admin/compensations/{{ c.id }}/retry"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button secondary small">Повторить ошибки</button></form>{% endif %}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">Компенсаций пока нет.</p>{% endif %}
+</section>
+{% endblock %}

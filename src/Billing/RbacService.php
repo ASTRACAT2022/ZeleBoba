@@ -5,7 +5,7 @@ use App\Infrastructure\Database;
 final class RbacService
 {
     public const PERMISSIONS = [
-        'admin.view','admin.users','admin.plans','admin.promocodes','admin.broadcasts',
+        'admin.view','admin.users','admin.compensations','admin.plans','admin.promocodes','admin.broadcasts',
         'admin.channels','admin.landings','admin.contests','admin.polls','admin.campaigns',
         'admin.withdrawals','admin.settings','admin.sync','admin.backup','admin.reports',
         'admin.roles','admin.audit','admin.monitoring','admin.maintenance',
