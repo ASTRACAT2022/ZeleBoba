@@ -74,6 +74,37 @@ final class CompensationTest extends TestCase
         $sub=$this->db->one('SELECT * FROM subscriptions');
         self::assertSame($oldExpiry+10*86400,(int)$sub['expires_at']);
     }
+    public function testDaysWithoutPlanExtendExistingTariffAndSkipUsersWithoutSubscription():void
+    {
+        $billing=new BillingService($this->db,$this->outbox,'demo');
+        $order=$billing->order($this->uid,'basic','comp-no-plan');
+        $billing->settle($order['id'],'demo','demo_no_plan',19900,'RUB');
+        $original=$this->db->one('SELECT id,plan_id,expires_at FROM subscriptions WHERE user_id=?',[$this->uid]);
+        $c=$this->svc->create('all','days',3,'Компенсация без смены тарифа',$this->adminUid,'admin');
+        self::assertNull($c['plan_id']);
+        $this->svc->run($c['id']);
+        $this->svc->grant($c['id'],$this->uid);
+        $this->svc->grant($c['id'],$this->uid2);
+        $updated=$this->db->one('SELECT id,plan_id,expires_at FROM subscriptions WHERE user_id=?',[$this->uid]);
+        self::assertSame($original['id'],$updated['id']);
+        self::assertSame('basic',$updated['plan_id']);
+        self::assertSame((int)$original['expires_at']+3*86400,(int)$updated['expires_at']);
+        self::assertNull($this->db->one('SELECT id FROM subscriptions WHERE user_id=?',[$this->uid2]));
+        self::assertSame('skipped',$this->db->one('SELECT status FROM compensation_targets WHERE compensation_id=? AND user_id=?',[$c['id'],$this->uid2])['status']);
+        $this->svc->grant($c['id'],$this->uid);
+        self::assertSame((int)$updated['expires_at'],(int)$this->db->one('SELECT expires_at FROM subscriptions WHERE id=?',[$original['id']])['expires_at']);
+    }
+    public function testDaysWithPlanDoNotChangeExistingTariff():void
+    {
+        $this->db->execute("INSERT INTO plans(id,name,price_minor,currency,duration_days,traffic_bytes,devices,active) VALUES('other','Other',29900,'RUB',30,10737418240,5,1)");
+        $billing=new BillingService($this->db,$this->outbox,'demo');
+        $order=$billing->order($this->uid,'basic','comp-other-plan');
+        $billing->settle($order['id'],'demo','demo_other_plan',19900,'RUB');
+        $c=$this->svc->create('all','days',3,'Компенсация',$this->adminUid,'admin','other');
+        $this->svc->run($c['id']);
+        $this->svc->grant($c['id'],$this->uid);
+        self::assertSame('basic',$this->db->one('SELECT plan_id FROM subscriptions WHERE user_id=?',[$this->uid])['plan_id']);
+    }
     public function testDaysCompensationCreatesNewSubscription():void
     {
         $c=$this->svc->create('all','days',7,'Компенсация дней',$this->adminUid,'admin','basic');

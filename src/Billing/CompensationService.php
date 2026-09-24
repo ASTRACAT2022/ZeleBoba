@@ -25,9 +25,9 @@ final class CompensationService
         $reason = trim($reason);
         if (mb_strlen($reason) < 3 || mb_strlen($reason) > 200) throw new BillingError('Причина: 3–200 символов.');
         $plan = null;
-        if ($kind === 'days') {
-            $plan = $planId ? $this->db->one('SELECT id,traffic_bytes,devices FROM plans WHERE id=? AND active=1', [$planId]) : null;
-            if (!$plan) throw new BillingError('Для компенсации днями выберите активный тариф.');
+        if ($kind === 'days' && $planId !== null && $planId !== '') {
+            $plan = $this->db->one('SELECT id,traffic_bytes,devices FROM plans WHERE id=? AND active=1', [$planId]);
+            if (!$plan) throw new BillingError('Выберите активный тариф для новых подписок.');
         }
         $now = time();
         $this->db->transaction(function () use ($id,$segment,$kind,$value,$reason,$adminId,$adminName,$plan,$now) {
@@ -96,7 +96,7 @@ final class CompensationService
             } elseif ($c['kind'] === 'balance') {
                 $this->wallet->credit($userId,(int)$c['value'],'manual_adjust','Компенсация: '.$c['reason'],null,'compensation:'.$compensationId);
             } elseif ($c['kind'] === 'days') {
-                $this->grantDays($c,$userId);
+                $detail = $this->grantDays($c,$userId);
             } elseif ($c['kind'] === 'traffic') {
                 $detail = $this->grantTraffic($c,$userId);
             } else {
@@ -158,7 +158,8 @@ final class CompensationService
         });
     }
 
-    private function grantDays(array $c, string $userId): void
+    /** Without a chosen plan, only extend an existing subscription. */
+    private function grantDays(array $c, string $userId): ?string
     {
         $now = time();
         $sub = $this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status IN ('active','trial','provisioning') AND expires_at>? ORDER BY expires_at DESC LIMIT 1".$this->db->lock(), [$userId,$now]);
@@ -169,19 +170,13 @@ final class CompensationService
             $topic = $status === 'provisioning' ? 'subscription.provision' : 'subscription.extend';
             $this->outbox->enqueue($topic,'comp-days:'.$c['id'].':'.$sub['id'],['subscription_id'=>$sub['id']]);
         } else {
-            if (!$c['plan_id']) {
-                // Jobs started before the plan choice was introduced.
-                $plan = $this->db->one('SELECT id,traffic_bytes,devices FROM plans WHERE active=1 ORDER BY id LIMIT 1');
-                if (!$plan) throw new BillingError('Для новой подписки не указан тариф.');
-                $c['plan_id'] = $plan['id'];
-                $c['plan_traffic_gb'] = intdiv((int)$plan['traffic_bytes'],1073741824);
-                $c['plan_devices'] = (int)$plan['devices'];
-            }
+            if (!$c['plan_id']) return 'no_active_subscription';
             $id = Database::id();
             $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,plan_id,traffic_limit_gb,device_limit,is_trial,start_date,updated_at,lifecycle_status) VALUES(?,NULL,?,'provisioning',?,?,?,?,?,0,?,?,'pending')", [$id,$userId,$now+(int)$c['value']*86400,$now,$c['plan_id'],(int)$c['plan_traffic_gb'],(int)$c['plan_devices'],$now,$now]);
             $this->outbox->enqueue('subscription.provision','comp-days:'.$c['id'].':'.$id,['subscription_id'=>$id]);
         }
         $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(),'system','compensation.days',$userId,$now]);
+        return null;
     }
 
     /** Returns a skip reason if there is no finite active subscription. */
