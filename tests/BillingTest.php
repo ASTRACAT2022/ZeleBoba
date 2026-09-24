@@ -62,6 +62,12 @@ final class BillingTest extends TestCase
         for($n=0;$n<8;$n++){$this->outbox->runOne(fn()=>throw new \RuntimeException('secret-token'));$this->db->execute('UPDATE outbox SET available_at=0');}
         $job=$this->db->one('SELECT * FROM outbox');self::assertSame('dead',$job['status']);self::assertSame(8,(int)$job['attempts']);self::assertStringNotContainsString('secret-token',$job['last_error']);self::assertFalse($this->outbox->runOne(fn()=>null));
     }
+    public function testOutboxRecordsOnlySafeRemnawaveStatus():void
+    {
+        $this->outbox->enqueue('test','safe-http-status',[]);
+        $this->outbox->runOne(fn()=>throw new \RuntimeException('Remnawave request failed: HTTP 429'));
+        self::assertSame('RuntimeException HTTP 429',$this->db->one("SELECT last_error FROM outbox WHERE dedup_key='safe-http-status'")['last_error']);
+    }
     public function testExpiredLeaseIsRecovered():void
     {
         $this->outbox->enqueue('test','test',[]);$this->db->execute("UPDATE outbox SET status='processing',locked_until=0");

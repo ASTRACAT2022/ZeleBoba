@@ -88,9 +88,13 @@ final class Outbox
             if ($changed && $operation) $operations->event($operation['id'], 'outbox.done', 'success', 'Outbox job permanently failed (expected)', ['metadata' => ['topic' => $job['topic'], 'error_class' => get_class($e)]]);
         } catch (\Throwable $e) {
             $attempt = (int)$job['attempts']+1;
-            // Never persist raw HTTP errors: they may contain tokens or subscription URLs.
-            $changed=$this->db->transaction(function() use($job,$payload,$attempt,$e) {
-                $changed=$this->db->execute('UPDATE outbox SET status=?, available_at=?, locked_until=NULL,lock_token=NULL,last_error=? WHERE id=? AND status=\'processing\' AND lock_token=?', [$attempt>=8?'dead':'pending',time()+min(3600,2**$attempt)+random_int(0,5),get_class($e),$job['id'],$job['lock_token']]);
+            // Keep only a fixed safe code; raw exception text can contain tokens or subscription URLs.
+            $error=get_class($e);
+            if (preg_match('/^Remnawave request failed: HTTP ([45][0-9]{2})$/D',$e->getMessage(),$match)) $error.=' HTTP '.$match[1];
+            elseif ($e->getMessage()==='Remnawave expiry verification failed') $error.=' expiry_mismatch';
+            elseif ($e->getMessage()==='Remnawave user not found for renewal') $error.=' user_missing';
+            $changed=$this->db->transaction(function() use($job,$payload,$attempt,$error) {
+                $changed=$this->db->execute('UPDATE outbox SET status=?, available_at=?, locked_until=NULL,lock_token=NULL,last_error=? WHERE id=? AND status=\'processing\' AND lock_token=?', [$attempt>=8?'dead':'pending',time()+min(3600,2**$attempt)+random_int(0,5),$error,$job['id'],$job['lock_token']]);
                 if($changed && $attempt>=8) {
                     $this->recordBroadcastOutcome($job,$payload,false);
                     if ($job['topic']==='compensation.grant' && isset($payload['compensation_id'],$payload['user_id'])) {
@@ -103,13 +107,13 @@ final class Outbox
                 if($changed && in_array($job['topic'],['subscription.provision','subscription.extend'],true) && isset($payload['subscription_id'])) {
                     $state=$attempt>=8?'failed':'retry';
                     $this->db->execute('UPDATE provisioning_accounts SET state=?,last_error=?,updated_at=? WHERE subscription_id=? AND state<>\'active\'',[
-                        $state,get_class($e),time(),(string)$payload['subscription_id']
+                        $state,$error,time(),(string)$payload['subscription_id']
                     ]);
                 }
                 return $changed;
             });
             if($changed && $operation)$operations->event($operation['id'],'outbox.retry','warning','Outbox retry scheduled',['metadata'=>['topic'=>$job['topic'],'attempt'=>$attempt,'error_class'=>get_class($e)]]);
-            if($changed)error_log(json_encode(['event'=>'job.failed','job_id'=>$job['id'],'type'=>get_class($e),'attempt'=>$attempt]));
+            if($changed)error_log(json_encode(['event'=>'job.failed','job_id'=>$job['id'],'type'=>$error,'attempt'=>$attempt]));
         }
         return true;
     }
