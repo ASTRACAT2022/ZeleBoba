@@ -53,16 +53,25 @@ final class RemnawaveSync
                 }
                 // active
                 if(!$remote){
-                    $report['missing']++;
-                    if($fix){
-                        $result=$this->provisioner->provision($s);
-                        $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[$result['id'],$result['url'],$s['id']]);
-                        $this->markActive($s['id'],(string)$result['id']);
-                        $report['reprovisioned']++; $report['details'][]="$username: reprovisioned";
+                    // Not found under canonical zb_<id>; try the stored remote_id
+                    // before declaring missing — legacy subs may live in the
+                    // panel under a different username. Fallback prevents
+                    // duplicate reprovision of an existing panel user.
+                    $remote=$this->provisioner->resolve($s);
+                    if ($remote){
+                        $report['details'][]="$username: found by remote_id (id=".($remote['id']??'?').")";
                     } else {
-                        $report['details'][]="$username: missing on panel";
+                        $report['missing']++;
+                        if($fix){
+                            $result=$this->provisioner->provision($s);
+                            $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[$result['id'],$result['url'],$s['id']]);
+                            $this->markActive($s['id'],(string)$result['id']);
+                            $report['reprovisioned']++; $report['details'][]="$username: reprovisioned";
+                        } else {
+                            $report['details'][]="$username: missing on panel";
+                        }
+                        continue;
                     }
-                    continue;
                 }
                 // Compare expireAt (panel is ISO8601), traffic, devices
                 $panelExpire=strtotime($remote['expireAt']??'');

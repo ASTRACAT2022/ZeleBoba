@@ -46,10 +46,12 @@ final class RemnawaveProvisioner implements Provisioner
     public function extend(array $subscription): void
     {
         if (!str_starts_with($this->baseUrl,'https://') || !$this->token) throw new \RuntimeException('Remnawave configuration missing');
-        $username='zb_'.$subscription['id'];
-        $response=$this->request('GET','/api/users/by-username/'.$username);
-        if ($response->getStatusCode()===404) throw new \RuntimeException('Remnawave user not found for renewal');
-        $user=$response->toArray()['response'];
+        // Resolve by canonical zb_<id> username, then fall back to the stored
+        // remote_id: legacy/provisioned subs can exist in the panel under a
+        // different username (e.g. virgalia). Looking up only by zb_<id> used to
+        // 404 on those and burn 8 retries into dead letters. Resolve covers both.
+        $user=$this->resolve($subscription);
+        if (!$user) throw new \RuntimeException('Remnawave user not found for renewal');
         $id=$user['id']??null;
         if (!$id) throw new \RuntimeException('Invalid Remnawave response for renewal');
         $this->requireSuccess($this->request('PATCH','/api/users',['id'=>(int)$id,
@@ -59,11 +61,37 @@ final class RemnawaveProvisioner implements Provisioner
             'status'=>'ACTIVE',
         ]));
     }
+    /**
+     * Resolve the panel user for a subscription: try canonical zb_<id> first,
+     * then fall back to stored remote_id/remnawave_id (legacy usernames).
+     * Returns the panel user array or null when not found anywhere.
+     */
+    public function resolve(array $subscription): ?array
+    {
+        $username='zb_'.($subscription['id']??'');
+        if ($username!=='zb_') {
+            $u=$this->fetch($username);
+            if ($u) return $u;
+        }
+        foreach (['remote_id','remnawave_id'] as $k) {
+            $id=(int)($subscription[$k]??0);
+            if ($id<=0) continue;
+            $u=$this->fetchById($id);
+            if ($u) return $u;
+        }
+        // Some legacy rows store the panel id in remote_id as a string uuid; try once more as raw fetch.
+        $raw=(string)($subscription['remote_id']??'');
+        if ($raw!=='' && !ctype_digit($raw)) {
+            $u=$this->fetch($raw);
+            if ($u) return $u;
+        }
+        return null;
+    }
     public function setTraffic(array $subscription, int $trafficGb): void
     {
         if (!str_starts_with($this->baseUrl,'https://') || !$this->token) throw new \RuntimeException('Remnawave configuration missing');
         $username='zb_'.$subscription['id'];
-        $user=$this->fetch($username);
+        $user=$this->fetch($username) ?? $this->resolve($subscription);
         if (!$user) throw new \RuntimeException('Remnawave user not found for traffic update');
         $id=$user['id']??null;
         if (!$id) throw new \RuntimeException('Invalid Remnawave response for traffic update');
@@ -75,7 +103,7 @@ final class RemnawaveProvisioner implements Provisioner
     {
         if (!str_starts_with($this->baseUrl,'https://') || !$this->token) throw new \RuntimeException('Remnawave configuration missing');
         $username='zb_'.$subscription['id'];
-        $user=$this->fetch($username);
+        $user=$this->fetch($username) ?? $this->resolve($subscription);
         if (!$user) throw new \RuntimeException('Remnawave user not found for device update');
         $id=$user['id']??null;
         if (!$id) throw new \RuntimeException('Invalid Remnawave response for device update');
