@@ -1,46 +1,34 @@
 <nav class="admin-nav" aria-label="Разделы управления">
     <div class="admin-nav-top">
-        <div>
-            <p class="admin-nav-eyebrow">ОПЕРАЦИОННЫЙ ЦЕНТР</p>
-            <strong>Управление биллингом</strong>
-        </div>
-        <a class="admin-exit" href="/" title="Вернуться в личный кабинет">← <span>В личный кабинет</span></a>
+        <a class="admin-nav-brand" href="/admin"><span class="admin-nav-mark" aria-hidden="true">z</span><span><strong>ZeleBoba</strong><small>Панель управления VPN</small></span></a>
+        <a class="admin-exit" href="/" title="Вернуться в личный кабинет">← <span>Личный кабинет</span></a>
     </div>
-
+    <div class="admin-nav-group-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
     <div class="admin-nav-primary">
-        <a href="/admin/operations" class="admin-nav-card {{ path starts with '/admin/operations' ? 'selected' : '' }}">
-            <span class="admin-nav-icon">⌘</span><span><strong>Операции</strong><small>Платежи, заказы и расследования</small></span>
-        </a>
-        <a href="/admin/events" class="admin-nav-card {{ path == '/admin/events' ? 'selected' : '' }}">
-            <span class="admin-nav-icon">⏱</span><span><strong>Events</strong><small>Event timeline и трассировка</small></span>
-        </a>
-        <a href="/admin/provisioning" class="admin-nav-card {{ path == '/admin/provisioning' ? 'selected' : '' }}">
-            <span class="admin-nav-icon">↻</span><span><strong>Выдача VPN</strong><small>Очередь и синхронизация Remnawave</small></span>
-        </a>
-        <a href="/admin/flags" class="admin-nav-card {{ path == '/admin/flags' ? 'selected' : '' }}">
-            <span class="admin-nav-icon">⚡</span><span><strong>Переключатели</strong><small>Функции и аварийные стопы</small></span>
-        </a>
-        <a href="/admin/switches" class="admin-nav-card {{ path == '/admin/switches' ? 'selected' : '' }}">
-            <span class="admin-nav-icon">🛡️</span><span><strong>Аварийные</strong><small>Safe mode и kill switches</small></span>
-        </a>
-        <a href="/admin/incidents" class="admin-nav-card {{ path == '/admin/incidents' ? 'selected' : '' }}">
-            <span class="admin-nav-icon">!</span><span><strong>Инциденты</strong><small>Влияние, восстановление, история</small></span>
-        </a>
+        <a href="/admin" class="admin-nav-card {{ path == '/admin' ? 'selected' : '' }}"><span class="admin-nav-icon" aria-hidden="true">◫</span><span><strong>Обзор</strong><small>Состояние и показатели</small></span></a>
+        <a href="/admin/operations" class="admin-nav-card {{ path starts with '/admin/operations' ? 'selected' : '' }}"><span class="admin-nav-icon" aria-hidden="true">⇄</span><span><strong>Операции</strong><small>Платежи и заказы</small></span></a>
+        <a href="/admin/users" class="admin-nav-card {{ path starts with '/admin/users' ? 'selected' : '' }}"><span class="admin-nav-icon" aria-hidden="true">♙</span><span><strong>Клиенты</strong><small>Аккаунты и подписки</small></span></a>
+        <a href="/admin/provisioning" class="admin-nav-card {{ path == '/admin/provisioning' ? 'selected' : '' }}"><span class="admin-nav-icon" aria-hidden="true">↗</span><span><strong>Выдача VPN</strong><small>Очередь и Remnawave</small></span></a>
+        <a href="/admin/events" class="admin-nav-card {{ path == '/admin/events' ? 'selected' : '' }}"><span class="admin-nav-icon" aria-hidden="true">◷</span><span><strong>События</strong><small>История и трассировка</small></span></a>
+        <a href="/admin/reports" class="admin-nav-card {{ path == '/admin/reports' ? 'selected' : '' }}"><span class="admin-nav-icon" aria-hidden="true">▥</span><span><strong>Отчёты</strong><small>Показатели сервиса</small></span></a>
     </div>
-
-    <div class="admin-nav-secondary" aria-label="Остальные разделы">
-        <a href="/admin" class="{{ path == '/admin' ? 'selected' : '' }}">Обзор</a>
-        <a href="/admin/users">Клиенты</a>
-        <a href="/admin/plans">Тарифы</a>
+    <div class="admin-nav-group-label">КАТАЛОГ И КОММУНИКАЦИИ</div>
+    <div class="admin-nav-secondary" aria-label="Каталог и коммуникации">
+        <a href="/admin/plans" class="{{ path starts with '/admin/plans' ? 'selected' : '' }}">Тарифы</a>
         <a href="/admin/promocodes" class="{{ path starts with '/admin/promocodes' ? 'selected' : '' }}">Промокоды</a>
         <a href="/admin/broadcasts" class="{{ path starts with '/admin/broadcasts' ? 'selected' : '' }}">Рассылки</a>
         <a href="/admin/compensations" class="{{ path starts with '/admin/compensations' ? 'selected' : '' }}">Компенсации</a>
-        <a href="/admin/reports">Отчёты</a>
         <a href="/admin/creators" class="{{ path starts with '/admin/creators' ? 'selected' : '' }}">Creators</a>
-        <a href="/admin/monitoring">Мониторинг</a>
+    </div>
+    <div class="admin-nav-group-label">КОНТРОЛЬ СИСТЕМЫ</div>
+    <div class="admin-nav-secondary" aria-label="Контроль системы">
+        <a href="/admin/monitoring" class="{{ path starts with '/admin/monitoring' ? 'selected' : '' }}">Мониторинг</a>
         <a href="/admin/investigations" class="{{ path starts with '/admin/investigations' ? 'selected' : '' }}">Расследования</a>
         <a href="/admin/intelligence" class="{{ path == '/admin/intelligence' ? 'selected' : '' }}">Контроль системы</a>
-        <a href="/admin/audit">Журнал действий</a>
-        <a href="/admin/config">Настройки</a>
+        <a href="/admin/flags" class="{{ path == '/admin/flags' ? 'selected' : '' }}">Переключатели</a>
+        <a href="/admin/switches" class="{{ path == '/admin/switches' ? 'selected' : '' }}">Аварийные режимы</a>
+        <a href="/admin/incidents" class="{{ path == '/admin/incidents' ? 'selected' : '' }}">Инциденты</a>
+        <a href="/admin/audit" class="{{ path starts with '/admin/audit' ? 'selected' : '' }}">Журнал действий</a>
+        <a href="/admin/config" class="{{ path starts with '/admin/config' ? 'selected' : '' }}">Настройки</a>
     </div>
 </nav>
