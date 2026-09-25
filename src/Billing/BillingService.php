@@ -90,7 +90,14 @@ final class BillingService
             if ($payment && $this->creators) $this->creators->recordPayment($payment['id']);
             $this->db->execute('UPDATE operations SET user_id=?,payment_id=? WHERE id=?',[$order['user_id'],$payment['id']??null,$op['id']]);
             $operations->event($op['id'],'payment.succeeded','success','Payment recorded',['user_id'=>$order['user_id'],'payment_id'=>$payment['id']??null,'metadata'=>['amount_minor'=>$amount,'currency'=>$currency]]);
-            foreach (['provider_clearing'=>$amount,'subscription_sales'=>-$amount] as $account=>$value) {
+            // Wallet (balance) purchases never bring money in from a payment
+            // provider: settle() is called with the synthetic id 'balance_<order>'
+            // and no provider funds exist. Booking them to 'provider_clearing'
+            // would inflate revenue reporting (ZeleBoba showed it as real income).
+            // Credit the internal wallet clearing account instead, so revenue
+            // aggregations that read provider_clearing stay truthful.
+            $isWalletPayment = str_starts_with($paymentId, 'balance_');
+            foreach ([($isWalletPayment ? 'wallet_clearing' : 'provider_clearing')=>$amount,'subscription_sales'=>-$amount] as $account=>$value) {
                 $this->db->execute('INSERT INTO ledger_entries VALUES(?,?,?,?,?,?)',[Database::id(),$orderId,$account,$value,$currency,$now]);
             }
             $operations->event($op['id'],'ledger.recorded','success','Ledger transaction created',['metadata'=>['amount_minor'=>$amount,'currency'=>$currency]]);

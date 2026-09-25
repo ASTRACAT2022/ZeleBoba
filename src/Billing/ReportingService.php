@@ -9,7 +9,7 @@ final class ReportingService
     public function salesStats(int $days = 30): array
     {
         $since = time() - $days * 86400;
-        $revenue = (int)($this->db->one('SELECT COALESCE(SUM(amount_minor),0) AS s FROM ledger_entries WHERE account=\'provider_clearing\' AND created_at>?', [$since])['s'] ?? 0);
+        $revenue = (int)($this->db->one("SELECT COALESCE(SUM(l.amount_minor),0) AS s FROM ledger_entries l JOIN orders o ON o.id=l.order_id WHERE l.account='provider_clearing' AND o.provider_payment_id NOT LIKE 'balance_%' AND l.created_at>?", [$since])['s'] ?? 0);
         $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND created_at>?", [$since])['c'] ?? 0);
         $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND created_at>?", [$since])['c'] ?? 0);
         $newUsers = (int)($this->db->one('SELECT COUNT(*) AS c FROM users WHERE created_at>?', [$since])['c'] ?? 0);
@@ -45,7 +45,7 @@ final class ReportingService
         ];
         $result = [];
         foreach ($periods as $key => $p) {
-            $revenue = (int)($this->db->one('SELECT COALESCE(SUM(amount_minor),0) AS s FROM ledger_entries WHERE account=\'provider_clearing\' AND created_at>=?', [$p['since']])['s'] ?? 0);
+            $revenue = (int)($this->db->one("SELECT COALESCE(SUM(l.amount_minor),0) AS s FROM ledger_entries l JOIN orders o ON o.id=l.order_id WHERE l.account='provider_clearing' AND o.provider_payment_id NOT LIKE 'balance_%' AND l.created_at>=?", [$p['since']])['s'] ?? 0);
             $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND created_at>=?", [$p['since']])['c'] ?? 0);
             $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND created_at>=?", [$p['since']])['c'] ?? 0);
             $result[$key] = [
@@ -65,7 +65,7 @@ final class ReportingService
         // local installations, where PostgreSQL's to_timestamp()/::date do
         // not exist.
         $rows = $this->db->all(
-            "SELECT created_at, amount_minor FROM ledger_entries WHERE account='provider_clearing' AND created_at>? ORDER BY created_at",
+            "SELECT l.created_at, l.amount_minor FROM ledger_entries l JOIN orders o ON o.id=l.order_id WHERE l.account='provider_clearing' AND o.provider_payment_id NOT LIKE 'balance_%' AND l.created_at>? ORDER BY l.created_at",
             [$since]
         );
         $result = [];
@@ -80,7 +80,7 @@ final class ReportingService
     {
         $since = time() - $days * 86400;
         return $this->db->all(
-            "SELECT o.provider, COUNT(*) AS cnt, SUM(o.price_minor) AS total FROM orders o WHERE o.status IN ('paid','fulfilled') AND o.created_at>? GROUP BY o.provider ORDER BY total DESC",
+            "SELECT o.provider, COUNT(*) AS cnt, SUM(o.price_minor) AS total FROM orders o WHERE o.status IN ('paid','fulfilled') AND o.provider_payment_id NOT LIKE 'balance_%' AND o.created_at>? GROUP BY o.provider ORDER BY total DESC",
             [$since]
         );
     }
@@ -89,7 +89,7 @@ final class ReportingService
     {
         $since = time() - $days * 86400;
         return $this->db->all(
-            "SELECT o.plan_name, COUNT(*) AS cnt, SUM(o.price_minor) AS total FROM orders o WHERE o.status IN ('paid','fulfilled') AND o.created_at>? GROUP BY o.plan_name ORDER BY total DESC",
+            "SELECT o.plan_name, COUNT(*) AS cnt, SUM(o.price_minor) AS total FROM orders o WHERE o.status IN ('paid','fulfilled') AND o.provider_payment_id NOT LIKE 'balance_%' AND o.created_at>? GROUP BY o.plan_name ORDER BY total DESC",
             [$since]
         );
     }
