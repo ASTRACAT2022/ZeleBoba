@@ -340,12 +340,13 @@ input[aria-invalid="true"]:focus { box-shadow: 0 0 0 4px color-mix(in srgb, var(
 .panel > .panel-body { padding: 20px var(--pad-x); }
 .section-heading {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  padding: 0 0 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  padding: 16px var(--pad-x); border-bottom: 1px solid var(--line); flex-wrap: wrap;
 }
 /* a section-heading that is the first child of an already-padded panel
    must not add its own horizontal inset (that caused nested drift) */
-.panel > .section-heading:first-child { padding-left: 0; padding-right: 0; }
-.detail > .section-heading:first-child { padding: 0 0 14px; border-bottom: 1px solid var(--line); }
+.panel.detail > .section-heading:first-child,
+.merge-panel > .section-heading:first-child { padding: 0 0 14px; }
+.detail > .section-heading:first-child { padding: 0 0 14px; }
 .section-heading h2 { font-size: var(--fs-md); margin: 0; }
 .section-heading a, .section-heading > span { font-size: var(--fs-sm); font-weight: 500; }
 .separator { height: 1px; background: var(--line); margin: 20px 0; }
@@ -738,8 +739,8 @@ footer {
   /* ---- compact mobile app bar + single scrollable nav rail ---- */
   .sidebar {
     position: sticky; top: 0; inset: auto; width: 100%; height: auto;
-    display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand account" "nav nav";
-    align-items: center; gap: 8px 10px; padding: 8px 12px 0;
+    display: grid; grid-template-columns: 1fr auto auto; grid-template-areas: "brand toggle account" "nav nav nav";
+    align-items: center; gap: 8px 8px; padding: 8px 12px 0;
     border-right: 0; border-bottom: 1px solid var(--line); z-index: 30;
   }
   .brand { grid-area: brand; font-size: var(--fs-md); padding: 0; min-width: 0; }
@@ -780,16 +781,18 @@ footer {
   .button.small { min-height: 32px; }
 
   .main { margin-left: 0; padding: 18px 16px 32px; }
-  /* the fixed theme toggle would collide with the top bar on phones:
-     dock it bottom-right, above the safe area */
-  body .theme-toggle {
-    position: fixed; top: auto; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); right: 14px;
-    height: 36px; min-height: 36px; width: 40px; padding: 0; justify-content: center;
-    border-radius: var(--radius-pill); box-shadow: var(--shadow-pop); z-index: 35;
+  /* theme toggle lives in the top bar's account area on phones so it
+     never floats over content */
+  body .sidebar .theme-toggle {
+    position: static; grid-area: toggle; align-self: center; justify-self: end;
+    height: 32px; min-height: 32px; width: 32px; padding: 0; justify-content: center;
+    border-radius: var(--radius-pill); box-shadow: none;
   }
-  body .theme-toggle [data-theme-label] { display: none; }
-  body .theme-toggle [data-theme-icon] { font-size: var(--fs-md); }
-  body .theme-toggle { position: fixed; }
+  body .sidebar .theme-toggle [data-theme-label] { display: none; }
+  body .sidebar .theme-toggle [data-theme-icon] { font-size: var(--fs-md); }
+  /* anonymous pages keep the toggle pinned top-right, away from content */
+  body .auth-main > .theme-toggle { position: fixed; top: 16px; right: 16px; width: 40px; height: 36px; padding: 0; justify-content: center; z-index: 40; }
+  body .auth-main > .theme-toggle [data-theme-label] { display: none; }
   .plans { grid-template-columns: 1fr; }
   header { align-items: flex-start; flex-direction: column; gap: 8px; }
   .admin-form { grid-template-columns: 1fr; }
@@ -815,6 +818,9 @@ footer {
   .meta-item:nth-child(2n) { border-right: 0; }
   .meta-item:nth-last-child(-n+2) { border-bottom: 0; }
   h2 { font-size: var(--fs-md); }
+  /* form controls stack full-width so they are never ragged */
+  .row-form { flex-direction: column; align-items: stretch; gap: 10px; }
+  .row-form label, .row-form select, .row-form .button { flex: 1 1 auto; width: 100%; min-width: 0; }
 }
 
 @media (max-width: 400px) {
@@ -929,7 +935,10 @@ html[data-theme="dark"] ::selection { background: color-mix(in srgb, var(--brand
 .narrow-640 { max-width: 640px; }
 .simple-head { padding: 0 0 14px; }
 .simple-head-16 { padding: 0 0 16px; }
-.head-soft { padding: 16px var(--pad-x); border-bottom: 1px solid var(--line-soft); }
+/* a row separator inside an already-padded panel-body: no extra horizontal
+   inset (the body supplies it), just vertical rhythm + a hairline */
+.head-soft { padding: 16px 0; border-bottom: 1px solid var(--line-soft); }
+.head-soft:last-child { border-bottom: 0; }
 .pad-page { padding: 40px 20px; }
 .bar-line { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .positive-box { background: var(--success-bg); color: var(--success); }
