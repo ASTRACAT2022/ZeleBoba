@@ -1,1 +1,49 @@
-{% extends 'base.html.twig' %}{% block title %}Настройки{% endblock %}{% block content %}<header><div><p class="eyebrow">ВАШ АККАУНТ</p><h1>Всегда на связи.</h1></div></header><section class="panel detail"><h2>Профиль</h2><form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button secondary small">Выйти из аккаунта</button></form><p><a href="/security">Двухфакторная защита →</a></p><p>{{ user.email ?? 'Telegram-аккаунт' }}</p><div class="separator"></div><h2>Промокод</h2><form method="post" action="/promo"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><label>Код<input name="code" required maxlength="50" placeholder="SUMMER2026"></label><button class="button">Активировать →</button></form><div class="separator"></div><h2>Подключение Telegram</h2>{% if user.telegram_id %}<p><span class="badge fulfilled">Подключён</span> ID {{ user.telegram_id }}</p>{% else %}<p>Получите одноразовый код и отправьте команду вашему боту. Код действует 10 минут.</p>{% if link_token %}<code class="token">/link {{ link_token }}</code><p class="muted">Отправьте команду до первого /start, если ещё не создавали аккаунт в боте.</p>{% endif %}<form method="post" action="/settings/telegram"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button">Получить код привязки →</button></form>{% endif %}</section>{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Настройки{% endblock %}{% block content %}
+<header>
+  <div>
+    <p class="eyebrow">Аккаунт</p>
+    <h1>Настройки</h1>
+    <p class="muted">Профиль, безопасность и подключение Telegram.</p>
+  </div>
+</header>
+
+<section class="panel">
+  <div class="panel-head"><h2>Профиль</h2></div>
+  <div class="panel-body">
+    <div class="meta-grid" style="margin-top:0">
+      <div class="meta-item"><span class="meta-label">Вход</span><span class="meta-value" style="font-size:14px">{{ user.email ?? 'Telegram-аккаунт' }}</span></div>
+      <div class="meta-item"><span class="meta-label">Роль</span><span class="meta-value" style="font-size:14px">{{ user.role == 'admin' ? 'Администратор' : 'Клиент' }}</span></div>
+      <div class="meta-item"><span class="meta-label">2FA</span><span class="meta-value" style="font-size:14px">{{ user.mfa_enabled ? 'Включена' : 'Выключена' }}</span></div>
+    </div>
+    <div class="inline-layout-3" style="margin-top:16px">
+      <a class="button secondary" href="/security">Двухфакторная защита</a>
+      <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button ghost">Выйти из аккаунта</button></form>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Подключение Telegram</h2></div>
+  <div class="panel-body">
+  {% if user.telegram_id %}
+    <p><span class="badge active">Подключён</span> <span class="muted">ID {{ user.telegram_id }}</span></p>
+    <p class="hint">Вход в кабинет и уведомления доступны через Telegram.</p>
+  {% else %}
+    <p class="muted">Получите одноразовый код и отправьте команду вашему боту. Код действует 10 минут.</p>
+    {% if link_token %}<code class="token">/link {{ link_token }}</code><p class="hint">Отправьте команду до первого /start, если ещё не создавали аккаунт в боте.</p>{% endif %}
+    <form method="post" action="/settings/telegram"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button">Получить код привязки</button></form>
+  {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Промокод</h2></div>
+  <div class="panel-body">
+    <form method="post" action="/promo" class="row-form">
+      <input type="hidden" name="_csrf" value="{{ user.csrf }}">
+      <label>Код<input name="code" required maxlength="50" placeholder="SUMMER2026"></label>
+      <button class="button secondary">Активировать</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

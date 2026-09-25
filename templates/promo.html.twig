@@ -1,1 +1,10 @@
-{% extends 'base.html.twig' %}{% block title %}Промокод{% endblock %}{% block content %}<header><div><p class="eyebrow">ПРОМОКОД</p><h1>Код применён.</h1><p class="muted">Бонусы зачислены.</p></div></header><section class="panel detail"><h2>Результат</h2><p class="token">{{ result.description }}</p><a class="button" href="/">В кабинет →</a></section>{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Промокод{% endblock %}{% block content %}
+<section class="panel detail" style="max-width:560px;margin-top:40px">
+  <div class="empty" style="padding:16px 0;text-align:left;align-items:flex-start">
+    <span aria-hidden="true" style="background:var(--success-bg);color:var(--success)">✓</span>
+    <h3>Промокод применён</h3>
+    <p>{{ result.description }}</p>
+  </div>
+  <a class="button" href="/">В кабинет</a>
+</section>
+{% endblock %}

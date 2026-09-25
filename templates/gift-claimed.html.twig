@@ -1,1 +1,10 @@
-{% extends 'base.html.twig' %}{% block title %}Подарок активирован{% endblock %}{% block content %}<header><div><p class="eyebrow">ПОДАРОК</p><h1>Подарок активирован.</h1><p class="muted">Подписка оформляется.</p></div></header><section class="panel detail"><p>Подарочная подписка на <strong>{{ purchase.period_days }} дней</strong> активирована. Доступ появится в разделе «Мои подписки» после обработки.</p><a class="button" href="/">К подпискам →</a></section>{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Подарок активирован{% endblock %}{% block content %}
+<section class="panel detail" style="max-width:560px;margin-top:40px">
+  <div class="empty" style="padding:16px 0;text-align:left;align-items:flex-start">
+    <span aria-hidden="true" style="background:var(--success-bg);color:var(--success)">✓</span>
+    <h3>Подарок активирован</h3>
+    <p>Подарочная подписка на {{ purchase.period_days }} дней активирована. Доступ появится в разделе «Обзор» после обработки.</p>
+  </div>
+  <a class="button" href="/">К подпискам</a>
+</section>
+{% endblock %}

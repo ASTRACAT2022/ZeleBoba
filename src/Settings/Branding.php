@@ -19,12 +19,12 @@ final class Branding
     public function color(): string
     {
         $c = (string)($this->config['BRAND_COLOR'] ?? '');
-        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#635bff';
+        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#0f5c46';
     }
     public function accent(): string
     {
         $c = (string)($this->config['BRAND_COLOR_ACCENT'] ?? '');
-        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#e9e7ff';
+        return preg_match('/^#[0-9a-fA-F]{6}$/D', $c) ? $c : '#d8f784';
     }
     public function footerText(): string
     {
@@ -42,11 +42,10 @@ final class Branding
         if ($t !== '') return $t;
         return "Команды:\n/plans — тарифы\n/buy <id> — купить\n/status — подписки + pending заказы\n/orders — мои заказы\n/subs — мои подписки\n/cabinet — открыть веб-кабинет\n/login — вход в кабинет\n/support — поддержка\n\nКабинет и бот работают в тандеме: заказы и подписки общие.";
     }
-    /** CSS-переменные для кабинета. */
+    /** CSS-переменные для кабинета. Только брендовые токены — базовая тема
+     *  (цвет текста, фон, линии, тёмная тема) живёт в app.css/stripe.css. */
     public function cssVars(): string
     {
-        $color = $this->color();
-        $accent = $this->accent();
-        return '--ink:#0a2540;--muted:#425466;--line:#e3e9f1;--green:'.$color.';--lime:'.$accent.';--bg:#f6f9fc';
+        return '--brand-color:'.$this->color().';--brand-accent:'.$this->accent();
     }
 }

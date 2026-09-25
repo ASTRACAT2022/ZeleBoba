@@ -1,1 +1,51 @@
-{% extends 'base.html.twig' %}{% block title %}Баланс{% endblock %}{% block content %}<header><div><p class="eyebrow">КОШЕЛЁК</p><h1>Баланс.</h1><p class="muted">Пополняйте любым способом и покупайте подписки с баланса.</p></div><div class="price">{{ balance|rub }}</div></header><section class="panel detail"><h2>Пополнить баланс</h2><form method="post" action="/balance/topup" class="row-form"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="idempotency_key" value="{{ key }}"><label>Сумма, ₽<input type="number" name="amount" min="1" max="1000000" step="1" required placeholder="500"></label><label>Способ оплаты<select name="provider">{% for id, name in providers %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label><button class="button">Пополнить →</button></form>{% if topups %}<h2>Последние пополнения</h2><table><thead><tr><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody>{% for t in topups %}<tr><td>{{ t.amount_kopeks|rub }}</td><td>{{ t.status == 'pending' ? 'Ожидает оплаты' : (t.status == 'paid' ? 'Зачислено' : 'Отменено') }}</td><td>{{ t.created_at|date('d.m.Y H:i') }}</td></tr>{% endfor %}</tbody></table>{% endif %}</section><section class="panel detail"><h2>История операций</h2>{% if history %}<table><thead><tr><th>Операция</th><th>Сумма</th><th>Дата</th></tr></thead><tbody>{% for t in history %}<tr><td>{{ t.description ?? t.type }}</td><td class="{{ t.amount_kopeks > 0 ? 'positive' : 'negative' }}">{{ t.amount_kopeks > 0 ? '+' : '' }}{{ t.amount_kopeks|rub }}</td><td>{{ t.created_at|date('d.m.Y H:i') }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="muted">Операций пока нет.</p>{% endif %}</section>{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Баланс{% endblock %}{% block content %}
+<header>
+  <div>
+    <p class="eyebrow">Кошелёк</p>
+    <h1>Баланс</h1>
+    <p class="muted">Пополняйте любым способом и оплачивайте подписки с баланса.</p>
+  </div>
+  <div class="price">{{ balance|rub }}</div>
+</header>
+
+<section class="panel">
+  <div class="panel-head"><h2>Пополнить баланс</h2></div>
+  <div class="panel-body">
+    <form method="post" action="/balance/topup" class="row-form">
+      <input type="hidden" name="_csrf" value="{{ user.csrf }}">
+      <input type="hidden" name="idempotency_key" value="{{ key }}">
+      <label>Сумма, ₽<input type="number" name="amount" min="1" max="1000000" step="1" required placeholder="500"></label>
+      <label>Способ оплаты<select name="provider">{% for id, name in providers %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+      <button class="button">Пополнить</button>
+    </form>
+  </div>
+</section>
+
+{% if topups %}
+<section class="panel">
+  <div class="panel-head"><h2>Последние пополнения</h2></div>
+  <div class="table-wrap table-cards"><table>
+    <thead><tr><th>Дата</th><th>Сумма</th><th class="table-actions">Статус</th></tr></thead>
+    <tbody>{% for t in topups %}<tr>
+      <td data-label="Дата">{{ t.created_at|date('d.m.Y H:i') }}</td>
+      <td class="amount" data-label="Сумма">{{ t.amount_kopeks|rub }}</td>
+      <td class="table-actions" data-label="Статус"><span class="badge {{ t.status == 'paid' ? 'fulfilled' : (t.status == 'pending' ? 'pending' : 'canceled') }}">{{ t.status == 'pending' ? 'Ожидает' : (t.status == 'paid' ? 'Зачислено' : 'Отменено') }}</span></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head"><h2>История операций</h2></div>
+  {% if history %}
+  <div class="table-wrap table-cards"><table>
+    <thead><tr><th>Дата</th><th>Операция</th><th class="table-actions">Сумма</th></tr></thead>
+    <tbody>{% for t in history %}<tr>
+      <td data-label="Дата">{{ t.created_at|date('d.m.Y') }}</td>
+      <td data-label="Операция">{{ t.description ?? t.type }}</td>
+      <td class="amount table-actions {{ t.amount_kopeks > 0 ? 'positive' : 'negative' }}" data-label="Сумма">{{ t.amount_kopeks > 0 ? '+' : '' }}{{ t.amount_kopeks|rub }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="empty"><span aria-hidden="true">◉</span><h3>Операций пока нет</h3><p>История появится после первого пополнения или покупки.</p></div>{% endif %}
+</section>
+{% endblock %}

@@ -1,1 +1,68 @@
-{% extends 'base.html.twig' %}{% block title %}Реферальная программа{% endblock %}{% block content %}<header><div><p class="eyebrow">ПАРТНЁРСКАЯ ПРОГРАММА</p><h1>Приглашайте друзей.</h1><p class="muted">Получайте комиссию с пополнений приглашённых.</p></div><div class="price">{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</div></header><section class="panel detail"><h2>Ваша ссылка</h2><p>Отправьте другу ссылку — при регистрации он станет вашим рефералом:</p><code class="token">https://t.me/{{ telegram_username }}?start=ref_{{ stats.code }}</code><p class="muted">Или код: <strong>{{ stats.code }}</strong></p></section><section class="panel detail"><h2>Статистика</h2><table><thead><tr><th>Показатель</th><th>Значение</th></tr></thead><tbody><tr><td>Приглашено</td><td>{{ stats.referrals|length }}</td></tr><tr><td>Оплативших</td><td>{{ stats.paid_referrals }}</td></tr><tr><td>Заработано</td><td>{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</td></tr></tbody></table></section>{% if stats.referrals %}<section class="panel detail"><h2>Рефералы</h2><table><thead><tr><th>Пользователь</th><th>Статус</th><th>Регистрация</th></tr></thead><tbody>{% for r in stats.referrals %}<tr><td>{{ r.email ?? ('TG ' ~ r.telegram_id) }}</td><td><span class="badge {{ r.has_made_first_topup ? 'fulfilled' : 'pending' }}">{{ r.has_made_first_topup ? 'Оплатил' : 'Не оплатил' }}</span></td><td>{{ r.created_at|date('d.m.Y') }}</td></tr>{% endfor %}</tbody></table></section>{% endif %}{% if withdrawal_enabled %}<section class="panel detail"><h2>Вывод средств</h2><p class="muted">Минимальная сумма: {{ (min_withdrawal / 100)|round(0, 'floor') }} ₽. Выводятся только реферальные начисления.</p><form method="post" action="/referral/withdraw" class="row-form"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><label>Сумма, ₽<input type="number" name="amount" min="{{ (min_withdrawal / 100)|round(0, 'floor') }}" required></label><label>Реквизиты<textarea name="payment_details" required maxlength="500" rows="2" placeholder="Номер карты / кошелька"></textarea></label><button class="button">Подать заявку →</button></form>{% if withdrawals %}<h2>Мои заявки</h2><table><thead><tr><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody>{% for w in withdrawals %}<tr><td>{{ (w.amount_kopeks / 100)|round(0, 'floor') }} ₽</td><td><span class="badge {{ w.status == 'paid' ? 'fulfilled' : (w.status == 'pending' ? 'pending' : 'canceled') }}">{{ w.status }}</span></td><td>{{ w.created_at|date('d.m.Y H:i') }}</td></tr>{% endfor %}</tbody></table>{% endif %}</section>{% endif %}{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Реферальная программа{% endblock %}{% block content %}
+<header>
+  <div>
+    <p class="eyebrow">Партнёрская программа</p>
+    <h1>Рефералы</h1>
+    <p class="muted">Получайте комиссию с пополнений приглашённых.</p>
+  </div>
+  <div class="price">{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</div>
+</header>
+
+<section class="panel">
+  <div class="panel-head"><h2>Ваша ссылка</h2></div>
+  <div class="panel-body">
+    <p class="muted">Отправьте другу ссылку — при регистрации он станет вашим рефералом.</p>
+    <code class="token">https://t.me/{{ telegram_username }}?start=ref_{{ stats.code }}</code>
+    <div class="inline-layout-3">
+      <button class="button small secondary" type="button" data-copy="https://t.me/{{ telegram_username }}?start=ref_{{ stats.code }}" data-copy-label="Скопировано">Скопировать ссылку</button>
+      <span class="badge plain">Код: {{ stats.code }}</span>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Статистика</h2></div>
+  {% if stats.referrals %}
+  <div class="table-wrap table-cards"><table>
+    <thead><tr><th>Пользователь</th><th>Регистрация</th><th class="table-actions">Статус</th></tr></thead>
+    <tbody>{% for r in stats.referrals %}<tr>
+      <td data-label="Пользователь">{{ r.email ?? ('TG ' ~ r.telegram_id) }}</td>
+      <td data-label="Регистрация">{{ r.created_at|date('d.m.Y') }}</td>
+      <td class="table-actions" data-label="Статус"><span class="badge {{ r.has_made_first_topup ? 'fulfilled' : 'pending' }}">{{ r.has_made_first_topup ? 'Оплатил' : 'Не оплатил' }}</span></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="empty"><span aria-hidden="true">↗</span><h3>Пока нет рефералов</h3><p>Поделитесь ссылкой — статистика появится здесь.</p></div>{% endif %}
+  <div class="panel-body" style="padding-top:0">
+    <div class="stat-grid">
+      <div class="stat-card"><span class="stat-label">Приглашено</span><span class="stat-value">{{ stats.referrals|length }}</span></div>
+      <div class="stat-card"><span class="stat-label">Оплативших</span><span class="stat-value">{{ stats.paid_referrals }}</span></div>
+      <div class="stat-card accent"><span class="stat-label">Заработано</span><span class="stat-value">{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</span></div>
+    </div>
+  </div>
+</section>
+
+{% if withdrawal_enabled %}
+<section class="panel">
+  <div class="panel-head"><h2>Вывод средств</h2></div>
+  <div class="panel-body">
+    <p class="hint">Минимальная сумма: {{ (min_withdrawal / 100)|round(0, 'floor') }} ₽. Выводятся только реферальные начисления.</p>
+    <form method="post" action="/referral/withdraw" class="row-form">
+      <input type="hidden" name="_csrf" value="{{ user.csrf }}">
+      <label>Сумма, ₽<input type="number" name="amount" min="{{ (min_withdrawal / 100)|round(0, 'floor') }}" required></label>
+      <label>Реквизиты<textarea name="payment_details" required maxlength="500" rows="2" placeholder="Номер карты / кошелька"></textarea></label>
+      <button class="button secondary">Подать заявку</button>
+    </form>
+  </div>
+  {% if withdrawals %}
+  <div class="table-wrap table-cards"><table>
+    <thead><tr><th>Дата</th><th>Сумма</th><th class="table-actions">Статус</th></tr></thead>
+    <tbody>{% for w in withdrawals %}<tr>
+      <td data-label="Дата">{{ w.created_at|date('d.m.Y H:i') }}</td>
+      <td class="amount" data-label="Сумма">{{ (w.amount_kopeks / 100)|round(0, 'floor') }} ₽</td>
+      <td class="table-actions" data-label="Статус"><span class="badge {{ w.status == 'paid' ? 'fulfilled' : (w.status == 'pending' ? 'pending' : 'canceled') }}">{{ w.status }}</span></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

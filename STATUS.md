@@ -1,7 +1,15 @@
 # ZeleBoba — Production Status
 
-> **Snapshot: 2026-09-21** — live production state of the billing platform.
-> Runtime version: **1.1** (Platega-only payment, single merged container).
+> **Snapshot: 2026-09-25** — live production state of the billing platform.
+> Runtime version: **1.1+ef31c96** (Platega-only payment, single merged container;
+> "Redesign VPN dashboard and admin navigation" deployed).
+> Deploy note (2026-09-25): updated to commit `ef31c96` via rsync + rebuild.
+> Added `.dockerignore` entries (the checkout had a recursive `zeleboba/` copy
+> ~20 GB that blew up the build context); rebuilt `app` + `migrate`; the
+> `billing_owner` password had to be re-aligned via `ALTER USER`; old
+> all-in-one container `zeleboba-all-1` stopped (double Telegram poller → HTTP 409)
+> and `web` recreated so nginx re-resolved `app:9000`. All subsystems healthy,
+> prod `/login` 200, Traefik `zeleboba` backend UP.
 
 This document reflects the **current production deployment** and the correctness
 invariants the codebase is verified against. Historical notes about removed

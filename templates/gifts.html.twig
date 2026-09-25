@@ -1,1 +1,66 @@
-{% extends 'base.html.twig' %}{% block title %}Подарки{% endblock %}{% block content %}<header><div><p class="eyebrow">ПОДАРКИ</p><h1>Дарите подписки.</h1><p class="muted">Купите подписку в подарок и отправьте код другу.</p></div></header>{% if gift_enabled %}<section class="panel detail"><h2>Купить подарок</h2><form method="post" action="/gifts/buy" class="admin-form"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="idempotency_key" value="{{ key }}"><label>Тариф<select name="plan_id">{% for p in plans %}<option value="{{ p.id }}">{{ p.name }} · {{ p.price_minor|rub }}</option>{% endfor %}</select></label><label>Кому (необязательно)<input name="recipient_value" maxlength="255" placeholder="@username или email"></label><label>Сообщение (необязательно)<textarea name="gift_message" maxlength="500" rows="2"></textarea></label><button class="button">Купить подарок →</button></form><p class="muted">Оплата с баланса. После покупки вы получите код GIFT_... — отправьте его другу. Активировать собственный подарок нельзя.</p></section>{% else %}<p class="notice">Подарки временно недоступны.</p>{% endif %}<section class="panel detail"><h2>Активировать подарок</h2><form method="post" action="/gifts/claim" class="row-form"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><label>Код или ссылка<input name="code" required maxlength="300" placeholder="GIFT_... или https://t.me/..."></label><button class="button">Активировать →</button></form></section>{% if bought %}<section class="panel detail"><h2>Мои подарки</h2><table><thead><tr><th>Тариф</th><th>Код</th><th>Статус</th><th>Дата</th></tr></thead><tbody>{% for g in bought %}<tr><td>{{ g.period_days }} дн.</td><td><code>{{ ('GIFT_' ~ g.token|slice(0,59)) }}</code></td><td><span class="badge {{ g.status == 'delivered' ? 'fulfilled' : 'pending' }}">{{ g.status == 'delivered' ? 'Активирован' : 'Ожидает активации' }}</span></td><td>{{ g.created_at|date('d.m.Y') }}</td></tr>{% endfor %}</tbody></table></section>{% endif %}{% if received %}<section class="panel detail"><h2>Полученные подарки</h2><table><thead><tr><th>Тариф</th><th>Дата</th></tr></thead><tbody>{% for g in received %}<tr><td>{{ g.period_days }} дн.</td><td>{{ g.delivered_at|date('d.m.Y') }}</td></tr>{% endfor %}</tbody></table></section>{% endif %}{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Подарки{% endblock %}{% block content %}
+<header>
+  <div>
+    <p class="eyebrow">Подарки</p>
+    <h1>Подарить подписку</h1>
+    <p class="muted">Купите подписку в подарок и отправьте код другу.</p>
+  </div>
+</header>
+
+{% if gift_enabled %}
+<section class="panel">
+  <div class="panel-head"><h2>Купить подарок</h2></div>
+  <div class="panel-body">
+    <form method="post" action="/gifts/buy" class="admin-form">
+      <input type="hidden" name="_csrf" value="{{ user.csrf }}">
+      <input type="hidden" name="idempotency_key" value="{{ key }}">
+      <label>Тариф<select name="plan_id">{% for p in plans %}<option value="{{ p.id }}">{{ p.name }} · {{ p.price_minor|rub }}</option>{% endfor %}</select></label>
+      <label>Кому (необязательно)<input name="recipient_value" maxlength="255" placeholder="@username или email"></label>
+      <label>Сообщение (необязательно)<textarea name="gift_message" maxlength="500" rows="2"></textarea></label>
+      <button class="button">Купить подарок</button>
+    </form>
+    <p class="hint">Оплата с баланса. После покупки вы получите код GIFT_… — отправьте его другу. Активировать собственный подарок нельзя.</p>
+  </div>
+</section>
+{% else %}
+<div class="alert alert-warning"><span class="alert-icon" aria-hidden="true">◆</span><span>Подарки временно недоступны.</span></div>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head"><h2>Активировать подарок</h2></div>
+  <div class="panel-body">
+    <form method="post" action="/gifts/claim" class="row-form">
+      <input type="hidden" name="_csrf" value="{{ user.csrf }}">
+      <label>Код или ссылка<input name="code" required maxlength="300" placeholder="GIFT_… или https://t.me/…"></label>
+      <button class="button secondary">Активировать</button>
+    </form>
+  </div>
+</section>
+
+{% if bought %}
+<section class="panel">
+  <div class="panel-head"><h2>Мои подарки</h2></div>
+  <div class="table-wrap table-cards"><table>
+    <thead><tr><th>Дата</th><th>Подарок</th><th class="table-actions">Статус</th></tr></thead>
+    <tbody>{% for g in bought %}<tr>
+      <td data-label="Дата">{{ g.created_at|date('d.m.Y') }}</td>
+      <td data-label="Подарок">{{ g.period_days }} дн.<small class="mono">{{ ('GIFT_' ~ g.token|slice(0,59)) }}</small></td>
+      <td class="table-actions" data-label="Статус"><span class="badge {{ g.status == 'delivered' ? 'fulfilled' : 'pending' }}">{{ g.status == 'delivered' ? 'Активирован' : 'Ожидает' }}</span></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+
+{% if received %}
+<section class="panel">
+  <div class="panel-head"><h2>Полученные подарки</h2></div>
+  <div class="table-wrap table-cards"><table>
+    <thead><tr><th>Дата</th><th>Подарок</th></tr></thead>
+    <tbody>{% for g in received %}<tr>
+      <td data-label="Дата">{{ g.delivered_at|date('d.m.Y') }}</td>
+      <td data-label="Подарок">{{ g.period_days }} дн.</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+{% endblock %}

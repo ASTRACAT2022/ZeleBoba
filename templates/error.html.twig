@@ -1,1 +1,10 @@
-{% extends 'base.html.twig' %}{% block title %}Не удалось выполнить действие{% endblock %}{% block content %}<section class="panel detail error"><p class="eyebrow">ПРОВЕРЬТЕ ЗАПРОС</p><h1>Нужно немного внимания.</h1><p>{{ message }}</p><a class="button" href="{{ user ? '/' : '/login' }}">{{ user ? 'В кабинет' : 'Ко входу' }} →</a></section>{% endblock %}
+{% extends 'base.html.twig' %}{% block title %}Ошибка{% endblock %}{% block content %}
+<section class="panel detail error" style="max-width:560px;margin-top:40px">
+  <div class="empty" style="padding:20px 0;text-align:left;align-items:flex-start">
+    <span aria-hidden="true">◆</span>
+    <h3>Не удалось выполнить действие</h3>
+    <p>{{ message }}</p>
+  </div>
+  <a class="button" href="{{ user ? '/' : '/login' }}">{{ user ? 'В кабинет' : 'Ко входу' }}</a>
+</section>
+{% endblock %}
