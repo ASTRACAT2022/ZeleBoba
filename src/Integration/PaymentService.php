@@ -122,7 +122,9 @@ final class PaymentService
             $entity=$order??$topup;
             $orders=$order?[$order]:[];
         }
-        if (!$entity) throw new BillingError('Платёж пока не привязан к локальному заказу. Требуется сверка.');
+        // The provider may notify us before checkout.create stores its result.
+        // This is a recoverable race, not a processed business rejection.
+        if (!$entity) throw new JobDeferred(60);
         $isOrder=$orders!==[];
         // When the entity was resolved by its own stored provider_payment_id,
         // the binding is already authoritative (payment belongs to this entity).

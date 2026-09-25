@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace Tests;
 use PHPUnit\Framework\TestCase;
-use App\Infrastructure\{Database,Outbox};
+use App\Infrastructure\{Database,Outbox,JobDeferred};
 use App\Billing\{BillingService,Wallet,TopupService};
 use App\Identity\Auth;
 use App\Integration\Payment\{ProviderRegistry,PlategaProvider};
@@ -105,5 +105,21 @@ final class ProvidersTest extends TestCase
         $req=Request::create('/webhooks/platega','POST',[],[],[],['CONTENT_TYPE'=>'application/json','HTTP_X_MERCHANTID'=>'merchant','HTTP_X_SECRET'=>'secret'],$body);
         self::assertTrue($svc->handleWebhook('platega',$req));
         self::assertSame(1,(int)$this->db->one('SELECT COUNT(*) c FROM payment_events')['c']);
+    }
+    public function testPaidWebhookBeforeCheckoutBindingRemainsRetryable():void
+    {
+        $config=['PLATEGA_ENABLED'=>'1','PLATEGA_MERCHANT_ID'=>'shop','PLATEGA_SECRET'=>'secret','APP_ENV'=>'test'];
+        $http=new MockHttpClient(fn()=>new MockResponse(json_encode([
+            'id'=>'early-payment','status'=>'CONFIRMED','orderId'=>'future-order',
+            'paymentDetails'=>['amount'=>199.00,'currency'=>'RUB'],'comission'=>0,
+        ])));
+        $events=new PaymentEventStore($this->db);
+        $svc=new PaymentService($this->db,$this->billing,$http,$config,$this->registry($config,$http),$events);
+        $id=$events->receive('platega','early-event','early-payment',['status'=>'paid'],true);
+        try {$svc->processEvent($id);self::fail('Unbound payment was acknowledged');}
+        catch (JobDeferred) {}
+        self::assertSame('retry',$this->db->one('SELECT status FROM payment_events WHERE id=?',[$id])['status']);
+        self::assertNull($this->db->one('SELECT processed_at FROM payment_events WHERE id=?',[$id])['processed_at']);
+        self::assertSame(0,(int)$this->db->one('SELECT COUNT(*) n FROM payment_receipts')['n']);
     }
 }

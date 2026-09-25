@@ -153,10 +153,28 @@ final class Worker
         // Legacy subscriptions have no operation row yet and remain supported.
         if ($this->workflows!==null && $this->db->one("SELECT id FROM provisioning_operations WHERE subscription_id=? AND operation_type='activate'",[$id]) && !$lease) return;
         $s=$this->subscription($id);
-        // Covers a crash after the local activation transaction committed but
-        // before the workflow row was marked complete.
-        if ($s && $s['remote_id']!==null && $s['status']==='active') {
-            $this->workflows?->succeeded($id,['remote_id'=>$s['remote_id'],'subscription_url'=>$s['subscription_url']]);
+        // A local remote_id is only a remembered result, not proof that the
+        // account still exists in the panel. A crash after local activation
+        // must be recovered by a live read before completing the workflow.
+        if ($s && $s['status']==='active' && ($s['remote_id']!==null || (int)($s['remnawave_id']??0)>0 || !empty($s['remnawave_short_uuid']))) {
+            $verifiedId=$s['remote_id'];
+            $verifiedUrl=$s['subscription_url'];
+            if ($s['provision_driver']!=='demo') {
+                try {
+                    if (!method_exists($this->provisioner,'resolve')) throw new \RuntimeException('Provisioner cannot verify panel account');
+                    $remote=$this->provisioner->resolve($s);
+                    $panelId=(int)($remote['id']??0);
+                    if ($panelId<=0) throw new \RuntimeException('Remnawave user not found after activation');
+                    $this->verifyExtended($s,$panelId);
+                    $verifiedId=(string)$panelId;
+                    $verifiedUrl=$remote['subscriptionUrl']??$verifiedUrl;
+                    $this->db->execute('UPDATE subscriptions SET remote_id=?,remnawave_id=?,subscription_url=COALESCE(subscription_url,?) WHERE id=?',[$verifiedId,$panelId,$verifiedUrl,$id]);
+                } catch (\Throwable $e) {
+                    $this->workflows?->unknown($id,$e);
+                    throw $e;
+                }
+            }
+            $this->workflows?->succeeded($id,['remote_id'=>$verifiedId,'subscription_url'=>$verifiedUrl]);
             return;
         }
         if (!$s || !in_array($s['status'],['provisioning','active','trial'],true) || $s['remote_id']!==null || (int)$s['expires_at']<=time()) return;
@@ -166,6 +184,13 @@ final class Worker
         if($s['provision_driver']==='demo' && !$this->allowDemo) throw new \RuntimeException('Demo provisioning forbidden');
         try {
             $remote=$s['provision_driver']==='demo'?(new \App\Integration\DemoProvisioner())->provision($s):$this->provisioner->provision($s);
+            if ($s['provision_driver']!=='demo') {
+                if (!method_exists($this->provisioner,'resolve')) throw new \RuntimeException('Provisioner cannot verify panel account');
+                $panel=$this->provisioner->resolve($s);
+                $panelId=(int)($panel['id']??0);
+                if ($panelId<=0) throw new \RuntimeException('Remnawave user not found after activation');
+                $this->verifyExtended($s,$panelId);
+            }
         } catch (\Throwable $e) {
             // The request may have reached Remnawave even if its response did
             // not. Preserve UNKNOWN and let the next leased run verify the
