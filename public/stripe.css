@@ -208,15 +208,25 @@ html[data-theme="dark"] .admin-exit { background: var(--surface); }
   .admin-nav-primary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
   .admin-nav .admin-nav-card { min-width: 0; }
   .admin-nav .admin-nav-card small { display: none; }
-  .admin-nav-secondary { display: flex; flex-wrap: wrap; gap: 3px; }
-  .admin-nav-secondary a { min-height: 28px; padding: 5px 9px 5px 9px; }
+  .admin-nav-secondary {
+    display: flex; flex-wrap: nowrap; gap: 3px; overflow-x: auto;
+    overscroll-behavior-x: contain; scrollbar-width: thin;
+  }
+  .admin-nav-group-label:has(+ .admin-nav-primary)::after,
+  .admin-nav-group-label:has(+ .admin-nav-secondary)::after {
+    content: '  ↔'; font-size: 12px; letter-spacing: 0;
+  }
+  .admin-nav-secondary a { flex: 0 0 auto; min-height: 28px; padding: 5px 9px; white-space: nowrap; }
   .admin-nav .admin-nav-brand, .admin-nav .admin-exit { min-height: 40px; }
   .admin-nav .admin-nav-secondary a { min-height: 36px; }
 }
 @media (max-width: 640px) {
   .main:has(> .admin-nav) { padding: 16px 15px; }
-  .admin-nav-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .admin-nav .admin-nav-card { padding: 6px 8px; }
+  .admin-nav-primary {
+    display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto;
+    overscroll-behavior-x: contain; scrollbar-width: thin;
+  }
+  .admin-nav .admin-nav-card { flex: 0 0 auto; padding: 6px 10px; }
   .admin-nav .admin-nav-card strong { font-size: 12px; }
 }
 @media (max-width: 480px) {

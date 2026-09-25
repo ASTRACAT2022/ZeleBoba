@@ -11,8 +11,14 @@
   document.addEventListener('submit', (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
+    if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) {
+      event.preventDefault();
+      return;
+    }
     if (form.dataset.noLock !== undefined) return;
-    const buttons = form.querySelectorAll('button[type="submit"], button:not([type])');
+    const buttons = [...form.elements].filter((element) =>
+      element instanceof HTMLButtonElement && element.type === 'submit'
+    );
     for (const button of buttons) {
       if (button.disabled) continue;
       button.classList.add('is-loading');
@@ -73,6 +79,7 @@
   document.addEventListener('click', (event) => {
     const trigger = event.target.closest('[data-confirm]');
     if (!trigger) return;
+    if (trigger instanceof HTMLFormElement) return;
     if (!window.confirm(trigger.getAttribute('data-confirm'))) event.preventDefault();
   });
 })();

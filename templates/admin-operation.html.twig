@@ -36,7 +36,7 @@
 {% set prov_st = supportSummary.provisioning.status ?? '' %}
 {% set not_st = supportSummary.notification.status ?? '' %}
 <div class="support-summary">
-<h3>Support Summary</h3>
+<h3>Сводка для поддержки</h3>
 <div class="support-grid">
 <div class="support-item {{ pay_st == 'success' ? 'ok' : (pay_st == 'failed' ? 'fail' : 'pending') }}"><small>PAYMENT</small><strong>{{ supportSummary.payment.status ?? '—' }}</strong></div>
 <div class="support-item {{ inv_st == 'success' ? 'ok' : (inv_st == 'failed' ? 'fail' : 'pending') }}"><small>INVOICE</small><strong>{{ supportSummary.invoice.status ?? '—' }}</strong></div>
@@ -50,7 +50,7 @@
 {% endif %}
 </section>
 <section class="panel detail">
-<div class="section-heading"><h2>Event Timeline</h2></div>
+<div class="section-heading"><h2>Хронология событий</h2></div>
 {% set steps = operation.steps ?? [] %}
 {% if steps %}<div class="timeline-container">{{ _self.step_list(steps) }}</div>
 {% else %}<ol class="customer-timeline">
@@ -62,20 +62,20 @@
 </section>
 {% if operation.retries|length %}
 <section class="panel detail">
-<div class="section-heading"><h2>Retries</h2></div>
+<div class="section-heading"><h2>Повторные попытки</h2></div>
 <table><thead><tr><th>Attempt</th><th>HTTP</th><th>Duration</th><th>Error</th><th>Time</th></tr></thead><tbody>
 {% for r in operation.retries %}<tr><td>{{ r.attempt }}</td><td>{{ r.http_status ?? '—' }}</td><td>{{ r.duration_ms ?? '—' }} ms</td><td>{{ r.error_code ?? r.error_message ?? '—' }}</td><td>{{ (r.finished_at ?? r.started_at)|date('H:i:s') }}</td></tr>{% endfor %}
 </tbody></table>
 </section>
 {% endif %}
 <section class="panel detail">
-<div class="section-heading"><h2>Details</h2></div>
-<p><strong>Started:</strong> {{ operation.started_at ? operation.started_at|date('d.m.Y H:i:s') : '—' }}</p>
-<p><strong>Finished:</strong> {{ operation.completed_at ? operation.completed_at|date('d.m.Y H:i:s') : '—' }}</p>
-<p><strong>Trace:</strong> <code>{{ operation.trace_id }}</code></p>
-<p><strong>Correlation:</strong> <code>{{ operation.correlation_id }}</code></p>
-{% if operation.last_error %}<p><strong>Last Error:</strong> <code>{{ operation.last_error }}</code></p>{% endif %}
-{% if operation.metadata %}<details><summary>Metadata</summary><pre class="json-viewer">{{ operation.metadata|json_encode(constant('JSON_PRETTY_PRINT')) }}</pre></details>{% endif %}
+<div class="section-heading"><h2>Подробности</h2></div>
+<p><strong>Начало:</strong> {{ operation.started_at ? operation.started_at|date('d.m.Y H:i:s') : '—' }}</p>
+<p><strong>Завершение:</strong> {{ operation.completed_at ? operation.completed_at|date('d.m.Y H:i:s') : '—' }}</p>
+<p><strong>Trace ID:</strong> <code>{{ operation.trace_id }}</code></p>
+<p><strong>Корреляция:</strong> <code>{{ operation.correlation_id }}</code></p>
+{% if operation.last_error %}<p><strong>Последняя ошибка:</strong> <code>{{ operation.last_error }}</code></p>{% endif %}
+{% if operation.metadata %}<details><summary>Метаданные</summary><pre class="json-viewer">{{ operation.metadata|json_encode(constant('JSON_PRETTY_PRINT')) }}</pre></details>{% endif %}
 </section>
 {% endblock %}
 {% macro step_list(steps) %}

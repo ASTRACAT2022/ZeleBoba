@@ -1,7 +1,7 @@
 {% extends 'base.html.twig' %}{% block title %}Аварийные переключатели{% endblock %}{% block content %}<header><div><p class="eyebrow">УПРАВЛЕНИЕ СИСТЕМОЙ</p><h1>Аварийные переключатели и circuit breaker.</h1><p class="muted">Safe mode полностью останавливает покупки и вывод. Kill switches действуют мгновенно. Проверяйте после каждого изменения.</p></div><a class="button light" href="/">← В кабинет</a></header>{% include '_admin-nav.html.twig' %}
 
 <section class="panel detail">
-<h2>Safe mode</h2>
+<h2>Безопасный режим</h2>
 <form method="post" action="/admin/switches"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="name" value="__safe_mode__">
 <p class="muted">Полное замораживание всей финансовой поверхности (покупки + выводы). Чтение и админка остаются доступными.</p>
 <select name="enabled"><option value="1" {{ data.safe_mode ? 'selected' : '' }}>Включено</option><option value="0" {{ not data.safe_mode ? 'selected' : '' }}>Выключено</option></select>
@@ -9,7 +9,7 @@
 </section>
 
 <section class="panel detail">
-<h2>Kill switches</h2>
+<h2>Аварийные переключатели</h2>
 <table><thead><tr><th>Переключатель</th><th>Состояние</th><th>Причина</th><th></th></tr></thead><tbody>
 {% for s in data.switches %}
 <tr>
@@ -21,7 +21,7 @@
 </tbody></table></section>
 
 <section class="panel detail">
-<h2>Circuit breakers</h2>
+<h2>Защитные выключатели</h2>
 <table><thead><tr><th>Канал</th><th>Состояние</th><th>Ошибки</th><th></th></tr></thead><tbody>
 {% for b in breakers %}
 <tr><td><strong>{{ b.name }}</strong></td><td><span class="badge {{ b.state }}">{{ b.state }}</span>{% if b.opened_at %}<br><small>открыт {{ b.opened_at|date('d.m H:i') }}</small>{% endif %}</td><td>{{ b.failures }}</td>

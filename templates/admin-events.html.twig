@@ -1,21 +1,21 @@
-{% extends 'base.html.twig' %}{% block title %}Events{% endblock %}{% block content %}
-<header><div><p class="eyebrow">OBSERVABILITY</p><h1>Events</h1><p class="muted">Browse and filter all tracked business operations.</p></div>
+{% extends 'base.html.twig' %}{% block title %}События{% endblock %}{% block content %}
+<header><div><p class="eyebrow">МОНИТОРИНГ</p><h1>События</h1><p class="muted">Поиск и фильтрация событий операций.</p></div>
 <a class="button light" href="/admin/operations">← Операции</a></header>
 {% include '_admin-nav.html.twig' %}
 <section class="panel detail">
 <form method="get" class="row-form">
-<label>Search<input name="q" value="{{ q }}" placeholder="ID, email, invoice, trace…"></label>
-<label>Type<select name="type"><option value="">All</option><option value="payment" {{ type == 'payment' ? 'selected' : '' }}>Payment</option><option value="invoice" {{ type == 'invoice' ? 'selected' : '' }}>Invoice</option><option value="subscription" {{ type == 'subscription' ? 'selected' : '' }}>Subscription</option><option value="provisioning" {{ type == 'provisioning' ? 'selected' : '' }}>Provisioning</option><option value="webhook" {{ type == 'webhook' ? 'selected' : '' }}>Webhook</option><option value="email" {{ type == 'email' ? 'selected' : '' }}>Email</option><option value="authentication" {{ type == 'authentication' ? 'selected' : '' }}>Auth</option><option value="cron" {{ type == 'cron' ? 'selected' : '' }}>Cron</option><option value="system" {{ type == 'system' ? 'selected' : '' }}>System</option></select></label>
-<label>Status<select name="status"><option value="">All</option><option value="success" {{ status == 'success' ? 'selected' : '' }}>Success</option><option value="processing" {{ status == 'processing' ? 'selected' : '' }}>Processing</option><option value="failed" {{ status == 'failed' ? 'selected' : '' }}>Failed</option><option value="pending" {{ status == 'pending' ? 'selected' : '' }}>Pending</option><option value="retrying" {{ status == 'retrying' ? 'selected' : '' }}>Retrying</option></select></label>
-<label>Client<select name="client"><option value="">All</option></select></label>
-<label>Period<select name="period"><option value="today" {{ period == 'today' ? 'selected' : '' }}>Today</option><option value="24h" {{ period == '24h' ? 'selected' : '' }}>24h</option><option value="7d" {{ period == '7d' ? 'selected' : '' }}>7 days</option><option value="30d" {{ period == '30d' ? 'selected' : '' }}>30 days</option></select></label>
-<button class="button small">Filter</button>
+<label>Поиск<input name="q" value="{{ q }}" placeholder="ID, email, счёт, Trace ID…"></label>
+<label>Тип<select name="type"><option value="">Все</option><option value="payment" {{ type == 'payment' ? 'selected' : '' }}>Платёж</option><option value="invoice" {{ type == 'invoice' ? 'selected' : '' }}>Счёт</option><option value="subscription" {{ type == 'subscription' ? 'selected' : '' }}>Подписка</option><option value="provisioning" {{ type == 'provisioning' ? 'selected' : '' }}>Выдача VPN</option><option value="webhook" {{ type == 'webhook' ? 'selected' : '' }}>Вебхук</option><option value="email" {{ type == 'email' ? 'selected' : '' }}>Email</option><option value="authentication" {{ type == 'authentication' ? 'selected' : '' }}>Авторизация</option><option value="cron" {{ type == 'cron' ? 'selected' : '' }}>Планировщик</option><option value="system" {{ type == 'system' ? 'selected' : '' }}>Система</option></select></label>
+<label>Статус<select name="status"><option value="">Все</option><option value="success" {{ status == 'success' ? 'selected' : '' }}>Успешно</option><option value="processing" {{ status == 'processing' ? 'selected' : '' }}>В обработке</option><option value="failed" {{ status == 'failed' ? 'selected' : '' }}>Ошибка</option><option value="pending" {{ status == 'pending' ? 'selected' : '' }}>Ожидает</option><option value="retrying" {{ status == 'retrying' ? 'selected' : '' }}>Повтор</option></select></label>
+<label>Клиент<select name="client"><option value="">Все</option></select></label>
+<label>Период<select name="period"><option value="today" {{ period == 'today' ? 'selected' : '' }}>Сегодня</option><option value="24h" {{ period == '24h' ? 'selected' : '' }}>24 часа</option><option value="7d" {{ period == '7d' ? 'selected' : '' }}>7 дней</option><option value="30d" {{ period == '30d' ? 'selected' : '' }}>30 дней</option></select></label>
+<button class="button small">Показать</button>
 </form>
 </section>
 <section class="panel detail">
-<h2>Operations</h2>
+<h2>Операции</h2>
 {% if operations %}<table><thead><tr>
-<th>Time</th><th>Type</th><th>Client</th><th>Operation</th><th>Status</th><th>Duration</th><th>Provider</th><th>Trace</th>
+<th>Время</th><th>Тип</th><th>Клиент</th><th>Операция</th><th>Статус</th><th>Длительность</th><th>Провайдер</th><th>Trace ID</th>
 </tr></thead><tbody>
 {% for o in operations %}
 <tr>
@@ -30,7 +30,6 @@
 </tr>
 {% endfor %}
 </tbody></table>
-{% else %}<p class="muted">No operations found.</p>{% endif %}
-</section>
+{% else %}<p class="muted">Операции не найдены.</p>{% endif %}
 </section>
 {% endblock %}

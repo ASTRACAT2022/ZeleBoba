@@ -1,19 +1,19 @@
-{% extends 'base.html.twig' %}{% block title %}Operations{% endblock %}{% block content %}
-<header><div><p class="eyebrow">OPERATIONAL CENTER</p><h1>Operations</h1><p class="muted">Payments, subscriptions, orders, and provisioning.</p></div></header>
+{% extends 'base.html.twig' %}{% block title %}Операции{% endblock %}{% block content %}
+<header><div><p class="eyebrow">ОПЕРАЦИОННЫЙ ЦЕНТР</p><h1>Операции</h1><p class="muted">Платежи, подписки, заказы и выдача VPN.</p></div></header>
 {% include '_admin-nav.html.twig' %}
 <section class="panel detail">
 <form method="get" class="row-form">
-<label>Search<input name="q" value="{{ q }}" placeholder="Payment, order, subscription, user, email, invoice, trace…"></label>
-<label>Type<select name="type"><option value="">All</option>{% for value,label in {'payment':'Payment','invoice':'Invoice','subscription':'Subscription','provisioning':'Provisioning','webhook':'Webhook','email':'Email','authentication':'Auth','cron':'Cron','system':'System'} %}<option value="{{ value }}" {{ type == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label>
-<label>Status<select name="status"><option value="">All</option>{% for value,label in {'success':'Success','processing':'Processing','failed':'Failed','pending':'Pending','retrying':'Retrying'} %}<option value="{{ value }}" {{ status == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label>
-<label>Client<input name="client" value="{{ client }}" placeholder="Email or user ID"></label>
-<label>Period<select name="period"><option value="today" {{ period == 'today' ? 'selected' : '' }}>Today</option><option value="24h" {{ period == '24h' ? 'selected' : '' }}>24h</option><option value="7d" {{ period == '7d' ? 'selected' : '' }}>7 days</option><option value="30d" {{ period == '30d' ? 'selected' : '' }}>30 days</option></select></label>
-<button class="button small">Search</button>
+<label>Поиск<input name="q" value="{{ q }}" placeholder="Платёж, заказ, подписка, клиент, email, счёт, Trace ID…"></label>
+<label>Тип<select name="type"><option value="">Все</option>{% for value,label in {'payment':'Платёж','invoice':'Счёт','subscription':'Подписка','provisioning':'Выдача VPN','webhook':'Вебхук','email':'Email','authentication':'Авторизация','cron':'Планировщик','system':'Система'} %}<option value="{{ value }}" {{ type == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Статус<select name="status"><option value="">Все</option>{% for value,label in {'success':'Успешно','processing':'В обработке','failed':'Ошибка','pending':'Ожидает','retrying':'Повтор'} %}<option value="{{ value }}" {{ status == value ? 'selected' : '' }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Клиент<input name="client" value="{{ client }}" placeholder="Email или ID клиента"></label>
+<label>Период<select name="period"><option value="today" {{ period == 'today' ? 'selected' : '' }}>Сегодня</option><option value="24h" {{ period == '24h' ? 'selected' : '' }}>24 часа</option><option value="7d" {{ period == '7d' ? 'selected' : '' }}>7 дней</option><option value="30d" {{ period == '30d' ? 'selected' : '' }}>30 дней</option></select></label>
+<button class="button small">Найти</button>
 </form>
 </section>
 <section class="panel detail">
-<h2>Operations</h2>
-{% if operations %}<table><thead><tr><th>Time</th><th>Operation</th><th>Status</th><th>Client</th><th>Related</th><th>Provider</th><th>Duration</th></tr></thead><tbody>
+<h2>Операции</h2>
+{% if operations %}<table><thead><tr><th>Время</th><th>Операция</th><th>Статус</th><th>Клиент</th><th>Связано</th><th>Провайдер</th><th>Длительность</th></tr></thead><tbody>
 {% for o in operations %}<tr>
 <td>{{ (o.started_at|date('d.m.Y H:i')) }}</td>
 <td><a href="/admin/operations/{{ o.id }}">{{ o.type }}</a><br><small class="mono">{{ o.correlation_id|slice(0,10) }}…</small></td>
@@ -24,7 +24,6 @@
 <td>{{ o.duration_ms ? o.duration_ms ~ ' ms' : '—' }}</td>
 </tr>{% endfor %}
 </tbody></table>
-{% else %}<p class="muted">No operations found.</p>{% endif %}
-</section>
+{% else %}<p class="muted">Операции не найдены.</p>{% endif %}
 </section>
 {% endblock %}
