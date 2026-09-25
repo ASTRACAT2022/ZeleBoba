@@ -140,13 +140,7 @@ final class Application
                 foreach ($plans as &$plan) $plan['price_minor']=$this->app->billing->priceFor($uid,$plan);
                 unset($plan);
                 return $this->render('plans',['plans'=>$plans,'key'=>Database::id(),'trial_available'=>$this->app->trials->available($uid)]);
-            case 'buy':
-                $this->app->killSwitch->assertCanPurchase($this->app->config['PAYMENT_DRIVER']);
-                $gateway=new RailsPresentationGateway($this->app->config);
-                $redirect=$gateway->createOrder($this->request);
-                if ($redirect) return $redirect;
-                $order=$this->app->billing->order($uid,$input->get('plan_id',''),$input->get('idempotency_key',''),$input->get('receipt_email'),self::clientIp($this->request),null,$input->get('landing_slug'));
-                return new RedirectResponse('/orders/'.$order['id'],303);
+            case 'buy': $this->app->killSwitch->assertCanPurchase($this->app->config['PAYMENT_DRIVER']); $order=$this->app->billing->order($uid,$input->get('plan_id',''),$input->get('idempotency_key',''),$input->get('receipt_email'),self::clientIp($this->request),null,$input->get('landing_slug')); return new RedirectResponse('/orders/'.$order['id'],303);
             case 'orders': return $this->render('orders',['orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100',[$uid])]);
             case 'order':
             case 'demo':
@@ -167,9 +161,6 @@ final class Application
                 // а не покупать новую: order(..., renewSubscriptionId) создаёт renewal-заказ,
                 // по оплате которого SubscriptionService::extend продлевает expires_at.
                 $this->app->killSwitch->assertCanPurchase($this->app->config['PAYMENT_DRIVER']);
-                $gateway=new RailsPresentationGateway($this->app->config);
-                $redirect=$gateway->createRenewal($this->request,$id);
-                if ($redirect) return $redirect;
                 $sub=$db->one('SELECT * FROM subscriptions WHERE id=? AND user_id=?'.$db->lock(),[$id,$uid]);
                 if (!$sub) return $this->render('error',['message'=>'Подписка не найдена.'],404);
                 if ($sub['status']!=='active' || (int)$sub['expires_at']<=time()) throw new BillingError('Продлить можно только активную подписку.');
@@ -212,9 +203,6 @@ final class Application
                 $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
                 if ($amount===false || $amount < -1000000 || $amount > 1000000) throw new BillingError('Некорректная сумма.');
                 $this->app->killSwitch->assertCanPurchase($input->get('provider',''));
-                $gateway=new RailsPresentationGateway($this->app->config);
-                $redirect=$gateway->createTopup($this->request);
-                if ($redirect) return $redirect;
                 $key=$input->get('idempotency_key','');
                 $provider=$input->get('provider','');
                 $topup=$this->app->topups->create($uid,($amount??0)*100,$key,$provider);
@@ -231,9 +219,6 @@ final class Application
                 return $this->render('topup',['topup'=>$topup]);
             case 'buy-balance':
                 $this->app->killSwitch->assertCanPurchase(null);
-                $gateway=new RailsPresentationGateway($this->app->config);
-                $redirect=$gateway->createBalanceOrder($this->request);
-                if ($redirect) return $redirect;
                 $this->app->billing->purchaseFromBalance($uid,$input->get('plan_id',''),$input->get('idempotency_key',''));
                 return new RedirectResponse('/',303);
             case 'settings': return $this->render('settings',['link_token'=>null]);
@@ -267,9 +252,6 @@ final class Application
                 $this->app->killSwitch->assertCanWithdraw();
                 $amount=filter_var($input->get('amount'),FILTER_VALIDATE_INT);
                 if ($amount===false || $amount < -1000000 || $amount > 1000000) throw new BillingError('Некорректная сумма.');
-                $gateway=new RailsPresentationGateway($this->app->config);
-                $redirect=$gateway->createReferralWithdrawal($this->request);
-                if ($redirect) return $redirect;
                 $details=$input->get('payment_details','');
                 $this->app->referrals->requestWithdrawal($uid,($amount??0)*100,$details);
                 return new RedirectResponse('/referral',303);
@@ -279,9 +261,6 @@ final class Application
                 $plans=$db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor');
                 return $this->render('gifts',['bought'=>$bought,'received'=>$received,'plans'=>$plans,'gift_enabled'=>$this->app->gifts->enabled(),'key'=>Database::id()]);
             case 'gift-buy':
-                $gateway=new RailsPresentationGateway($this->app->config);
-                $redirect=$gateway->createGiftPurchase($this->request);
-                if ($redirect) return $redirect;
                 $planId=$input->get('plan_id','');
                 $key=$input->get('idempotency_key','');
                 $recipientType=$input->get('recipient_type','');

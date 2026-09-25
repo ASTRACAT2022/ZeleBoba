@@ -1,7 +1,7 @@
 #!/bin/sh
-# Merge supervisor for ZeleBoba: runs the PHP web role and any enabled
-# background roles in ONE container. Background roles can be disabled
-# independently while keeping php-fpm available during a staged Rails cutover.
+# Merge supervisor for ZeleBoba: runs all four worker roles in ONE container
+# (php-fpm web + outbox worker + reconcile scheduler + telegram long-poll) so a
+# single deploy target replaces the 4-container topology (app/worker/scheduler/bot).
 # No rebuild / no new deps: uses only sh + php already in the php-fpm image.
 #
 # Resilience model: any child that exits reports through a tiny event file, the
@@ -49,48 +49,32 @@ wait_for_pid() {
     cat "$PIDFILE"
 }
 
-# --- start enabled roles in the background, keep child and supervisor PIDs --
-SUPERVISORS=""
-ROLE_PIDS=""
-start_role() {
-    ROLE_NAME="$1"
-    ROLE_PIDFILE="$2"
-    shift 2
-    run_supervised "$ROLE_NAME" "$ROLE_PIDFILE" "$@" &
-    LAST_SUPERVISOR=$!
-    SUPERVISORS="$SUPERVISORS $LAST_SUPERVISOR"
-    LAST_CHILD=$(wait_for_pid "$ROLE_PIDFILE")
-    ROLE_PIDS="$ROLE_PIDS $LAST_CHILD"
-}
+# --- start each role in the background, keep PIDs -------------------------
+run_supervised fpm "$TMP_DIR/fpm.pid" php-fpm &
+FPM_SUP=$!
 
-start_role fpm "$TMP_DIR/fpm.pid" php-fpm
-FPM_PID=$LAST_CHILD
-FPM_SUP=$LAST_SUPERVISOR
+run_supervised scheduler "$TMP_DIR/scheduler.pid" run_scheduler &
+SCHED_SUP=$!
 
-SCHED_PID=""; SCHED_SUP=""
-WORKER_PID=""; WORKER_SUP=""
-BOT_PID=""; BOT_SUP=""
-if [ "${RUN_PHP_SCHEDULER:-1}" = "1" ]; then
-    start_role scheduler "$TMP_DIR/scheduler.pid" run_scheduler
-    SCHED_PID=$LAST_CHILD; SCHED_SUP=$LAST_SUPERVISOR
-fi
-if [ "${RUN_PHP_OUTBOX_WORKER:-1}" = "1" ]; then
-    start_role worker "$TMP_DIR/worker.pid" php bin/console worker:run
-    WORKER_PID=$LAST_CHILD; WORKER_SUP=$LAST_SUPERVISOR
-fi
-if [ "${RUN_PHP_TELEGRAM_POLL:-1}" = "1" ]; then
-    start_role bot "$TMP_DIR/bot.pid" php bin/console telegram:poll
-    BOT_PID=$LAST_CHILD; BOT_SUP=$LAST_SUPERVISOR
-fi
+run_supervised worker "$TMP_DIR/worker.pid" php bin/console worker:run &
+WORKER_SUP=$!
 
-echo "[merge-entrypoint] started php-fpm=$FPM_PID scheduler=${SCHED_PID:-disabled} worker=${WORKER_PID:-disabled} bot=${BOT_PID:-disabled}"
+run_supervised bot "$TMP_DIR/bot.pid" php bin/console telegram:poll &
+BOT_SUP=$!
+
+FPM_PID=$(wait_for_pid "$TMP_DIR/fpm.pid")
+SCHED_PID=$(wait_for_pid "$TMP_DIR/scheduler.pid")
+WORKER_PID=$(wait_for_pid "$TMP_DIR/worker.pid")
+BOT_PID=$(wait_for_pid "$TMP_DIR/bot.pid")
+
+echo "[merge-entrypoint] started php-fpm=$FPM_PID scheduler=$SCHED_PID worker=$WORKER_PID bot=$BOT_PID"
 
 # --- lifecycle: forward signals, exit (for restart policy) when any dies ----
 STOPPING=0
 terminate_set() {
     STOPPING=1
-    [ -z "$ROLE_PIDS" ] || kill -TERM $ROLE_PIDS 2>/dev/null
-    [ -z "$SUPERVISORS" ] || kill -TERM $SUPERVISORS 2>/dev/null
+    kill -TERM $FPM_PID $SCHED_PID $WORKER_PID $BOT_PID 2>/dev/null
+    kill -TERM $FPM_SUP $SCHED_SUP $WORKER_SUP $BOT_SUP 2>/dev/null
 }
 trap 'terminate_set' TERM INT
 
@@ -120,8 +104,8 @@ fi
 
 # reap remaining children after signal
 sleep 1
-for PID in $ROLE_PIDS; do kill -9 "$PID" 2>/dev/null; done
-for PID in $SUPERVISORS; do wait "$PID" 2>/dev/null; done
-rm -f "$EVENT_FILE" "$TMP_DIR"/*.pid 2>/dev/null
+kill -9 $FPM_PID $SCHED_PID $WORKER_PID $BOT_PID 2>/dev/null
+wait $FPM_SUP $SCHED_SUP $WORKER_SUP $BOT_SUP 2>/dev/null
+rm -f "$EVENT_FILE" "$TMP_DIR/fpm.pid" "$TMP_DIR/scheduler.pid" "$TMP_DIR/worker.pid" "$TMP_DIR/bot.pid" 2>/dev/null
 rmdir "$TMP_DIR" 2>/dev/null
 exit $FAILED

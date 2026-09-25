@@ -2,9 +2,6 @@
 .env
 .env.*
 vendor
-rails_backend/vendor/
-rails_backend/.bundle/
-rails_backend/tmp/
 var
 .phpunit.cache
 node_modules

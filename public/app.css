@@ -756,7 +756,7 @@ footer {
     min-height: 34px; padding: 8px 10px; white-space: nowrap;
     font-size: var(--fs-sm); border-radius: var(--radius-control);
   }
-  .sidebar nav a span { display: none; }
+  nav a span { display: none; }
   nav a.selected { background: var(--surface-brand); box-shadow: none; }
   /* account block compact in the top bar */
   .sidebar-bottom {
