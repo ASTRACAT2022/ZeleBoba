@@ -5,8 +5,8 @@
 <table><thead><tr><th>Действие</th><th>Автор</th><th>Детали</th><th></th></tr></thead><tbody>
 {% for r in data.pending %}
 <tr><td><strong>{{ r.action }}</strong><br><small>{{ r.requested_at|date('d.m H:i') }}</small></td><td>{{ r.actor }}</td><td><code>{{ r.payload }}</code></td>
-<td style="white-space:nowrap"><form method="post" action="/admin/approvals/{{ r.id }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="decision" value="approve"><button class="button small">Подтвердить</button></form>
-<form method="post" action="/admin/approvals/{{ r.id }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="decision" value="reject"><button class="button small danger">Отклонить</button></form></td></tr>
+<td class="nowrap"><form method="post" action="/admin/approvals/{{ r.id }}" class="inline"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="decision" value="approve"><button class="button small">Подтвердить</button></form>
+<form method="post" action="/admin/approvals/{{ r.id }}" class="inline"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="decision" value="reject"><button class="button small danger">Отклонить</button></form></td></tr>
 {% else %}<tr><td colspan="4">Очередь пуста.</td></tr>{% endfor %}
 </tbody></table></section>
 

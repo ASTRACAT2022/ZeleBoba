@@ -10,12 +10,12 @@
 <section class="panel">
   <div class="panel-head"><h2>Профиль</h2></div>
   <div class="panel-body">
-    <div class="meta-grid" style="margin-top:0">
-      <div class="meta-item"><span class="meta-label">Вход</span><span class="meta-value" style="font-size:14px">{{ user.email ?? 'Telegram-аккаунт' }}</span></div>
-      <div class="meta-item"><span class="meta-label">Роль</span><span class="meta-value" style="font-size:14px">{{ user.role == 'admin' ? 'Администратор' : 'Клиент' }}</span></div>
-      <div class="meta-item"><span class="meta-label">2FA</span><span class="meta-value" style="font-size:14px">{{ user.mfa_enabled ? 'Включена' : 'Выключена' }}</span></div>
+    <div class="meta-grid mt-0" >
+      <div class="meta-item"><span class="meta-label">Вход</span><span class="meta-value fs-14" >{{ user.email ?? 'Telegram-аккаунт' }}</span></div>
+      <div class="meta-item"><span class="meta-label">Роль</span><span class="meta-value fs-14" >{{ user.role == 'admin' ? 'Администратор' : 'Клиент' }}</span></div>
+      <div class="meta-item"><span class="meta-label">2FA</span><span class="meta-value fs-14" >{{ user.mfa_enabled ? 'Включена' : 'Выключена' }}</span></div>
     </div>
-    <div class="inline-layout-3" style="margin-top:16px">
+    <div class="inline-layout-3 mt-16" >
       <a class="button secondary" href="/security">Двухфакторная защита</a>
       <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><button class="button ghost">Выйти из аккаунта</button></form>
     </div>

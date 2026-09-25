@@ -13,7 +13,7 @@
 {% if primary %}
 {# ---------- Primary subscription state ---------- #}
 <section class="panel detail" aria-labelledby="sub-state">
-  <div class="section-heading" style="padding:0 0 16px">
+  <div class="section-heading simple-head-16" >
     <h2 id="sub-state">{{ primary.plan_name }}</h2>
     {% if primary.expires_at > now %}<span class="badge active">Активна</span>{% else %}<span class="badge expired">Истекла</span>{% endif %}
   </div>
@@ -34,14 +34,14 @@
 {% if subscriptions|length > 1 %}
 <section class="panel">
   <div class="panel-head"><h2>Другие подписки</h2><span class="muted">{{ subscriptions|length }}</span></div>
-  <div class="panel-body" style="padding:0">
+  <div class="panel-body plain" >
   {% for s in subscriptions %}{% if s.id != primary.id %}
-    <div style="padding:16px var(--pad-x);border-bottom:1px solid var(--line-soft)">
-      <div style="display:flex;justify-content:space-between;gap:14px;align-items:baseline;flex-wrap:wrap">
-        <div><strong>{{ s.plan_name }}</strong><small class="muted" style="display:block">{{ s.expires_at > now ? ('до ' ~ (s.expires_at|date('d.m.Y'))) : (s.expires_at|date('d.m.Y')) }}</small></div>
+    <div class="head-soft">
+      <div class="bar-line">
+        <div><strong>{{ s.plan_name }}</strong><small class="muted block" >{{ s.expires_at > now ? ('до ' ~ (s.expires_at|date('d.m.Y'))) : (s.expires_at|date('d.m.Y')) }}</small></div>
         <span class="badge {{ s.status == 'active' and s.expires_at > now ? 'active' : 'expired' }}">{{ s.expires_at > now ? 'Активна' : 'Истекла' }}</span>
       </div>
-      <div class="inline-layout-3" style="margin-top:10px">
+      <div class="inline-layout-3 mt-10" >
         {% if s.subscription_url and s.expires_at > now %}<a class="button small secondary" href="{{ s.subscription_url }}" rel="noreferrer">Открыть ↗</a>{% endif %}
         {% if s.status == 'active' and s.expires_at > now %}<form method="post" action="/subscriptions/{{ s.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ s.id }}:{{ now }}"><button class="button small secondary">Продлить</button></form>{% endif %}
       </div>
@@ -53,8 +53,8 @@
 
 {# ---------- Merge (existing feature, unchanged logic) ---------- #}
 {% if active|length > 1 %}
-<section class="merge-panel panel" style="margin-top:var(--gap-lg)">
-  <div class="section-heading" style="padding:0 0 14px"><h2>Объединить подписки</h2><span class="muted">перенос трафика и дней</span></div>
+<section class="merge-panel panel mt-24" >
+  <div class="section-heading simple-head" ><h2>Объединить подписки</h2><span class="muted">перенос трафика и дней</span></div>
   <p class="muted">Перенесите остаток дней на другую подписку. Исходная будет удалена — <a href="/plans">подробнее</a>.</p>
   <form method="post" action="/subscriptions/merge" class="row-form">
     <input type="hidden" name="_csrf" value="{{ user.csrf }}">
@@ -66,10 +66,10 @@
 {% endif %}
 
 {# ---------- Quick actions ---------- #}
-<div class="overview" style="margin-top:var(--gap-lg)">
-  <section class="panel detail" style="margin-top:0">
-    <div class="section-heading" style="padding:0 0 14px"><h2>Быстрые действия</h2></div>
-    <ul class="feature-list" style="margin:0">
+<div class="overview mt-24" >
+  <section class="panel detail mt-0" >
+    <div class="section-heading simple-head" ><h2>Быстрые действия</h2></div>
+    <ul class="feature-list m-0" >
       <li><a href="/plans">Продлить или купить подписку</a></li>
       <li><a href="/balance">Пополнить баланс</a></li>
       {% if autorenew_enabled %}<li>Автопродление: {% if primary and primary.auto_renew %}<span class="badge active">включено</span>{% else %}<span class="badge">выключено</span>{% endif %}</li>{% endif %}
@@ -88,18 +88,18 @@
 
 {% else %}
 {# ---------- Empty state: no subscription ---------- #}
-<section class="panel detail" style="text-align:center">
-  <div class="empty" style="padding:40px 20px">
+<section class="panel detail center" >
+  <div class="empty pad-page" >
     <span aria-hidden="true">◫</span>
     <h3>Подписки пока нет</h3>
     <p>Выберите тариф — после оплаты доступ появится здесь автоматически.</p>
     <a class="button large" href="/plans">Выбрать тариф</a>
   </div>
 </section>
-<div class="overview" style="margin-top:var(--gap-lg)">
-  <section class="panel detail" style="margin-top:0">
-    <div class="section-heading" style="padding:0 0 14px"><h2>Что вы получите</h2></div>
-    <ul class="feature-list" style="margin:0">
+<div class="overview mt-24" >
+  <section class="panel detail mt-0" >
+    <div class="section-heading simple-head" ><h2>Что вы получите</h2></div>
+    <ul class="feature-list m-0" >
       <li>Стабильный VPN-доступ на всей инфраструктуре {{ site_name }}</li>
       <li>Устройства: без ограничений</li>
       <li>Обход ограничений и фильтраций</li>

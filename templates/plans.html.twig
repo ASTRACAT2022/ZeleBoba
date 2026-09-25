@@ -14,7 +14,7 @@
 <div class="pricing" data-pricing>
   {# ---------- Term selector ---------- #}
   <div>
-    <fieldset style="border:0;margin:0;padding:0">
+    <fieldset class="plain">
       <legend class="sr-only">Период подписки</legend>
       <ul class="term-list">
       {% for p in plans %}
@@ -34,7 +34,7 @@
       {% endfor %}
       </ul>
     </fieldset>
-    <ul class="feature-list" style="margin-top:18px">
+    <ul class="feature-list mt-18" >
       <li>Устройства: без ограничений</li>
       <li>Обход ограничений и фильтраций</li>
       <li>Доступ ко всей инфраструктуре {{ site_name }}</li>
@@ -42,26 +42,26 @@
   </div>
 
   {# ---------- Order summary + term forms ---------- #}
-  <aside class="panel detail summary" style="margin-top:0" aria-label="Итог заказа">
-    <h2 style="margin-bottom:14px">Итог</h2>
+  <aside class="panel detail summary mt-0"  aria-label="Итог заказа">
+    <h2 class="mb-14">Итог</h2>
     <div class="summary-row"><span>Тариф</span><span data-summary-plan>{{ plans|first.name }}</span></div>
     <div class="summary-total"><span>Итого</span><span class="price" data-summary-total>{{ plans|first.price_minor|rub }}</span></div>
     {% for p in plans %}
     <div data-term-panel="{{ p.id }}" {% if not loop.first %}hidden{% endif %}>
       {% if p.is_trial_available and trial_available %}
-      <form method="post" action="/trial" style="margin-top:16px">
+      <form method="post" action="/trial" class="mt-16">
         <input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="plan_id" value="{{ p.id }}">
         <button class="button light full">{{ p.trial_price_kopeks > 0 ? ('Попробовать за ' ~ (p.trial_price_kopeks|rub)) : 'Попробовать бесплатно' }} · {{ p.trial_duration_days ?: 3 }} дн.</button>
       </form>
       {% endif %}
-      <form method="post" action="/orders" style="margin-top:16px">
+      <form method="post" action="/orders" class="mt-16">
         <input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="plan_id" value="{{ p.id }}">
         <input type="hidden" name="idempotency_key" value="{{ key }}:{{ p.id }}">
         {% if receipt_required and not user.email %}<label>Email для чека<input type="email" name="receipt_email" required maxlength="254" placeholder="email@example.com"></label>{% endif %}
         <button class="button large full" data-summary-cta {{ not purchases_enabled ? 'disabled' : '' }}>Перейти к оплате</button>
       </form>
       {% if user.balance_kopeks >= p.price_minor %}
-      <form method="post" action="/orders/balance" style="margin-top:8px">
+      <form method="post" action="/orders/balance" class="mt-8">
         <input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="plan_id" value="{{ p.id }}">
         <input type="hidden" name="idempotency_key" value="balance:{{ key }}:{{ p.id }}">
         <button class="button secondary full" {{ not purchases_enabled ? 'disabled' : '' }}>Оплатить с баланса ({{ p.price_minor|rub }})</button>
@@ -69,23 +69,8 @@
       {% endif %}
     </div>
     {% endfor %}
-    <p class="hint" style="margin:14px 0 0">Стоимость фиксируется при создании заказа. Автоматических списаний нет.</p>
+    <p class="hint mt-14" >Стоимость фиксируется при создании заказа. Автоматических списаний нет.</p>
   </aside>
 </div>
-<script nonce="{{ style_nonce }}">
-/* Show the summary forms for the selected term (progressive enhancement). */
-(() => {
-  const root = document.querySelector('[data-pricing]');
-  if (!root) return;
-  const panels = [...root.querySelectorAll('[data-term-panel]')];
-  const sync = () => {
-    const checked = root.querySelector('input[name="term"]:checked');
-    panels.forEach((panel) => { panel.hidden = !checked || panel.dataset.termPanel !== checked.value; });
-  };
-  root.addEventListener('change', (e) => { if (e.target.name === 'term') sync(); });
-  root.addEventListener('click', sync);
-  sync();
-})();
-</script>
 {% endif %}
 {% endblock %}

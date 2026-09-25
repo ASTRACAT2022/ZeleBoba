@@ -43,11 +43,15 @@
   const pricing = document.querySelector('[data-pricing]');
   if (pricing) {
     const terms = [...pricing.querySelectorAll('.term')];
+    const panels = [...pricing.querySelectorAll('[data-term-panel]')];
     const sync = () => {
       const checked = pricing.querySelector('input[type="radio"]:checked');
       terms.forEach((term) => {
         const input = term.querySelector('input[type="radio"]');
         term.classList.toggle('selected', input === checked);
+      });
+      panels.forEach((panel) => {
+        panel.hidden = !checked || panel.dataset.termPanel !== checked.value;
       });
       if (!checked) return;
       const out = document.querySelector('[data-summary-plan]');

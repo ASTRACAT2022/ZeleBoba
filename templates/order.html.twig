@@ -15,7 +15,7 @@
   <span class="{{ order.status == 'fulfilled' ? 'complete' : '' }}">3 · Доступ выдан</span>
 </div>
 
-<section class="panel detail" style="max-width:640px">
+<section class="panel detail narrow-640" >
 
 {% if order.status == 'pending' %}
   <div class="summary-row"><span>Тариф</span><span>{{ order.plan_name }} · {{ order.duration_days }} дней</span></div>
@@ -24,45 +24,45 @@
   <div class="summary-total"><span>Итого</span><span class="price">{{ order.price_minor|rub }}</span></div>
 
   {% if order.provider == 'demo' %}
-    <div class="alert alert-info" style="margin-top:18px"><span class="alert-icon" aria-hidden="true">◆</span><span>Тестовый платёж — деньги не списываются.</span></div>
-    <form method="post" action="/orders/{{ order.id }}/demo-pay" style="margin-top:16px">
+    <div class="alert alert-info mt-18" ><span class="alert-icon" aria-hidden="true">◆</span><span>Тестовый платёж — деньги не списываются.</span></div>
+    <form method="post" action="/orders/{{ order.id }}/demo-pay" class="mt-16">
       <input type="hidden" name="_csrf" value="{{ user.csrf }}">
       <button class="button large full">Подтвердить оплату</button>
     </form>
   {% elseif order.checkout_url %}
-    <div style="margin-top:18px">
+    <div class="mt-18">
       <a class="button large full" href="{{ order.checkout_url }}" rel="noreferrer">
         {% if order.provider == 'platega' %}Оплатить {{ order.price_minor|rub }} через Platega ↗{% else %}Оплатить {{ order.price_minor|rub }} ↗{% endif %}
       </a>
     </div>
-    <p class="hint" style="margin-top:10px">Оплата откроется на защищённой странице провайдера. Вернитесь сюда после оплаты — статус обновится автоматически.</p>
+    <p class="hint mt-10" >Оплата откроется на защищённой странице провайдера. Вернитесь сюда после оплаты — статус обновится автоматически.</p>
   {% else %}
-    <div class="alert alert-info" style="margin-top:18px"><span class="alert-icon" aria-hidden="true">◆</span><span>Готовим ссылку на оплату. Обновите страницу через несколько секунд.</span></div>
-    <a class="button secondary full" href="/orders/{{ order.id }}" style="margin-top:12px">Обновить статус</a>
+    <div class="alert alert-info mt-18" ><span class="alert-icon" aria-hidden="true">◆</span><span>Готовим ссылку на оплату. Обновите страницу через несколько секунд.</span></div>
+    <a class="button secondary full mt-12" href="/orders/{{ order.id }}" >Обновить статус</a>
   {% endif %}
 
 {% elseif order.status == 'paid' %}
   <div class="alert alert-success"><span class="alert-icon" aria-hidden="true">✓</span><span><strong>Оплата получена.</strong> Настраиваем вашу подписку — оплачивать повторно не нужно.</span></div>
-  <a class="button secondary full" href="/orders/{{ order.id }}" style="margin-top:16px">Обновить статус</a>
+  <a class="button secondary full mt-16" href="/orders/{{ order.id }}" >Обновить статус</a>
 
 {% elseif order.status == 'fulfilled' %}
-  <div class="empty" style="padding:24px 0">
-    <span aria-hidden="true" style="background:var(--success-bg);color:var(--success)">✓</span>
+  <div class="empty py-24" >
+    <span aria-hidden="true" class="positive-box">✓</span>
     <h3>Оплата прошла</h3>
     <p>{{ order.plan_name }} активирован.</p>
   </div>
   <div class="summary-row"><span>Сумма</span><span class="amount">{{ order.price_minor|rub }}</span></div>
   <div class="summary-row"><span>Период</span><span>{{ order.duration_days }} дней</span></div>
   {% if subscription %}<div class="summary-row"><span>Действует до</span><span class="amount">{{ subscription.expires_at|date('d.m.Y') }}</span></div>{% endif %}
-  <a class="button large full" href="/" style="margin-top:16px">Вернуться на главную</a>
+  <a class="button large full mt-16" href="/" >Вернуться на главную</a>
 
 {% elseif order.status == 'payment_unavailable' %}
   <div class="alert alert-warning"><span class="alert-icon" aria-hidden="true">◆</span><span><strong>Оплата временно недоступна.</strong> Этот способ оплаты сейчас не работает. Попробуйте другой тариф или повторите попытку позже.</span></div>
-  <a class="button secondary full" href="/plans" style="margin-top:16px">Выбрать другой тариф</a>
+  <a class="button secondary full mt-16" href="/plans" >Выбрать другой тариф</a>
 
 {% else %}
   <div class="alert alert-danger"><span class="alert-icon" aria-hidden="true">◆</span><span>Платёж отменён. Деньги не списаны.</span></div>
-  <a class="button large full" href="/plans" style="margin-top:16px">Выбрать тариф снова</a>
+  <a class="button large full mt-16" href="/plans" >Выбрать тариф снова</a>
 {% endif %}
 </section>
 {% endblock %}

@@ -5,7 +5,7 @@
     <p class="muted">Введите код из сообщения.</p>
   </div>
 </header>
-<section class="panel detail" style="max-width:520px">
+<section class="panel detail narrow" >
   <form method="post" action="/gifts/claim">
     <input type="hidden" name="_csrf" value="{{ user.csrf }}">
     <label>Код или ссылка<input name="code" value="{{ code|default('') }}" required maxlength="300" placeholder="GIFT_… или https://t.me/…"></label>

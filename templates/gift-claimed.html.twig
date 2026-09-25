@@ -1,7 +1,7 @@
 {% extends 'base.html.twig' %}{% block title %}Подарок активирован{% endblock %}{% block content %}
-<section class="panel detail" style="max-width:560px;margin-top:40px">
-  <div class="empty" style="padding:16px 0;text-align:left;align-items:flex-start">
-    <span aria-hidden="true" style="background:var(--success-bg);color:var(--success)">✓</span>
+<section class="panel detail narrow-560" >
+  <div class="empty lead-actions" >
+    <span aria-hidden="true" class="positive-box">✓</span>
     <h3>Подарок активирован</h3>
     <p>Подарочная подписка на {{ purchase.period_days }} дней активирована. Доступ появится в разделе «Обзор» после обработки.</p>
   </div>

@@ -105,7 +105,7 @@ function toggleStep(el){
 <span class="step-duration">{{ step.duration_ms ? step.duration_ms ~ ' ms' : '' }}</span>
 <span class="step-time">{{ step.started_at ? step.started_at|date('H:i:s') : '' }}</span>
 </div>
-<div class="step-details" style="display:none">
+<div class="step-details is-hidden" >
 {% if step.http_method %}<p><strong>Request:</strong> {{ step.http_method }} {{ step.http_url ?? '' }}</p>{% endif %}
 {% if step.http_status %}<p><strong>HTTP Status:</strong> {{ step.http_status }}</p>{% endif %}
 {% if step.error_code %}<p><strong>Error:</strong> {{ step.error_code }} — {{ step.error_message ?? '' }}</p>{% endif %}
