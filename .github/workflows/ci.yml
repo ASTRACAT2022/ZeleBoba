@@ -25,3 +25,21 @@ jobs:
           TEST_POSTGRES_PASSWORD: test-only
       - run: composer audit
       - run: docker build -t billing-ci .
+  rails-boot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.5'
+      - run: sudo apt-get update && sudo apt-get install -y libargon2-dev libpq-dev libsodium-dev pkg-config
+      - run: gem install bundler -v 4.0.11 --no-document
+      - run: bundle install --jobs 4 --retry 3
+        working-directory: rails_backend
+      - run: bundle exec rails zeitwerk:check
+        working-directory: rails_backend
+        env: {RAILS_ENV: test}
+      - run: bundle exec rails routes > /tmp/zeleboba-rails-routes.txt
+        working-directory: rails_backend
+        env: {RAILS_ENV: test}
+      - run: docker build -f rails_backend/Dockerfile -t billing-rails-ci .

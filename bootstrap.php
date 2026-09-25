@@ -8,7 +8,13 @@ if (is_file(__DIR__.'/.env')) (new Symfony\Component\Dotenv\Dotenv())->load(__DI
 if (!$otelWasInEnvironment && (($_SERVER['OTEL_PHP_AUTOLOAD_ENABLED']??$_ENV['OTEL_PHP_AUTOLOAD_ENABLED']??'')==='true')) {
     \OpenTelemetry\SDK\SdkAutoloader::autoload();
 }
-$defaults=['DATABASE_DSN'=>'sqlite:var/billing.sqlite','DATABASE_USER'=>'','DATABASE_PASSWORD'=>''];
+$defaults=[
+    'DATABASE_DSN'=>'sqlite:var/billing.sqlite',
+    'DATABASE_USER'=>'',
+    'DATABASE_PASSWORD'=>'',
+    'RAILS_WRITE_GATEWAY_ENABLED'=>'0',
+    'RAILS_INTERNAL_URL'=>'http://rails-api:3000',
+];
 $config=[];
 foreach ($defaults as $key=>$default) $config[$key]=$_SERVER[$key]??$_ENV[$key]??(getenv($key)!==false?getenv($key):$default);
 return new App\Container($config);

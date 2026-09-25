@@ -22,6 +22,31 @@ x-app: &app
   volumes: ["app-secrets:/app/var"]
   security_opt: ["no-new-privileges:true"]
   stop_grace_period: 45s
+x-rails-api: &rails-api
+  build:
+    context: .
+    dockerfile: rails_backend/Dockerfile
+  environment: &rails-env
+    RAILS_ENV: production
+    APP_ENV: ${APP_ENV:-prod}
+    APP_URL: ${APP_URL:?Set APP_URL in .env}
+    DATABASE_HOST: db
+    DATABASE_PORT: "5432"
+    DATABASE_NAME: billing
+    DATABASE_USER: billing
+    DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    ZELEBOBA_MASTER_KEY_FILE: /app/var/master.key
+    SECRET_KEY_BASE: ${RAILS_SECRET_KEY_BASE:-}
+    RAILS_ONLY_TOPICS_ENABLED: ${RAILS_ONLY_TOPICS_ENABLED:-0}
+    RAILS_SCHEDULER_ENABLED: ${RAILS_SCHEDULER_ENABLED:-0}
+    RAILS_MAX_THREADS: "5"
+  volumes: ["app-secrets:/app/var:ro"]
+  depends_on:
+    db: {condition: service_healthy}
+  restart: unless-stopped
+  init: true
+  security_opt: ["no-new-privileges:true"]
+  stop_grace_period: 45s
 services:
   db:
     image: postgres:17
@@ -46,6 +71,24 @@ services:
       DATABASE_USER: billing_owner
       DATABASE_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD}
     command: ["sh", "-c", "php bin/console db:migrate && php bin/console db:grant-runtime"]
+  rails-api:
+    <<: *rails-api
+    profiles: [rails]
+    environment:
+      <<: *rails-env
+      RAILS_OUTBOX_WORKER_ENABLED: "0"
+    healthcheck:
+      test: ["CMD", "ruby", "-rnet/http", "-e", "uri = URI('http://127.0.0.1:3000/health/ready'); response = Net::HTTP.start(uri.host, uri.port, open_timeout: 3, read_timeout: 5) { |http| http.get(uri) }; exit(response.code == '200' ? 0 : 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+  rails-worker:
+    <<: *rails-api
+    profiles: [rails-worker]
+    command: ["bundle", "exec", "rails", "zeleboba:work"]
+    environment:
+      <<: *rails-env
+      RAILS_OUTBOX_WORKER_ENABLED: "1"
   # Single all-in-one container: php-fpm (web) + outbox worker + reconcile
   # scheduler + telegram long-poll supervised by infra/merge-entrypoint.sh.
   # nginx reaches FPM via the `app` network alias on fastcgi_pass app:9000.
@@ -58,9 +101,14 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
       APP_URL: ${APP_URL:?Set APP_URL in .env}
       APP_ENV: ${APP_ENV:-prod}
+      RAILS_WRITE_GATEWAY_ENABLED: ${RAILS_WRITE_GATEWAY_ENABLED:-0}
+      RAILS_INTERNAL_URL: ${RAILS_INTERNAL_URL:-http://rails-api:3000}
       RECONCILE_SECONDS: "60"
+      RUN_PHP_SCHEDULER: ${RUN_PHP_SCHEDULER:-1}
+      RUN_PHP_OUTBOX_WORKER: ${RUN_PHP_OUTBOX_WORKER:-1}
+      RUN_PHP_TELEGRAM_POLL: ${RUN_PHP_TELEGRAM_POLL:-1}
     healthcheck:
-      test: ["CMD-SHELL", "php bin/console app:health && php bin/console app:health worker && php bin/console app:health scheduler && php bin/console app:health telegram"]
+      test: ["CMD-SHELL", "php bin/console app:health && if [ \"$$RUN_PHP_OUTBOX_WORKER\" = \"1\" ]; then php bin/console app:health worker || exit $$?; fi && if [ \"$$RUN_PHP_SCHEDULER\" = \"1\" ]; then php bin/console app:health scheduler || exit $$?; fi && if [ \"$$RUN_PHP_TELEGRAM_POLL\" = \"1\" ]; then php bin/console app:health telegram || exit $$?; fi"]
       interval: 30s
       timeout: 5s
       start_period: 45s

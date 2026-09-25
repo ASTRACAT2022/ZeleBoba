@@ -74,5 +74,22 @@ if kill -0 $C 2>/dev/null; then echo "STILL RUNNING (BAD)"; kill -9 $C; FAIL=$((
 echo "--- c.log (tail) ---"; tail -5 /tmp/c.log
 
 echo
+echo "=== D. disabled PHP background roles leave php-fpm running ==="
+RUN_PHP_SCHEDULER=0 RUN_PHP_OUTBOX_WORKER=0 RUN_PHP_TELEGRAM_POLL=0 \
+  sh "$ENTRYPOINT_UNDER_TEST" > /tmp/d.log 2>&1 &
+D=$!
+sleep 2
+if ! kill -0 "$D" 2>/dev/null; then echo "FAIL: php-fpm supervisor exited"; FAIL=$((FAIL+1)); fi
+if ! grep -q 'FPM-START:' /tmp/d.log; then echo "FAIL: php-fpm did not start"; FAIL=$((FAIL+1)); fi
+if grep -q 'ROLE-WORKER:\|ROLE-BOT:' /tmp/d.log; then echo "FAIL: disabled background role started"; FAIL=$((FAIL+1)); fi
+if ! grep -q 'scheduler=disabled worker=disabled bot=disabled' /tmp/d.log; then
+  echo "FAIL: disabled roles were not reported"; FAIL=$((FAIL+1))
+fi
+kill -TERM "$D"
+sleep 2
+if kill -0 "$D" 2>/dev/null; then echo "FAIL: disabled-role supervisor did not stop"; kill -9 "$D"; FAIL=$((FAIL+1)); fi
+echo "--- d.log ---"; cat /tmp/d.log
+
+echo
 echo "HARNESS DONE (FAIL=${FAIL:-0})"
 [ "${FAIL:-0}" = "0" ]
