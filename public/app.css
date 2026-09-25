@@ -769,8 +769,8 @@ footer {
   .signout { width: 32px; height: 32px; }
 
   /* ---- comfortable tap targets on phones ---- */
-  .support-link, .main p a, .main td a, .main li a, footer a, .panel a:not(.button):not(.brand) {
-    display: inline-flex; align-items: center; min-height: 32px;
+  .support-link, .main p a, .main td a, .main li a, footer a, .panel a:not(.button):not(.brand), .side-card a:not(.button) {
+    display: inline-flex; align-items: center; min-height: 36px;
   }
   .table-cards td.table-actions a, .table-cards .table-actions a {
     display: inline-flex; align-items: center; justify-content: flex-end;
