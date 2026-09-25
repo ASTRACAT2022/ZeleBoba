@@ -15,4 +15,25 @@
   function render() { const q=input().value.toLowerCase().trim(); const found=items.filter(([name])=>name.toLowerCase().includes(q)); results().innerHTML=found.map(([name,url],i)=>`<a data-url="${url}" class="${i===0?'selected':''}" href="${url}">${name}<span>↵</span></a>`).join('') || '<span class="muted">Попробуйте другой запрос</span>'; }
   document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase()==='k') { e.preventDefault(); dialog.showModal(); setTimeout(()=>input().focus(),0); render(); } else if (e.key==='Enter' && dialog.open) { const choice=results().querySelector('a.selected'); if(choice){ e.preventDefault(); location.href=choice.dataset.url; } } });
   dialog.addEventListener('input', render); dialog.addEventListener('click', e=>{ if(e.target===dialog)dialog.close(); });
+
+  document.addEventListener('click', async e => {
+    const copy = e.target.closest('[data-copy]');
+    if (copy) {
+      try {
+        await navigator.clipboard.writeText(copy.dataset.copy);
+        const original = copy.textContent;
+        copy.textContent = 'Скопировано';
+        setTimeout(() => { copy.textContent = original; }, 1500);
+      } catch (_) { /* Clipboard permissions may be unavailable. */ }
+      return;
+    }
+    const toggle = e.target.closest('[data-step-toggle]');
+    if (toggle) {
+      const details = toggle.parentElement.querySelector('.step-details');
+      if (!details) return;
+      const expanded = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', String(!expanded));
+      details.classList.toggle('is-hidden', expanded);
+    }
+  });
 })();

@@ -15,14 +15,25 @@ body:has(.admin-nav) .sidebar { display: none; }
 .main:has(> .admin-nav) .control-metrics article { border: 0; border-right: 1px solid var(--line); border-radius: 0; box-shadow: none; padding: 16px 20px; }
 
 .admin-nav {
+  display: block;
   position: fixed; inset: 0 auto 0 0; width: 252px; height: 100vh;
   padding: 16px 12px; overflow-y: auto; z-index: 8;
   background: var(--surface-soft); border-right: 1px solid var(--line);
   border-radius: 0; box-shadow: none;
 }
 .admin-nav-top { margin-bottom: 12px; }
-.admin-nav-brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px; color: var(--ink); font-weight: 700; font-size: 15px; }
+.admin-nav-brand { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px; color: var(--ink); font-weight: 700; font-size: 15px; }
 .admin-nav-brand:hover { text-decoration: none; }
+/* Keep labels in a flexible text column beside their fixed-width icons. */
+.admin-nav .admin-nav-brand > span:last-child,
+.admin-nav .admin-nav-card > span:last-child,
+.admin-nav .admin-exit > span {
+  display: block; width: auto; height: auto; min-width: 0; flex: 1 1 auto;
+  place-items: normal; font-size: inherit; line-height: inherit; color: inherit;
+}
+.admin-nav-brand small { display: block; line-height: 1.3; font-weight: 500; color: var(--muted); }
+.admin-nav-brand strong, .admin-nav-brand small,
+.admin-nav .admin-nav-card strong, .admin-nav .admin-nav-card small { overflow-wrap: anywhere; }
 .admin-nav-mark {
   width: 26px; height: 26px; flex: none; border-radius: var(--radius-sm);
   display: grid; place-items: center; background: var(--brand-color); color: var(--brand-accent);
@@ -34,7 +45,7 @@ body:has(.admin-nav) .sidebar { display: none; }
 }
 .admin-nav-primary { display: grid; grid-template-columns: 1fr; gap: 1px; margin: 0; padding: 0; }
 .admin-nav .admin-nav-card {
-  display: flex; align-items: center; gap: 10px; min-height: 40px;
+  display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 40px;
   padding: 6px 10px; border: 0; border-radius: var(--radius-control); background: transparent;
   box-shadow: none; color: var(--ink-2); transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
@@ -55,7 +66,7 @@ body:has(.admin-nav) .sidebar { display: none; }
 .admin-nav-secondary a:hover { background: var(--surface-tint); color: var(--ink); text-decoration: none; }
 .admin-nav-secondary a.selected { background: var(--surface-brand); color: var(--link); font-weight: 600; }
 .admin-exit {
-  display: flex; align-items: center; gap: 9px; margin-top: 16px; padding: 10px 12px;
+  display: flex; align-items: center; gap: 9px; min-width: 0; margin-top: 16px; padding: 10px 12px;
   border: 1px solid var(--line); border-radius: var(--radius-control);
   color: var(--ink); background: var(--surface); font-weight: 550; font-size: 13px;
 }
@@ -74,6 +85,110 @@ body:has(.admin-nav) .sidebar { display: none; }
 /* ---------- Dark adjustments ---------- */
 html[data-theme="dark"] .admin-nav { background: #121821; }
 html[data-theme="dark"] .admin-exit { background: var(--surface); }
+
+/* ---------- Dense admin data ---------- */
+.main:has(> .admin-nav) .table-wrap { max-width: 100%; overscroll-behavior-x: contain; }
+.main:has(> .admin-nav) .table-wrap table,
+.main:has(> .admin-nav) .panel.detail > table:has(> thead) { min-width: 680px; }
+.main:has(> .admin-nav) .table-wrap th,
+.main:has(> .admin-nav) .panel.detail > table:has(> thead) th { white-space: nowrap; }
+.main:has(> .admin-nav) .table-wrap td,
+.main:has(> .admin-nav) .panel.detail > table td { overflow-wrap: anywhere; }
+.main:has(> .admin-nav) .admin-wide-table table { min-width: 1120px; }
+
+/* Provisioning is a data grid. Keep all four cells on the same tracks and
+   let long addresses wrap within their own cell instead of moving a column. */
+.provisioning-heading,
+.provisioning-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.05fr) minmax(0, .95fr) minmax(180px, .8fr);
+  column-gap: 20px;
+  align-items: center;
+  padding: 15px var(--pad-x);
+}
+.provisioning-heading {
+  color: var(--muted);
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+.provisioning-row { border-bottom: 1px solid var(--line-soft); }
+.provisioning-row:last-child { border-bottom: 0; }
+.provisioning-row > div { min-width: 0; }
+.provisioning-row strong,
+.provisioning-row small { display: block; }
+.provisioning-row strong { overflow-wrap: anywhere; }
+.provisioning-row small { margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
+.provisioning-state .badge { display: inline-flex; max-width: 100%; white-space: normal; }
+.provisioning-action form { display: flex; align-items: center; gap: 8px; margin: 0; }
+.provisioning-action input { min-width: 0; width: 100%; }
+.provisioning-action .button { flex: none; }
+.provisioning-ok { color: var(--success); font-weight: 600; }
+.provisioning-list > .empty { padding: 20px var(--pad-x); }
+
+/* The investigation screens share the same admin content width and card rhythm. */
+.main:has(> .admin-nav) .ops-kpi {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+}
+.main:has(> .admin-nav) .ops-kpi article { min-width: 0; padding: 18px var(--pad-x); }
+.main:has(> .admin-nav) .ops-kpi small,
+.main:has(> .admin-nav) .ops-kpi strong,
+.main:has(> .admin-nav) .ops-kpi span { display: block; overflow-wrap: anywhere; }
+.main:has(> .admin-nav) .ops-kpi strong { margin: 7px 0 3px; font-size: var(--fs-xl); }
+.main:has(> .admin-nav) .ops-kpi small,
+.main:has(> .admin-nav) .ops-kpi span { color: var(--muted); font-size: var(--fs-xs); }
+.main:has(> .admin-nav) .investigation-tools { display: grid; gap: 15px; }
+.main:has(> .admin-nav) .investigation-tools h2 { margin-bottom: 5px; }
+.main:has(> .admin-nav) .investigation-tools p { margin: 0; }
+
+.dependency-graph { max-width: 760px; margin: 0 auto; }
+.dependency-graph .graph-node { padding: 16px var(--pad-x); min-width: 0; overflow-wrap: anywhere; }
+.dependency-graph .graph-node small,
+.dependency-graph .graph-node strong,
+.dependency-graph .graph-node span { display: block; }
+.dependency-graph .graph-node small { margin-bottom: 6px; color: var(--muted); }
+.dependency-graph .graph-node span { margin-top: 4px; color: var(--muted); font-size: var(--fs-xs); }
+.dependency-graph .graph-warn { border-color: var(--warning-line); background: var(--warning-bg); }
+.dependency-graph .graph-line { width: 2px; height: 20px; margin: 0 auto; background: var(--line); }
+.dependency-graph .graph-branches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.dependency-graph .graph-branches > div { min-width: 0; }
+
+.main:has(> .admin-nav) .simulation {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px; align-items: stretch;
+}
+.main:has(> .admin-nav) .simulation article { min-width: 0; padding: 18px var(--pad-x); overflow-wrap: anywhere; }
+.main:has(> .admin-nav) .simulation article p { margin: 8px 0 0; }
+.main:has(> .admin-nav) .simulation article small { color: var(--muted); }
+.main:has(> .admin-nav) .simulation .simulation-arrow { align-self: center; color: var(--muted); font-size: var(--fs-xl); }
+.main:has(> .admin-nav) .simulation .simulation-ok { border-color: var(--success); }
+.main:has(> .admin-nav) .simulation .simulation-warn { border-color: var(--warning-line); background: var(--warning-bg); }
+
+@media (max-width: 1280px) {
+  .provisioning-heading { display: none; }
+  .provisioning-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; align-items: start; }
+  .provisioning-row > div::before {
+    display: block; margin-bottom: 5px; color: var(--muted);
+    font-size: var(--fs-2xs); font-weight: 600; letter-spacing: .4px; text-transform: uppercase;
+  }
+  .provisioning-person::before { content: "Подписка и клиент"; }
+  .provisioning-desired::before { content: "Ожидаемое состояние"; }
+  .provisioning-state::before { content: "Синхронизация"; }
+  .provisioning-action::before { content: "Действие"; }
+}
+@media (max-width: 640px) {
+  .main:has(> .admin-nav) .ops-kpi { grid-template-columns: minmax(0, 1fr); }
+  .dependency-graph .graph-branches { grid-template-columns: minmax(0, 1fr); }
+  .main:has(> .admin-nav) .simulation { grid-template-columns: minmax(0, 1fr); }
+  .main:has(> .admin-nav) .simulation .simulation-arrow { justify-self: center; transform: rotate(90deg); }
+  .provisioning-row { grid-template-columns: minmax(0, 1fr); gap: 15px; }
+  .provisioning-row > div + div { padding-top: 12px; border-top: 1px solid var(--line-soft); }
+  .provisioning-action form { flex-wrap: wrap; }
+  .provisioning-action input { flex-basis: 100%; }
+}
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1024px) {
@@ -95,10 +210,16 @@ html[data-theme="dark"] .admin-exit { background: var(--surface); }
   .admin-nav .admin-nav-card small { display: none; }
   .admin-nav-secondary { display: flex; flex-wrap: wrap; gap: 3px; }
   .admin-nav-secondary a { min-height: 28px; padding: 5px 9px 5px 9px; }
+  .admin-nav .admin-nav-brand, .admin-nav .admin-exit { min-height: 40px; }
+  .admin-nav .admin-nav-secondary a { min-height: 36px; }
 }
 @media (max-width: 640px) {
   .main:has(> .admin-nav) { padding: 16px 15px; }
   .admin-nav-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-nav .admin-nav-card { padding: 6px 8px; }
   .admin-nav .admin-nav-card strong { font-size: 12px; }
+}
+@media (max-width: 480px) {
+  .admin-nav-top { flex-wrap: wrap; gap: 8px; }
+  .admin-nav .admin-exit { margin-top: 0; }
 }

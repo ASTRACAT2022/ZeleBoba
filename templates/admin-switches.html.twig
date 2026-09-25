@@ -12,11 +12,11 @@
 <h2>Kill switches</h2>
 <table><thead><tr><th>Переключатель</th><th>Состояние</th><th>Причина</th><th></th></tr></thead><tbody>
 {% for s in data.switches %}
-<tr><form method="post" action="/admin/switches"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="name" value="{{ s.name }}">
-<td><strong>{{ s.name }}</strong><br><small>{{ s.actor }} · {{ s.created_at|date('d.m H:i') }}</small></td>
-<td><select name="enabled"><option value="1" {{ s.enabled ? 'selected' : '' }}>Включено</option><option value="0" {{ not s.enabled ? 'selected' : '' }}>Выключено</option></select></td>
-<td><input name="reason" value="{{ s.reason }}" maxlength="200"></td>
-<td><button class="button small">Сохранить</button></td></form></tr>
+<tr>
+<td><form id="switch-{{ loop.index }}" method="post" action="/admin/switches"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="name" value="{{ s.name }}"></form><strong>{{ s.name }}</strong><br><small>{{ s.actor }} · {{ s.created_at|date('d.m H:i') }}</small></td>
+<td><select name="enabled" form="switch-{{ loop.index }}"><option value="1" {{ s.enabled ? 'selected' : '' }}>Включено</option><option value="0" {{ not s.enabled ? 'selected' : '' }}>Выключено</option></select></td>
+<td><input name="reason" form="switch-{{ loop.index }}" value="{{ s.reason }}" maxlength="200"></td>
+<td><button class="button small" form="switch-{{ loop.index }}">Сохранить</button></td></tr>
 {% else %}<tr><td colspan="4">Нет переключателей.</td></tr>{% endfor %}
 </tbody></table></section>
 

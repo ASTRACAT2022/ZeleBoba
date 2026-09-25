@@ -13,8 +13,8 @@
 </div>
 </div>
 <div class="op-actions">
-<button class="button small" data-copy="{{ operation.trace_id }}">Копировать Trace ID</button>
-<button class="button small" data-copy="{{ operation.id }}">Копировать ID</button>
+<button type="button" class="button small" data-copy="{{ operation.trace_id }}">Копировать Trace ID</button>
+<button type="button" class="button small" data-copy="{{ operation.id }}">Копировать ID</button>
 {% if operation.subscription_id %}<a class="button small" href="/admin/subscriptions/{{ operation.subscription_id }}">Подписка</a>{% endif %}
 {% if operation.invoice_id %}<a class="button small" href="/admin/operations/{{ operation.invoice_id }}">Счёт</a>{% endif %}
 {% if operation.order_id %}<a class="button small" href="/admin/orders/{{ operation.order_id }}">Заказ</a>{% endif %}
@@ -77,34 +77,18 @@
 {% if operation.last_error %}<p><strong>Last Error:</strong> <code>{{ operation.last_error }}</code></p>{% endif %}
 {% if operation.metadata %}<details><summary>Metadata</summary><pre class="json-viewer">{{ operation.metadata|json_encode(constant('JSON_PRETTY_PRINT')) }}</pre></details>{% endif %}
 </section>
-</section>
-{% endblock %}
-{% block javascript %}
-<script>
-document.querySelectorAll('[data-copy]').forEach(function(btn){
-  btn.addEventListener('click', function(){
-    navigator.clipboard.writeText(btn.dataset.copy).then(function(){
-      var orig=btn.textContent; btn.textContent='Copied!'; setTimeout(function(){btn.textContent=orig},1500);
-    });
-  });
-});
-function toggleStep(el){
-  var details=el.parentElement.querySelector('.step-details');
-  if(details){details.style.display=details.style.display==='none'?'block':'none';}
-}
-</script>
 {% endblock %}
 {% macro step_list(steps) %}
 {% for step in steps %}
 <div class="timeline-step {{ step.status }}">
 <div class="step-dot"></div>
 <div class="step-content">
-<div class="step-header" onclick="toggleStep(this)">
+<button type="button" class="step-header" data-step-toggle aria-expanded="false">
 <span class="step-icon">{{ step.status == 'success' ? '✓' : (step.status == 'failed' ? '✕' : (step.status == 'processing' ? '◷' : '○')) }}</span>
 <span class="step-name">{{ step.name }}</span>
 <span class="step-duration">{{ step.duration_ms ? step.duration_ms ~ ' ms' : '' }}</span>
 <span class="step-time">{{ step.started_at ? step.started_at|date('H:i:s') : '' }}</span>
-</div>
+</button>
 <div class="step-details is-hidden" >
 {% if step.http_method %}<p><strong>Request:</strong> {{ step.http_method }} {{ step.http_url ?? '' }}</p>{% endif %}
 {% if step.http_status %}<p><strong>HTTP Status:</strong> {{ step.http_status }}</p>{% endif %}
