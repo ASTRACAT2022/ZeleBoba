@@ -194,7 +194,10 @@ final class RemnawaveSyncTest extends TestCase
         $calls=0;
         $http=new MockHttpClient(function($method,$url)use(&$calls,$sub){
             $calls++;
-            if($method==='GET') return new MockResponse(json_encode(['response'=>null]),['http_code'=>404]);
+            if($method==='GET') {
+                if(str_ends_with($url,'/api/users/200')) return new MockResponse(json_encode(['response'=>['id'=>200,'status'=>'ACTIVE','expireAt'=>gmdate('Y-m-d\TH:i:s\Z',(int)$sub['expires_at'])]]));
+                return new MockResponse(json_encode(['response'=>null]),['http_code'=>404]);
+            }
             self::assertSame('POST',$method);
             return new MockResponse(json_encode(['response'=>['id'=>200,'username'=>'zb_'.$sub['id'],'status'=>'ACTIVE','expireAt'=>'2026-10-10T00:00:00.000Z','subscriptionUrl'=>'https://sub.example/new']]));
         });
@@ -203,6 +206,21 @@ final class RemnawaveSyncTest extends TestCase
         $report=$sync->run(10,true);
         self::assertSame(1,$report['reprovisioned']);
         self::assertSame('200',$this->db->one('SELECT remote_id FROM subscriptions')['remote_id']);
+    }
+    public function testFailedReprovisionKeepsOldPanelIdentity(): void
+    {
+        $sub=$this->seedActiveSubscription(time()+30*86400);
+        $this->db->execute("UPDATE subscriptions SET remote_id='777',remnawave_id=777 WHERE id=?",[$sub['id']]);
+        $http=new MockHttpClient(function($method){
+            if($method==='POST') throw new \RuntimeException('panel unavailable');
+            return new MockResponse('{}',['http_code'=>404]);
+        });
+        $report=(new RemnawaveSync($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad')))->run(10,true);
+        self::assertSame(1,$report['errors']);
+        self::assertSame(0,$report['reprovisioned']);
+        $stored=$this->db->one('SELECT remote_id,remnawave_id FROM subscriptions WHERE id=?',[$sub['id']]);
+        self::assertSame('777',$stored['remote_id']);
+        self::assertSame(777,(int)$stored['remnawave_id']);
     }
     public function testSyncDisablesExpiredOnPanel(): void
     {

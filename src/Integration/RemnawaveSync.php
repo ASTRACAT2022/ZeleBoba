@@ -62,9 +62,12 @@ final class RemnawaveSync
                     // link (Billing shows +N days, panel has nobody).
                     $report['missing']++;
                     if($fix){
-                        $this->db->execute('UPDATE subscriptions SET remote_id=NULL,remnawave_id=NULL WHERE id=?',[$s['id']]);
                         $result=$this->provisioner->provision($s);
-                        $this->db->execute('UPDATE subscriptions SET remote_id=?,subscription_url=? WHERE id=?',[$result['id'],$result['url'],$s['id']]);
+                        $panelId=(int)$result['id'];
+                        $verified=$panelId>0?$this->provisioner->fetchById($panelId):null;
+                        $verifiedExpiry=is_array($verified)?strtotime((string)($verified['expireAt']??'')):false;
+                        if (!$verifiedExpiry || abs($verifiedExpiry-(int)$s['expires_at'])>60 || ($verified['status']??null)!=='ACTIVE') throw new \RuntimeException('Remnawave reprovision readback failed');
+                        $this->db->execute('UPDATE subscriptions SET remote_id=?,remnawave_id=?,subscription_url=? WHERE id=?',[$result['id'],$panelId,$result['url'],$s['id']]);
                         $this->markActive($s['id'],(string)$result['id']);
                         $report['reprovisioned']++; $report['details'][]="$username: orphan remote_id re-provisioned";
                     } else {
