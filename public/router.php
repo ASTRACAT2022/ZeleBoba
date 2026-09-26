@@ -1,8 +1,8 @@
 <?php
 // Local PHP server only; serve the same public assets as nginx.
 $path=parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH);
-$assets=['/app.css','/stripe.css','/auth.js','/theme.js','/control.js'];
-if (in_array($path,$assets,true) || str_starts_with($path,'/branding/')) {
+$assets=['/app.css','/app.js','/stripe.css','/portal-design.css','/auth.js','/theme.js','/control.js'];
+if (in_array($path,$assets,true) || str_starts_with($path,'/branding/') || str_starts_with($path,'/design-system/')) {
     $asset=realpath(__DIR__.$path);
     if ($asset && str_starts_with($asset,__DIR__.DIRECTORY_SEPARATOR) && is_file($asset) && pathinfo($asset,PATHINFO_EXTENSION)!=='php') return false;
 }

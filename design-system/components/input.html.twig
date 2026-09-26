@@ -1,0 +1,19 @@
+{# Accessible field primitive. Supply error or hint, never both as the sole description. #}
+{% set inputId = id|default('field-' ~ random()) %}
+{% set descriptionId = inputId ~ '-description' %}
+<div class="ui-field{% if error|default(false) %} ui-field--error{% endif %}{% if success|default(false) %} ui-field--success{% endif %}">
+  <label class="ui-field__label" for="{{ inputId }}">{{ label }}</label>
+  <input
+    class="ui-control"
+    id="{{ inputId }}"
+    name="{{ name|default(inputId) }}"
+    type="{{ type|default('text') }}"
+    {% if value|default(false) %}value="{{ value }}"{% endif %}
+    {% if placeholder|default(false) %}placeholder="{{ placeholder }}"{% endif %}
+    {% if required|default(false) %}required{% endif %}
+    {% if disabled|default(false) %}disabled{% endif %}
+    {% if error|default(false) %}aria-invalid="true" aria-describedby="{{ descriptionId }}"{% elseif hint|default(false) %}aria-describedby="{{ descriptionId }}"{% endif %}
+  >
+  {% if error|default(false) %}<span class="ui-field__message" id="{{ descriptionId }}">{{ error }}</span>
+  {% elseif hint|default(false) %}<span class="ui-field__hint" id="{{ descriptionId }}">{{ hint }}</span>{% endif %}
+</div>

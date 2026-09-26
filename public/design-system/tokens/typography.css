@@ -1,0 +1,16 @@
+:root {
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --text-display-size: 48px;
+  --text-display-line: 52px;
+  --text-headline-size: 32px;
+  --text-headline-line: 40px;
+  --text-title-size: 20px;
+  --text-title-line: 28px;
+  --text-body-size: 15px;
+  --text-body-line: 24px;
+  --text-small-size: 13px;
+  --text-small-line: 20px;
+  --text-label-size: 12px;
+  --text-label-line: 16px;
+}

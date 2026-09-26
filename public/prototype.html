@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f8fb"><title>ЗелёБоба — личный кабинет</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+<aside class="sidebar" id="sidebar">
+  <a class="brand" href="#dashboard"><span class="brand-mark">z</span><span>зелёбоба</span><span class="brand-tag">VPN</span></a>
+  <div class="side-label">ЛИЧНЫЙ КАБИНЕТ</div>
+  <nav class="nav" aria-label="Основная навигация">
+    <a href="#dashboard" data-page="dashboard"><i>◫</i>Обзор</a>
+    <a href="#subscription" data-page="subscription"><i>◷</i>Подписка</a>
+    <a href="#vpn" data-page="vpn"><i>⌁</i>Подключение</a>
+    <a href="#servers" data-page="servers"><i>◎</i>Серверы</a>
+    <a href="#payments" data-page="payments"><i>▤</i>Платежи</a>
+    <a href="#referral" data-page="referral"><i>♧</i>Реферальная программа</a>
+    <a href="#settings" data-page="settings"><i>⚙</i>Настройки</a>
+  </nav>
+  <div class="side-spacer"></div>
+  <button class="support" data-toast="Открываем чат поддержки"><span class="support-icon">?</span><span>Нужна помощь?<small>Поддержка отвечает в Telegram</small></span><b>↗</b></button>
+  <div class="profile"><div class="avatar">АК</div><div class="profile-text"><strong>Александр К.</strong><small>Базовый аккаунт</small></div><button class="icon-btn" aria-label="Меню профиля" data-toast="Меню аккаунта">···</button></div>
+</aside>
+<div class="mobile-top"><button class="icon-btn" id="menuToggle" aria-label="Открыть меню">☰</button><a class="brand" href="#dashboard"><span class="brand-mark">z</span><span>зелёбоба</span></a><button class="icon-btn" id="mobileTheme" aria-label="Переключить тему">◐</button></div>
+<main class="main"><div class="topline"><div class="crumb">Личный кабинет <span>/</span> <strong id="crumb">Обзор</strong></div><div class="top-actions"><span class="infra"><i></i>Все системы работают</span><button class="icon-btn theme-button" id="themeToggle" aria-label="Переключить тему">◐</button></div></div><div id="app"></div><footer>© 2026 ЗелёБоба <span>Конфиденциальность · Условия</span></footer></main>
+<div class="toast" id="toast" role="status"></div><div class="modal-backdrop" id="modal"></div>
+<script src="prototype.js"></script>
+</body></html>

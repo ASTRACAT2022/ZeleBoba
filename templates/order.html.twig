@@ -27,7 +27,7 @@
     <div class="alert alert-info mt-18" ><span class="alert-icon" aria-hidden="true">◆</span><span>Тестовый платёж — деньги не списываются.</span></div>
     <form method="post" action="/orders/{{ order.id }}/demo-pay" class="mt-16">
       <input type="hidden" name="_csrf" value="{{ user.csrf }}">
-      <button class="button large full">Подтвердить оплату</button>
+      {% include '@ui/button.html.twig' with { label: 'Подтвердить оплату', type: 'submit', variant: 'action', size: 'lg' } only %}
     </form>
   {% elseif order.checkout_url %}
     <div class="mt-18">

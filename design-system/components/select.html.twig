@@ -1,0 +1,25 @@
+{# options: [{value, label}], selected value: value #}
+{% set selectId = id|default('select-' ~ random()) %}
+{% set selectedValue = value|default(options[0].value|default('')) %}
+<div class="ui-field">
+  <span class="ui-field__label" id="{{ selectId }}-label">{{ label }}</span>
+  <div class="select-control">
+    <button
+      class="select-trigger" id="{{ selectId }}" type="button" role="combobox"
+      aria-labelledby="{{ selectId }}-label {{ selectId }}-value"
+      aria-haspopup="listbox" aria-expanded="false" aria-controls="{{ selectId }}-options"
+      {% if disabled|default(false) %}disabled{% endif %}
+    >
+      <span id="{{ selectId }}-value" class="select-value">{% for option in options %}{% if option.value == selectedValue %}{{ option.label }}{% endif %}{% endfor %}</span>
+      <span class="select-chevron" aria-hidden="true">⌄</span>
+    </button>
+    <div class="select-menu" id="{{ selectId }}-options" role="listbox" aria-labelledby="{{ selectId }}-label" hidden>
+      {% for option in options %}
+        {% set isSelected = option.value == selectedValue %}
+        <div class="select-option{% if isSelected %} is-selected{% endif %}" id="{{ selectId }}-option-{{ loop.index }}" role="option" aria-selected="{{ isSelected ? 'true' : 'false' }}" data-value="{{ option.value }}" tabindex="-1">{{ option.label }}</div>
+      {% endfor %}
+    </div>
+    <input type="hidden" name="{{ name|default(selectId) }}" value="{{ selectedValue }}">
+  </div>
+  {% if hint|default(false) %}<span class="ui-field__hint">{{ hint }}</span>{% endif %}
+</div>

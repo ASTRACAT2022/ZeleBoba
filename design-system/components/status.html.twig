@@ -1,0 +1,14 @@
+{# status: healthy|degraded|maintenance|offline|unknown #}
+{% set status = status|default('unknown') %}
+{% set labels = {
+  healthy: 'Работает',
+  degraded: 'Замедлен',
+  maintenance: 'Обслуживание',
+  offline: 'Недоступен',
+  unknown: 'Нет данных'
+} %}
+<span class="ui-status ui-status--{{ status }}" role="status">
+  <span class="ui-status__dot" aria-hidden="true"></span>
+  <span>{{ label|default(labels[status]|default(labels.unknown)) }}</span>
+  {% if detail|default(false) %}<span class="ui-status__detail">{{ detail }}</span>{% endif %}
+</span>

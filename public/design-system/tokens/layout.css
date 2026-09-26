@@ -1,0 +1,9 @@
+:root {
+  --content-max: 1200px;
+  --dashboard-max: 1440px;
+  --form-max: 720px;
+  --grid-gap: 24px;
+  --page-gutter: 56px;
+  --sidebar-width: 248px;
+  --topbar-height: 64px;
+}

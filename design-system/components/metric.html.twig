@@ -1,0 +1,9 @@
+{# Metric display. Pass numeric values as preformatted strings to retain locale control. #}
+<section class="ui-metric" aria-label="{{ label }}">
+  <div class="ui-metric__header">
+    <span class="ui-metric__label">{{ label }}</span>
+    {% if trend|default(false) %}<span class="ui-metric__trend ui-metric__trend--{{ trendTone|default('neutral') }}">{{ trend }}</span>{% endif %}
+  </div>
+  <div class="ui-metric__value">{{ value }}</div>
+  {% if secondary|default(false) %}<div class="ui-metric__secondary">{{ secondary }}</div>{% endif %}
+</section>

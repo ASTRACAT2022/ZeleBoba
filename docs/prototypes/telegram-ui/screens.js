@@ -145,6 +145,15 @@ window.TG_UI_SCREENS = {
                     "size": 1
                 },
                 {
+                    "type": "paragraph",
+                    "text": "Активных подписок: 1"
+                },
+                {
+                    "type": "heading",
+                    "text": "ASTRACAT VPN · 650 GB",
+                    "size": 2
+                },
+                {
                     "type": "table",
                     "cells": [
                         [
@@ -163,14 +172,6 @@ window.TG_UI_SCREENS = {
                             },
                             {
                                 "text": "🟢 Активна"
-                            }
-                        ],
-                        [
-                            {
-                                "text": "Тариф"
-                            },
-                            {
-                                "text": "ASTRACAT VPN · 650 GB"
                             }
                         ],
                         [
@@ -205,7 +206,7 @@ window.TG_UI_SCREENS = {
                     "type": "buttons",
                     "buttons": [
                         {
-                            "text": "Продлить · ASTRACAT VPN · 650 GB",
+                            "text": "Продлить подписку",
                             "callback_data": "renew:demo-subscription",
                             "style": "success"
                         }
@@ -244,16 +245,6 @@ window.TG_UI_SCREENS = {
                         }
                     ],
                     "align": "center"
-                },
-                {
-                    "type": "details",
-                    "summary": "Что такое трафик?",
-                    "blocks": [
-                        {
-                            "type": "paragraph",
-                            "text": "650 GB — объём данных, доступный в рамках текущего периода подписки."
-                        }
-                    ]
                 },
                 {
                     "type": "buttons",

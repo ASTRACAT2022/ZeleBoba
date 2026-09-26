@@ -51,20 +51,20 @@
       {% if p.is_trial_available and trial_available %}
       <form method="post" action="/trial" class="mt-16">
         <input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="plan_id" value="{{ p.id }}">
-        <button class="button light full">{{ p.trial_price_kopeks > 0 ? ('Попробовать за ' ~ (p.trial_price_kopeks|rub)) : 'Попробовать бесплатно' }} · {{ p.trial_duration_days ?: 3 }} дн.</button>
+        {% include '@ui/button.html.twig' with { label: (p.trial_price_kopeks > 0 ? ('Попробовать за ' ~ (p.trial_price_kopeks|rub)) : 'Попробовать бесплатно') ~ ' · ' ~ (p.trial_duration_days ?: 3) ~ ' дн.', type: 'submit', variant: 'neutral', size: 'md' } only %}
       </form>
       {% endif %}
       <form method="post" action="/orders" class="mt-16">
         <input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="plan_id" value="{{ p.id }}">
         <input type="hidden" name="idempotency_key" value="{{ key }}:{{ p.id }}">
         {% if receipt_required and not user.email %}<label>Email для чека<input type="email" name="receipt_email" required maxlength="254" placeholder="email@example.com"></label>{% endif %}
-        <button class="button large full" data-summary-cta {{ not purchases_enabled ? 'disabled' : '' }}>Перейти к оплате</button>
+        {% include '@ui/button.html.twig' with { label: 'Перейти к оплате', type: 'submit', variant: 'action', size: 'lg', disabled: not purchases_enabled } only %}
       </form>
       {% if user.balance_kopeks >= p.price_minor %}
       <form method="post" action="/orders/balance" class="mt-8">
         <input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="plan_id" value="{{ p.id }}">
         <input type="hidden" name="idempotency_key" value="balance:{{ key }}:{{ p.id }}">
-        <button class="button secondary full" {{ not purchases_enabled ? 'disabled' : '' }}>Оплатить с баланса ({{ p.price_minor|rub }})</button>
+        {% include '@ui/button.html.twig' with { label: 'Оплатить с баланса (' ~ (p.price_minor|rub) ~ ')', type: 'submit', variant: 'neutral', size: 'md', disabled: not purchases_enabled } only %}
       </form>
       {% endif %}
     </div>

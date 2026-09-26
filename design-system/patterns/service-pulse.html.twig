@@ -1,0 +1,17 @@
+{# A compact health summary. Each service: {name, status, detail}. #}
+<section class="ui-service-pulse" aria-labelledby="{{ id|default('service-pulse-title') }}">
+  <header class="ui-service-pulse__header">
+    <h2 id="{{ id|default('service-pulse-title') }}">{{ title|default('Состояние сервисов') }}</h2>
+    <span>{{ services|length }} систем</span>
+  </header>
+  <ul class="ui-service-pulse__list">
+    {% for service in services %}
+      <li>
+        <span>{{ service.name }}</span>
+        {% include '@ui/status.html.twig' with { status: service.status, detail: service.detail|default(false) } only %}
+      </li>
+    {% else %}
+      <li class="ui-service-pulse__empty">Статус систем пока неизвестен</li>
+    {% endfor %}
+  </ul>
+</section>

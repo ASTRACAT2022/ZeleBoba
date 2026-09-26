@@ -1,0 +1,14 @@
+{# API: label, variant (action|neutral|quiet|positive|critical), size (sm|md|lg), icon, disabled #}
+{% set variant = variant|default('action') %}
+{% set size = size|default('md') %}
+{% set label = label|default(false) %}
+{% set icon = icon|default(false) %}
+<button
+  class="ui-button ui-button--{{ variant }} ui-button--{{ size }}{% if icon and not label %} ui-button--icon{% endif %}"
+  type="{{ type|default('button') }}"
+  {% if disabled|default(false) %}disabled aria-disabled="true"{% endif %}
+  {% if ariaLabel|default(false) %}aria-label="{{ ariaLabel }}"{% endif %}
+>
+  {% if icon|default(false) %}<span class="ui-button__icon" aria-hidden="true">{{ icon }}</span>{% endif %}
+  {% if label|default(false) %}<span>{{ label }}</span>{% endif %}
+</button>

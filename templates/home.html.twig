@@ -1,5 +1,5 @@
 {% extends 'base.html.twig' %}{% block title %}Обзор{% endblock %}{% block content %}
-{% set active = subscriptions|filter(s => s.status == 'active' and s.expires_at > now) %}
+{% set active = subscriptions|filter(s => s.status in ['active', 'trial'] and s.expires_at > now) %}
 {% set primary = active|first %}
 
 <header>
@@ -15,35 +15,36 @@
 <section class="panel detail" aria-labelledby="sub-state">
   <div class="section-heading simple-head-16" >
     <h2 id="sub-state">{{ primary.plan_name }}</h2>
-    {% if primary.expires_at > now %}<span class="badge active">Активна</span>{% else %}<span class="badge expired">Истекла</span>{% endif %}
+    <span class="badge active">{{ primary.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
   </div>
   <div class="meta-grid">
-    <div class="meta-item"><span class="meta-label">Статус</span><span class="meta-value">{% if primary.expires_at > now %}● Работает{% else %}○ Остановлена{% endif %}</span></div>
+    <div class="meta-item"><span class="meta-label">Статус</span><span class="meta-value">● Работает</span></div>
     <div class="meta-item"><span class="meta-label">Действует до</span><span class="meta-value">{{ primary.expires_at|date('d.m.Y') }}</span></div>
-    <div class="meta-item"><span class="meta-label">Трафик</span><span class="meta-value">{{ primary.traffic_limit_gb > 0 ? (primary.traffic_limit_gb ~ ' ГБ') : 'Безлимит' }}</span></div>
+    <div class="meta-item"><span class="meta-label">Трафик</span><span class="meta-value">{% if primary.traffic_limit_gb > 0 %}{{ (primary.traffic_used_gb|default(0))|round }} / {{ primary.traffic_limit_gb|round }} ГБ{% else %}{{ (primary.traffic_used_gb|default(0))|round }} ГБ использовано · безлимит{% endif %}</span></div>
     <div class="meta-item"><span class="meta-label">Устройства</span><span class="meta-value">{{ primary.devices == 0 ? 'Без ограничений' : ('до ' ~ primary.devices) }}</span></div>
   </div>
   <div class="inline-layout-3">
-    {% if primary.subscription_url and primary.expires_at > now %}<a class="button" href="{{ primary.subscription_url }}" rel="noreferrer">Открыть подписку ↗</a>{% endif %}
-    <form method="post" action="/subscriptions/{{ primary.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ primary.id }}:{{ now }}"><button class="button {{ primary.subscription_url and primary.expires_at > now ? 'secondary' : '' }}">Продлить подписку</button></form>
+    {% if primary.subscription_url %}<button class="button" type="button" data-copy="{{ primary.subscription_url }}" data-copy-label="Ссылка скопирована">Скопировать ссылку</button>{% endif %}
+    {% if primary.status == 'active' %}<form method="post" action="/subscriptions/{{ primary.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ primary.id }}:{{ now }}"><button class="button secondary">Продлить подписку</button></form>{% endif %}
     <a class="button ghost" href="/plans">Сменить тариф</a>
   </div>
+  {% if primary.subscription_url %}<p class="hint mt-12">Скопируйте ссылку, откройте Happ или Incy, нажмите «+» и вставьте её из буфера.</p>{% endif %}
 </section>
 
 {# ---------- Secondary subscriptions ---------- #}
-{% if subscriptions|length > 1 %}
+{% if active|length > 1 %}
 <section class="panel">
-  <div class="panel-head"><h2>Другие подписки</h2><span class="muted">{{ subscriptions|length }}</span></div>
+  <div class="panel-head"><h2>Другие активные подписки</h2><span class="muted">{{ active|length - 1 }}</span></div>
   <div class="panel-body plain" >
-  {% for s in subscriptions %}{% if s.id != primary.id %}
+  {% for s in active %}{% if s.id != primary.id %}
     <div class="head-soft">
       <div class="bar-line">
-        <div><strong>{{ s.plan_name }}</strong><small class="muted block" >{{ s.expires_at > now ? ('до ' ~ (s.expires_at|date('d.m.Y'))) : (s.expires_at|date('d.m.Y')) }}</small></div>
-        <span class="badge {{ s.status == 'active' and s.expires_at > now ? 'active' : 'expired' }}">{{ s.expires_at > now ? 'Активна' : 'Истекла' }}</span>
+        <div><strong>{{ s.plan_name }}</strong><small class="muted block">до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
+        <span class="badge active">{{ s.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
       </div>
       <div class="inline-layout-3 mt-10" >
-        {% if s.subscription_url and s.expires_at > now %}<a class="button small secondary" href="{{ s.subscription_url }}" rel="noreferrer">Открыть ↗</a>{% endif %}
-        {% if s.status == 'active' and s.expires_at > now %}<form method="post" action="/subscriptions/{{ s.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ s.id }}:{{ now }}"><button class="button small secondary">Продлить</button></form>{% endif %}
+        {% if s.subscription_url %}<button class="button small secondary" type="button" data-copy="{{ s.subscription_url }}" data-copy-label="Ссылка скопирована">Скопировать ссылку</button>{% endif %}
+        {% if s.status == 'active' %}<form method="post" action="/subscriptions/{{ s.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ s.id }}:{{ now }}"><button class="button small secondary">Продлить</button></form>{% endif %}
       </div>
     </div>
   {% endif %}{% endfor %}

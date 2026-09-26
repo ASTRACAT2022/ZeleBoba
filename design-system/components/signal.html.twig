@@ -1,0 +1,13 @@
+{# Signature component: concise, reassuring connection state with a useful location and latency. #}
+<section class="ui-signal" aria-labelledby="{{ id|default('signal-title') }}">
+  <div class="ui-signal__heading">
+    {% include '@ui/status.html.twig' with { status: status|default('healthy'), label: statusLabel|default('Защищено') } only %}
+    <span class="ui-signal__protocol">{{ protocol|default('WIREGUARD') }}</span>
+  </div>
+  <h2 id="{{ id|default('signal-title') }}">{{ title|default('VPN Protection') }}</h2>
+  <dl class="ui-signal__readout">
+    <div><dt>Точка выхода</dt><dd>{{ location }}</dd></div>
+    <div><dt>Задержка</dt><dd>{{ latency }} <small>ms</small></dd></div>
+  </dl>
+  {% if actionUrl|default(false) %}<a class="ui-signal__action" href="{{ actionUrl }}">{{ actionLabel|default('Управление соединением') }} <span aria-hidden="true">↗</span></a>{% endif %}
+</section>

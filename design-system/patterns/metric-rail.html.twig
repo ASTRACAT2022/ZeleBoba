@@ -1,0 +1,6 @@
+{# Linear data display pattern; metrics flow horizontally, then stack at narrow widths. #}
+<section class="ui-metric-rail" aria-label="{{ label|default('Ключевые показатели') }}">
+  {% for metric in metrics %}
+    {% include '@ui/metric.html.twig' with metric only %}
+  {% endfor %}
+</section>

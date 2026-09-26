@@ -5,7 +5,9 @@
     <h1>Баланс</h1>
     <p class="muted">Пополняйте любым способом и оплачивайте подписки с баланса.</p>
   </div>
-  <div class="price">{{ balance|rub }}</div>
+  <div class="balance-summary">
+    {% include '@ui/metric.html.twig' with { label: 'Доступно на балансе', value: balance|rub, secondary: 'Средства для оплаты подписок' } only %}
+  </div>
 </header>
 
 <section class="panel">
@@ -16,7 +18,7 @@
       <input type="hidden" name="idempotency_key" value="{{ key }}">
       <label>Сумма, ₽<input type="number" name="amount" min="1" max="1000000" step="1" required placeholder="500"></label>
       <label>Способ оплаты<select name="provider">{% for id, name in providers %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
-      <button class="button">Пополнить</button>
+      {% include '@ui/button.html.twig' with { label: 'Пополнить', type: 'submit', variant: 'action', size: 'md' } only %}
     </form>
   </div>
 </section>

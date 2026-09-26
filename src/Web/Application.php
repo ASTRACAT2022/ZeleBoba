@@ -19,7 +19,11 @@ final class Application
     private string $styleNonce;
     public function __construct(private Container $app)
     {
-        $this->twig=new Environment(new FilesystemLoader(dirname(__DIR__,2).'/templates'),['strict_variables'=>true,'autoescape'=>'html']);
+        $templates=dirname(__DIR__,2);
+        $loader=new FilesystemLoader($templates.'/templates');
+        $loader->addPath($templates.'/design-system/components','ui');
+        $loader->addPath($templates.'/design-system/patterns','patterns');
+        $this->twig=new Environment($loader,['strict_variables'=>true,'autoescape'=>'html']);
         $this->twig->addFilter(new \Twig\TwigFilter('rub',fn($n)=>number_format((int)$n/100,(int)$n%100===0?0:2,',',' ').' ₽'));
     }
     public function handle(Request $r): Response
@@ -278,15 +282,7 @@ final class Application
                 return $this->render('gift-claim',['code'=>$id]);
             case 'admin':
                 $today=strtotime('today UTC');
-                // "Выручка сегодня" = all money that actually cleared through the
-                // payment provider today: successful order payments (excluding
-                // internal wallet settlements, which bring in no provider money)
-                // plus paid balance topups. Topups are a separate table, so they
-                // must be summed in explicitly.
-                $paymentsToday=(int)($db->one("SELECT COALESCE(SUM(amount_minor),0) v FROM payments WHERE status='succeeded' AND provider_payment_id NOT LIKE 'balance_%' AND paid_at>=?",[$today])['v']??0);
-                $topupsToday=(int)($db->one("SELECT COALESCE(SUM(amount_kopeks),0) v FROM topups WHERE status='paid' AND COALESCE(paid_at,created_at)>=?",[$today])['v']??0);
-                $paymentsCountToday=(int)($db->one("SELECT COUNT(*) v FROM payments WHERE status='succeeded' AND provider_payment_id NOT LIKE 'balance_%' AND paid_at>=?",[$today])['v']??0)+(int)($db->one("SELECT COUNT(*) v FROM topups WHERE status='paid' AND COALESCE(paid_at,created_at)>=?",[$today])['v']??0);
-                $metrics=['revenue'=>$paymentsToday+$topupsToday,'payments'=>$paymentsCountToday,'active'=>(int)($db->one("SELECT COUNT(*) v FROM subscriptions WHERE lifecycle_status='active' AND expires_at>?",[time()])['v']??0),'attention'=>(int)($db->one("SELECT COUNT(*) v FROM provisioning_accounts WHERE state IN ('retry','failed')")['v']??0)+(int)($db->one("SELECT COUNT(*) v FROM payments WHERE status='pending'")['v']??0)];
+                $metrics=['revenue'=>(int)($db->one("SELECT COALESCE(SUM(amount_minor),0) v FROM payments WHERE status='succeeded' AND paid_at>=?",[$today])['v']??0),'payments'=>(int)($db->one("SELECT COUNT(*) v FROM payments WHERE status='succeeded' AND paid_at>=?",[$today])['v']??0),'active'=>(int)($db->one("SELECT COUNT(*) v FROM subscriptions WHERE lifecycle_status='active' AND expires_at>?",[time()])['v']??0),'attention'=>(int)($db->one("SELECT COUNT(*) v FROM provisioning_accounts WHERE state IN ('retry','failed')")['v']??0)+(int)($db->one("SELECT COUNT(*) v FROM payments WHERE status='pending'")['v']??0)];
                 $platform=[['name'=>'Платежи','state'=>(int)($db->one("SELECT COUNT(*) v FROM payments WHERE status='failed' AND created_at>?",[time()-900])['v']??0)>0?'attention':'healthy','note'=>'Проверка событий и провайдеров'],['name'=>'Remnawave','state'=>(int)($db->one("SELECT COUNT(*) v FROM provisioning_accounts WHERE state='failed'")['v']??0)>0?'failed':'healthy','note'=>'Состояние выдачи VPN'],['name'=>'Выдача VPN','state'=>(int)($db->one("SELECT COUNT(*) v FROM provisioning_accounts WHERE state IN ('pending','retry')")['v']??0)>0?'attention':'healthy','note'=>'Очередь синхронизации'],['name'=>'Workers','state'=>(int)($db->one("SELECT COUNT(*) v FROM outbox WHERE status IN ('dead','processing')")['v']??0)>0?'attention':'healthy','note'=>'Фоновые обработчики'],['name'=>'Reconciliation','state'=>(int)($db->one("SELECT COUNT(*) v FROM provisioning_accounts WHERE state='failed'")['v']??0)>0?'attention':'healthy','note'=>'Сверка Billing и Remnawave']];
                 $jobs=$db->all("SELECT id,topic,dedup_key,status,attempts,last_error FROM outbox WHERE status!='done' ORDER BY created_at LIMIT 100");
                 foreach($jobs as &$job){
