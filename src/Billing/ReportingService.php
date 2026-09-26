@@ -9,9 +9,11 @@ final class ReportingService
     public function salesStats(int $days = 30): array
     {
         $since = time() - $days * 86400;
-        $revenue = (int)($this->db->one("SELECT COALESCE(SUM(l.amount_minor),0) AS s FROM ledger_entries l JOIN orders o ON o.id=l.order_id WHERE l.account='provider_clearing' AND o.provider_payment_id NOT LIKE 'balance_%' AND l.created_at>?", [$since])['s'] ?? 0);
-        $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND created_at>?", [$since])['c'] ?? 0);
-        $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND created_at>?", [$since])['c'] ?? 0);
+        $orderRevenue = (int)($this->db->one("SELECT COALESCE(SUM(l.amount_minor),0) AS s FROM ledger_entries l JOIN orders o ON o.id=l.order_id WHERE l.account='provider_clearing' AND o.provider_payment_id NOT LIKE 'balance_%' AND l.created_at>?", [$since])['s'] ?? 0);
+        $topupRevenue = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM topups WHERE status='paid' AND COALESCE(paid_at,created_at)>?", [$since])['s'] ?? 0);
+        $revenue = $orderRevenue + $topupRevenue;
+        $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND provider_payment_id NOT LIKE 'balance_%' AND created_at>?", [$since])['c'] ?? 0);
+        $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND COALESCE(paid_at,created_at)>?", [$since])['c'] ?? 0);
         $newUsers = (int)($this->db->one('SELECT COUNT(*) AS c FROM users WHERE created_at>?', [$since])['c'] ?? 0);
         $activeSubs = (int)($this->db->one("SELECT COUNT(*) AS c FROM subscriptions WHERE status IN ('active','trial') AND expires_at>?", [time()])['c'] ?? 0);
         $trials = (int)($this->db->one("SELECT COUNT(*) AS c FROM subscriptions WHERE is_trial=1 AND status IN ('active','trial')", [])['c'] ?? 0);
@@ -45,9 +47,13 @@ final class ReportingService
         ];
         $result = [];
         foreach ($periods as $key => $p) {
-            $revenue = (int)($this->db->one("SELECT COALESCE(SUM(l.amount_minor),0) AS s FROM ledger_entries l JOIN orders o ON o.id=l.order_id WHERE l.account='provider_clearing' AND o.provider_payment_id NOT LIKE 'balance_%' AND l.created_at>=?", [$p['since']])['s'] ?? 0);
-            $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND created_at>=?", [$p['since']])['c'] ?? 0);
-            $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND created_at>=?", [$p['since']])['c'] ?? 0);
+            // Revenue = money that actually cleared through the provider:
+            // real (non-wallet) order payments plus paid balance topups.
+            $orderRevenue = (int)($this->db->one("SELECT COALESCE(SUM(l.amount_minor),0) AS s FROM ledger_entries l JOIN orders o ON o.id=l.order_id WHERE l.account='provider_clearing' AND o.provider_payment_id NOT LIKE 'balance_%' AND l.created_at>=?", [$p['since']])['s'] ?? 0);
+            $topupRevenue = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM topups WHERE status='paid' AND COALESCE(paid_at,created_at)>=?", [$p['since']])['s'] ?? 0);
+            $revenue = $orderRevenue + $topupRevenue;
+            $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND provider_payment_id NOT LIKE 'balance_%' AND created_at>=?", [$p['since']])['c'] ?? 0);
+            $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND COALESCE(paid_at,created_at)>=?", [$p['since']])['c'] ?? 0);
             $result[$key] = [
                 'label' => $p['label'],
                 'revenue_kopeks' => $revenue,
