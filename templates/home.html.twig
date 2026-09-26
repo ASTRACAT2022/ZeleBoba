@@ -12,9 +12,9 @@
 
 {% if primary %}
 {# ---------- Primary subscription state ---------- #}
-<section class="panel detail" aria-labelledby="sub-state">
-  <div class="section-heading simple-head-16" >
-    <h2 id="sub-state">{{ primary.plan_name }}</h2>
+<section class="panel detail primary-subscription" aria-labelledby="sub-state">
+  <div class="section-heading subscription-primary-heading" >
+    <h2 id="sub-state">{{ primary.plan_name|default('Основная подписка') }}</h2>
     <span class="badge active">{{ primary.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
   </div>
   <div class="meta-grid">
@@ -33,13 +33,13 @@
 
 {# ---------- Secondary subscriptions ---------- #}
 {% if active|length > 1 %}
-<section class="panel">
+<section class="panel other-subscriptions">
   <div class="panel-head"><h2>Другие активные подписки</h2><span class="muted">{{ active|length - 1 }}</span></div>
   <div class="subscription-list">
   {% for s in active %}{% if s.id != primary.id %}
     <article class="subscription-list-item">
       <div class="subscription-list-item__heading">
-        <div class="subscription-list-item__info"><strong>{{ s.plan_name }}</strong><small class="muted">до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
+        <div class="subscription-list-item__info"><strong>{{ s.plan_name|default('Подписка') }}</strong><small class="muted">до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
         <span class="badge active">{{ s.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
       </div>
       <div class="subscription-list-item__actions">
