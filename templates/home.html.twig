@@ -35,18 +35,18 @@
 {% if active|length > 1 %}
 <section class="panel">
   <div class="panel-head"><h2>Другие активные подписки</h2><span class="muted">{{ active|length - 1 }}</span></div>
-  <div class="panel-body plain" >
+  <div class="subscription-list">
   {% for s in active %}{% if s.id != primary.id %}
-    <div class="head-soft">
-      <div class="bar-line">
-        <div><strong>{{ s.plan_name }}</strong><small class="muted block">до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
+    <article class="subscription-list-item">
+      <div class="subscription-list-item__heading">
+        <div class="subscription-list-item__info"><strong>{{ s.plan_name }}</strong><small class="muted">до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
         <span class="badge active">{{ s.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
       </div>
-      <div class="inline-layout-3 mt-10" >
+      <div class="subscription-list-item__actions">
         {% if s.subscription_url %}<button class="button small secondary" type="button" data-copy="{{ s.subscription_url }}" data-copy-label="Ссылка скопирована">Скопировать ссылку</button>{% endif %}
         {% if s.status == 'active' %}<form method="post" action="/subscriptions/{{ s.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ s.id }}:{{ now }}"><button class="button small secondary">Продлить</button></form>{% endif %}
       </div>
-    </div>
+    </article>
   {% endif %}{% endfor %}
   </div>
 </section>

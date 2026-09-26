@@ -9,14 +9,15 @@ final class ReportingService
     public function salesStats(int $days = 30): array
     {
         $since = time() - $days * 86400;
-        $revenue = (int)($this->db->one('SELECT COALESCE(SUM(amount_minor),0) AS s FROM ledger_entries WHERE account=\'provider_clearing\' AND created_at>?', [$since])['s'] ?? 0);
-        $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND created_at>?", [$since])['c'] ?? 0);
-        $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND created_at>?", [$since])['c'] ?? 0);
+        $receipts = $this->plategaTotalsSince($since);
+        $revenue = $receipts['revenue_kopeks'];
+        $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM payments p WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id <> ('balance_' || p.order_id) AND p.paid_at>?", [$since])['c'] ?? 0);
+        $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE provider='platega' AND status='paid' AND paid_at>?", [$since])['c'] ?? 0);
         $newUsers = (int)($this->db->one('SELECT COUNT(*) AS c FROM users WHERE created_at>?', [$since])['c'] ?? 0);
         $activeSubs = (int)($this->db->one("SELECT COUNT(*) AS c FROM subscriptions WHERE status IN ('active','trial') AND expires_at>?", [time()])['c'] ?? 0);
         $trials = (int)($this->db->one("SELECT COUNT(*) AS c FROM subscriptions WHERE is_trial=1 AND status IN ('active','trial')", [])['c'] ?? 0);
         $gifts = (int)($this->db->one("SELECT COUNT(*) AS c FROM guest_purchases WHERE is_gift=1 AND status IN ('paid','pending_activation','delivered') AND created_at>?", [$since])['c'] ?? 0);
-        $avgCheck = $orders > 0 ? (int)($revenue / $orders) : 0;
+        $avgCheck = $receipts['payments'] > 0 ? (int)($revenue / $receipts['payments']) : 0;
         $conversion = $newUsers > 0 ? (int)round($orders * 100 / $newUsers) : 0;
         return [
             'revenue_kopeks' => $revenue,
@@ -45,9 +46,10 @@ final class ReportingService
         ];
         $result = [];
         foreach ($periods as $key => $p) {
-            $revenue = (int)($this->db->one('SELECT COALESCE(SUM(amount_minor),0) AS s FROM ledger_entries WHERE account=\'provider_clearing\' AND created_at>=?', [$p['since']])['s'] ?? 0);
-            $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM orders WHERE status IN ('paid','fulfilled') AND created_at>=?", [$p['since']])['c'] ?? 0);
-            $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE status='paid' AND created_at>=?", [$p['since']])['c'] ?? 0);
+            $receipts = $this->plategaTotalsSince($p['since']);
+            $revenue = $receipts['revenue_kopeks'];
+            $orders = (int)($this->db->one("SELECT COUNT(*) AS c FROM payments p WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id <> ('balance_' || p.order_id) AND p.paid_at>=?", [$p['since']])['c'] ?? 0);
+            $topups = (int)($this->db->one("SELECT COUNT(*) AS c FROM topups WHERE provider='platega' AND status='paid' AND paid_at>=?", [$p['since']])['c'] ?? 0);
             $result[$key] = [
                 'label' => $p['label'],
                 'revenue_kopeks' => $revenue,
@@ -61,16 +63,13 @@ final class ReportingService
     public function dailyRevenue(int $days = 14): array
     {
         $since = time() - $days * 86400;
-        // Keep this query portable: the application also supports SQLite for
-        // local installations, where PostgreSQL's to_timestamp()/::date do
-        // not exist.
         $rows = $this->db->all(
-            "SELECT created_at, amount_minor FROM ledger_entries WHERE account='provider_clearing' AND created_at>? ORDER BY created_at",
-            [$since]
+            "SELECT paid_at AS received_at, amount_minor FROM payments WHERE provider='platega' AND status='succeeded' AND provider_payment_id <> ('balance_' || order_id) AND paid_at>?\n             UNION ALL\n             SELECT paid_at AS received_at, amount_kopeks AS amount_minor FROM topups WHERE provider='platega' AND status='paid' AND paid_at>?\n             ORDER BY received_at",
+            [$since, $since]
         );
         $result = [];
         foreach ($rows as $row) {
-            $day = gmdate('Y-m-d', (int)$row['created_at']);
+            $day = gmdate('Y-m-d', (int)$row['received_at']);
             $result[$day] = ($result[$day] ?? 0) + (int)$row['amount_minor'];
         }
         return $result;
@@ -80,8 +79,8 @@ final class ReportingService
     {
         $since = time() - $days * 86400;
         return $this->db->all(
-            "SELECT o.provider, COUNT(*) AS cnt, SUM(o.price_minor) AS total FROM orders o WHERE o.status IN ('paid','fulfilled') AND o.created_at>? GROUP BY o.provider ORDER BY total DESC",
-            [$since]
+            "SELECT provider, COUNT(*) AS cnt, SUM(amount_minor) AS total FROM (\n                SELECT p.provider,p.amount_minor FROM payments p WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id <> ('balance_' || p.order_id) AND p.paid_at>?\n                UNION ALL\n                SELECT t.provider,t.amount_kopeks AS amount_minor FROM topups t WHERE t.provider='platega' AND t.status='paid' AND t.paid_at>?\n             ) receipts GROUP BY provider ORDER BY total DESC",
+            [$since, $since]
         );
     }
     /** Revenue split by plan. */
@@ -89,7 +88,7 @@ final class ReportingService
     {
         $since = time() - $days * 86400;
         return $this->db->all(
-            "SELECT o.plan_name, COUNT(*) AS cnt, SUM(o.price_minor) AS total FROM orders o WHERE o.status IN ('paid','fulfilled') AND o.created_at>? GROUP BY o.plan_name ORDER BY total DESC",
+            "SELECT o.plan_name, COUNT(*) AS cnt, SUM(p.amount_minor) AS total FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id <> ('balance_' || p.order_id) AND p.paid_at>? GROUP BY o.plan_name ORDER BY total DESC",
             [$since]
         );
     }
@@ -97,15 +96,13 @@ final class ReportingService
     public function revenueByType(int $days = 30): array
     {
         $since = time() - $days * 86400;
-        $topups = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM topups WHERE status='paid' AND created_at>?", [$since])['s'] ?? 0);
-        $purchases = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM transactions WHERE type IN ('subscription_purchase','subscription_renewal','trial_conversion') AND amount_kopeks<0 AND created_at>?", [$since])['s'] ?? 0);
-        $gifts = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM transactions WHERE type='gift_purchase' AND amount_kopeks<0 AND created_at>?", [$since])['s'] ?? 0);
-        $traffic = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM transactions WHERE type IN ('traffic_topup','device_addon') AND amount_kopeks<0 AND created_at>?", [$since])['s'] ?? 0);
+        $topups = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM topups WHERE provider='platega' AND status='paid' AND paid_at>?", [$since])['s'] ?? 0);
+        $purchases = (int)($this->db->one("SELECT COALESCE(SUM(amount_minor),0) AS s FROM payments WHERE provider='platega' AND status='succeeded' AND provider_payment_id <> ('balance_' || order_id) AND paid_at>?", [$since])['s'] ?? 0);
         return [
             'topups_kopeks' => $topups,
-            'purchases_kopeks' => -$purchases,
-            'gifts_kopeks' => -$gifts,
-            'addons_kopeks' => -$traffic,
+            'purchases_kopeks' => $purchases,
+            'gifts_kopeks' => 0,
+            'addons_kopeks' => 0,
         ];
     }
     /** Top customers by spend. */
@@ -131,5 +128,18 @@ final class ReportingService
         $spent = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM transactions WHERE user_id=? AND amount_kopeks<0 AND type IN ('subscription_purchase','subscription_renewal','gift_purchase','traffic_topup','device_addon')", [$userId])['s'] ?? 0);
         $topups = (int)($this->db->one("SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM topups WHERE user_id=? AND status='paid'", [$userId])['s'] ?? 0);
         return ['spent_kopeks' => -$spent, 'topups_kopeks' => $topups];
+    }
+
+    /** Gross incoming funds confirmed by Platega (orders and wallet topups). */
+    public function plategaTotalsSince(int $since): array
+    {
+        // Balance-funded orders keep the order's configured provider for
+        // fulfillment, but their synthetic balance_<order id> payment is not
+        // an external cash receipt and must never appear in Platega revenue.
+        $row = $this->db->one(
+            "SELECT COALESCE(SUM(receipts.amount_minor),0) AS revenue,COUNT(*) AS payments FROM (\n                SELECT p.amount_minor FROM payments p WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id <> ('balance_' || p.order_id) AND p.paid_at>=?\n                UNION ALL\n                SELECT t.amount_kopeks AS amount_minor FROM topups t WHERE t.provider='platega' AND t.status='paid' AND t.paid_at>=?\n            ) receipts",
+            [$since, $since]
+        );
+        return ['revenue_kopeks' => (int)($row['revenue'] ?? 0), 'payments' => (int)($row['payments'] ?? 0)];
     }
 }
