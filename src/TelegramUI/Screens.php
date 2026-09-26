@@ -20,10 +20,17 @@ final class Screens
         return Blocks::footer('ASTRACAT  •  status.astracat.network');
     }
 
+    private static function isCurrentSubscription(array $subscription): bool
+    {
+        return in_array(($subscription['status'] ?? ''), ['active','trial'], true)
+            && (int)($subscription['expires_at'] ?? 0) > time();
+    }
+
     public static function buildHomeScreen(array $user = [], ?array $subscription = null): array
     {
-        $active = $subscription !== null && in_array(($subscription['status'] ?? ''), ['active','trial'], true) && (int)($subscription['expires_at'] ?? 0) > time();
-        $status = $active ? '🟢 Активна' : ($subscription ? 'Истекла' : 'Нет подписки');
+        if ($subscription !== null && !self::isCurrentSubscription($subscription)) $subscription = null;
+        $active = $subscription !== null;
+        $status = $active ? '🟢 Активна' : 'Нет активной подписки';
         $until = $subscription ? gmdate('d.m.Y', (int)$subscription['expires_at']) : '—';
         $days = $active ? max(0, (int)ceil(((int)$subscription['expires_at'] - time()) / 86400)).' дней' : '—';
         $used = $subscription ? (float)($subscription['traffic_used_gb'] ?? 0) : 0;
@@ -48,44 +55,47 @@ final class Screens
 
     public static function buildSubscriptionScreen(array $subscriptions = []): array
     {
+        $subscriptions = array_values(array_filter($subscriptions, static fn(array $subscription): bool => self::isCurrentSubscription($subscription)));
         if (!$subscriptions) return ['blocks' => [
             Blocks::heading('Подписка', 1),
-            Blocks::paragraph('Пока нет оформленной подписки.'),
+            Blocks::paragraph('Активной подписки нет.'),
             Blocks::buttons([Blocks::button('Выбрать тариф', 'ui:plans', 'success')]),
             Blocks::buttons([Blocks::button('← На главную', 'ui:home')]),
             self::footer(),
         ]];
-        $primary = $subscriptions[0];
-        $limit = (float)($primary['traffic_limit_gb'] ?? 0);
-        $used = (float)($primary['traffic_used_gb'] ?? 0);
-        $active = in_array(($primary['status'] ?? ''), ['active','trial'], true) && (int)$primary['expires_at'] > time();
-        $traffic = $limit <= 0 ? 'Безлимит' : number_format($used, 0, ',', ' ').' / '.number_format($limit, 0, ',', ' ').' GB';
-        $rows = [
-            ['Параметр', 'Значение'],
-            ['Статус', $active ? '🟢 Активна' : 'Истекла'],
-            ['Тариф', (string)($primary['plan_name'] ?? 'Подписка')],
-            ['Окончание', gmdate('d.m.Y', (int)$primary['expires_at'])],
-            ['Трафик', $traffic],
+        $blocks = [
+            Blocks::heading('Подписка', 1),
+            Blocks::paragraph('Активных подписок: '.count($subscriptions)),
         ];
-        $startedAt = (int)($primary['starts_at'] ?? $primary['created_at'] ?? 0);
-        if ($startedAt > 0) $rows[] = ['Начало', gmdate('d.m.Y', $startedAt)];
-        $actions = [];
-        foreach ($subscriptions as $subscription) {
-            if (in_array(($subscription['status'] ?? ''), ['active','trial'], true) && (int)$subscription['expires_at'] > time()) {
-                $actions[] = Blocks::buttons([Blocks::button('Продлить · '.(string)($subscription['plan_name'] ?? 'подписку'), 'renew:'.$subscription['id'], 'success')]);
-                $actions[] = Blocks::buttons([Blocks::button(((int)($subscription['auto_renew'] ?? 0) === 1 ? 'Выключить' : 'Включить').' автопродление', 'autorenew:'.$subscription['id'])]);
+        foreach ($subscriptions as $index => $subscription) {
+            $limit = (float)($subscription['traffic_limit_gb'] ?? 0);
+            $used = (float)($subscription['traffic_used_gb'] ?? 0);
+            $traffic = $limit <= 0 ? 'Безлимит' : number_format($used, 0, ',', ' ').' / '.number_format($limit, 0, ',', ' ').' GB';
+            $rows = [
+                ['Параметр', 'Значение'],
+                ['Статус', '🟢 Активна'],
+                ['Окончание', gmdate('d.m.Y', (int)$subscription['expires_at'])],
+                ['Трафик', $traffic],
+            ];
+            $startedAt = (int)($subscription['starts_at'] ?? $subscription['created_at'] ?? 0);
+            if ($startedAt > 0) $rows[] = ['Начало', gmdate('d.m.Y', $startedAt)];
+
+            if ($index > 0) $blocks[] = Blocks::divider();
+            $blocks[] = Blocks::heading((string)($subscription['plan_name'] ?? 'Подписка'), 2);
+            $blocks[] = Blocks::table($rows, true, false, true);
+            if (($subscription['status'] ?? '') === 'active') {
+                $blocks[] = Blocks::buttons([Blocks::button('Продлить подписку', 'renew:'.$subscription['id'], 'success')]);
+                $blocks[] = Blocks::buttons([Blocks::button(((int)($subscription['auto_renew'] ?? 0) === 1 ? 'Выключить' : 'Включить').' автопродление', 'autorenew:'.$subscription['id'])]);
+            }
+            if (!empty($subscription['subscription_url'])) {
+                $blocks[] = Blocks::buttons([Blocks::urlButton('Подключиться', (string)$subscription['subscription_url'], 'primary')]);
+                $blocks[] = Blocks::buttons([Blocks::copyButton('Скопировать ссылку', (string)$subscription['subscription_url'])]);
             }
         }
-        return ['blocks' => [
-            Blocks::heading('Подписка', 1),
-            Blocks::table($rows, true, false, true),
-            ...$actions,
-            ...($active && !empty($primary['subscription_url']) ? [Blocks::buttons([Blocks::urlButton('Подключиться', (string)$primary['subscription_url'], 'primary')]), Blocks::buttons([Blocks::copyButton('Скопировать ссылку', (string)$primary['subscription_url'])])] : []),
-            Blocks::details('Что такое трафик?', [Blocks::paragraph($limit > 0 ? number_format($limit, 0, ',', ' ').' GB — объём данных, доступный в рамках текущего периода подписки.' : 'Текущий тариф не ограничивает объём трафика.')]),
-            Blocks::buttons([Blocks::button('Выбрать тариф', 'ui:plans', 'success')]),
-            Blocks::buttons([Blocks::button('← На главную', 'ui:home')]),
-            self::footer(),
-        ]];
+        $blocks[] = Blocks::buttons([Blocks::button('Выбрать тариф', 'ui:plans', 'success')]);
+        $blocks[] = Blocks::buttons([Blocks::button('← На главную', 'ui:home')]);
+        $blocks[] = self::footer();
+        return ['blocks' => $blocks];
     }
 
     public static function buildServersScreen(array $servers = []): array

@@ -279,16 +279,16 @@ final class Telegram
     {
         $ui = new Screens();
         if ($screen === 'home') {
-            $subscription = $this->db->one("SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 1", [$user['id']]);
+            $subscription = $this->db->one("SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status IN ('active','trial') AND s.expires_at>? ORDER BY s.expires_at DESC LIMIT 1", [$user['id'], time()]);
             return $ui->buildHomeScreen($user, $subscription);
         }
         if ($screen === 'subscription') {
-            $subscriptions = $this->db->all("SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 10", [$user['id']]);
+            $subscriptions = $this->db->all("SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status IN ('active','trial') AND s.expires_at>? ORDER BY s.expires_at DESC LIMIT 10", [$user['id'], time()]);
             return $ui->buildSubscriptionScreen($subscriptions);
         }
         if (str_starts_with($screen, 'connect-')) {
             $device = substr($screen, 8);
-            $subscription = $this->db->one("SELECT subscription_url FROM subscriptions WHERE user_id=? AND status='active' AND expires_at>? AND subscription_url IS NOT NULL ORDER BY expires_at DESC LIMIT 1", [$user['id'], time()]);
+            $subscription = $this->db->one("SELECT subscription_url FROM subscriptions WHERE user_id=? AND status IN ('active','trial') AND expires_at>? AND subscription_url IS NOT NULL ORDER BY expires_at DESC LIMIT 1", [$user['id'], time()]);
             $devices = ['iphone'=>'iPhone','android'=>'Android','windows'=>'Windows','macos'=>'macOS','linux'=>'Linux'];
             return $ui->buildConnectionGuideScreen($devices[$device] ?? 'устройство', $subscription['subscription_url'] ?? null);
         }
