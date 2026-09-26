@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ASTRACAT · Telegram UI prototype</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="workspace">
+    <aside class="rail">
+      <div class="brand"><span class="brand-mark">A</span><span><b>ASTRACAT</b><small>TELEGRAM UI KIT</small></span></div>
+      <p class="rail-label">ПРОТОТИП ЭКРАНОВ</p>
+      <nav id="screen-nav" aria-label="Экраны прототипа"></nav>
+      <div class="rail-note"><span class="live-dot"></span>Все данные демонстрационные<br><small>Backend ещё не подключён</small></div>
+    </aside>
+
+    <section class="stage">
+      <header class="stage-head"><div><p class="eyebrow">ASTRACAT VPN · TELEGRAM BOT API</p><h1 id="screen-title">Прототип</h1></div><span class="api-chip">RICH MESSAGE</span></header>
+      <div class="phone-wrap">
+        <div class="phone">
+          <div class="phone-top"><span class="phone-time">9:41</span><span class="phone-status"><i></i><i></i><i></i></span></div>
+          <div class="chat-head"><span class="back">‹</span><span class="bot-avatar">A</span><span class="chat-name"><b>ASTRACAT VPN</b><small>бот</small></span><span class="more">•••</span></div>
+          <div class="chat-body" id="chat-body">
+            <div class="day-pill">сегодня</div>
+            <article class="message"><div class="message-content" id="message-content"></div><div class="message-meta"><span>ASTRACAT VPN</span><span>9:41</span><span class="read">✓✓</span></div></article>
+          </div>
+          <div class="composer"><span class="clip">⌕</span><span class="composer-field">Сообщение</span><span class="mic">◖</span></div>
+        </div>
+      </div>
+      <footer class="stage-foot"><span><i class="live-dot"></i> Навигация меняет содержимое одного сообщения</span><span>Прототип · без API-запросов</span></footer>
+    </section>
+  </main>
+  <script src="./screens.js"></script>
+  <script src="./prototype.js"></script>
+</body>
+</html>

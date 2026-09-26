@@ -3,12 +3,14 @@ declare(strict_types=1);
 namespace App\Integration;
 use App\Infrastructure\{Database,Outbox};
 use App\Billing\{BillingService,BillingError};
+use App\TelegramUI\{Blocks,Screens};
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Component\HttpClient\HttpClient;
 final class Telegram
 {
     private ?\App\Container $app = null;
     private ?HttpClientInterface $http = null;
+    private ?array $callbackMessage = null;
     public function __construct(private Database $db,private Outbox $outbox,private BillingService $billing,private string $appUrl, private ?\App\Identity\TelegramLogin $login=null, private string $apiBase='https://astracattg.netlify.app', ?HttpClientInterface $http=null) { $this->http=$http; }
     public function setApp(\App\Container $app): void { $this->app = $app; }
     public function apiBase(): string { return rtrim($this->apiBase,'/')===''?'https://astracattg.netlify.app':rtrim($this->apiBase,'/'); }
@@ -40,6 +42,7 @@ final class Telegram
     {
         $id=$update['update_id']??null; $message=$update['message']??null;
         $callback=$update['callback_query']??null;
+        $this->callbackMessage = is_array($callback) ? $callback : null;
         if($callback){
             $this->handleCallback($id,$callback);
             return;
@@ -122,6 +125,12 @@ final class Telegram
         if($command==='/plans'||$command==='plans'||$command==='/tariffs'){
             $this->sendPlans($id,$tg); return;
         }
+        if(in_array($command,['/connect','connect','/vpn','vpn'],true)){ $this->showUi($id,$tg,$user,'connect'); return; }
+        if(in_array($command,['/servers','servers'],true)){ $this->showUi($id,$tg,$user,'servers'); return; }
+        if(in_array($command,['/network','network','/statuspage'],true)){ $this->showUi($id,$tg,$user,'network'); return; }
+        if(in_array($command,['/profile','profile'],true)){ $this->showUi($id,$tg,$user,'profile'); return; }
+        if(in_array($command,['/settings','settings'],true)){ $this->showUi($id,$tg,$user,'settings'); return; }
+        if(in_array($command,['/support','support'],true)){ $this->showUi($id,$tg,$user,'support'); return; }
         if(str_starts_with($command,'/buy')||str_starts_with($text,'/buy ')){
             $arg=trim(substr($text,4));
             if($arg===''){ $this->sendPlans($id,$tg,'Выберите тариф для покупки:'); return; }
@@ -258,45 +267,157 @@ final class Telegram
     private function mainMenu(): array
     {
         return ['inline_keyboard'=>[
-            [['text'=>'Тарифы','callback_data'=>'menu:plans'],['text'=>'Мои подписки','callback_data'=>'menu:subs']],
-            [['text'=>'Мои заказы','callback_data'=>'menu:orders'],['text'=>'Кабинет','callback_data'=>'menu:cabinet']],
-            [['text'=>'Помощь','callback_data'=>'menu:help']],
+            [['text'=>'VPN','callback_data'=>'ui:connect'],['text'=>'Подписка','callback_data'=>'ui:subscription']],
+            [['text'=>'Серверы','callback_data'=>'ui:servers'],['text'=>'Платежи','callback_data'=>'ui:payments']],
+            [['text'=>'Рефералы','callback_data'=>'ui:referrals'],['text'=>'Профиль','callback_data'=>'ui:profile']],
+            [['text'=>'Поддержка','callback_data'=>'ui:support']],
         ]];
     }
+
+    /** Build a native Rich Message from current backend state. */
+    private function uiScreen(string $screen, array $user, string $argument = ''): array
+    {
+        $ui = new Screens();
+        if ($screen === 'home') {
+            $subscription = $this->db->one("SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 1", [$user['id']]);
+            return $ui->buildHomeScreen($user, $subscription);
+        }
+        if ($screen === 'subscription') {
+            $subscriptions = $this->db->all("SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 10", [$user['id']]);
+            return $ui->buildSubscriptionScreen($subscriptions);
+        }
+        if (str_starts_with($screen, 'connect-')) {
+            $device = substr($screen, 8);
+            $subscription = $this->db->one("SELECT subscription_url FROM subscriptions WHERE user_id=? AND status='active' AND expires_at>? AND subscription_url IS NOT NULL ORDER BY expires_at DESC LIMIT 1", [$user['id'], time()]);
+            $devices = ['iphone'=>'iPhone','android'=>'Android','windows'=>'Windows','macos'=>'macOS','linux'=>'Linux','openwrt'=>'OpenWrt'];
+            return $ui->buildConnectionGuideScreen($devices[$device] ?? 'устройство', $subscription['subscription_url'] ?? null);
+        }
+        if ($screen === 'servers') return $ui->buildServersScreen([]);
+        if ($screen === 'connect') return $ui->buildConnectionScreen();
+        if ($screen === 'plans') {
+            $plans = $this->db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor');
+            return $ui->buildPlansScreen(array_map(fn($plan) => $this->uiPlan($plan, $user['id']), $plans));
+        }
+        if ($screen === 'plan') {
+            $plan = $this->db->one('SELECT * FROM plans WHERE id=? AND active=1', [$argument]);
+            if (!$plan) return ['blocks'=>[Blocks::heading('Тариф недоступен'), Blocks::paragraph('Выберите другой тариф.'), Blocks::buttons([Blocks::button('← К тарифам','ui:plans')])]];
+            return $ui->buildSelectedPlanScreen($this->uiPlan($plan, $user['id']));
+        }
+        if ($screen === 'order') {
+            $order = $this->db->one('SELECT * FROM orders WHERE id=? AND user_id=?', [$argument, $user['id']]);
+            if (!$order) return ['blocks'=>[Blocks::heading('Заказ не найден'), Blocks::buttons([Blocks::button('Мои платежи','ui:payments'), Blocks::button('На главную','ui:home')])]];
+            $subscription = $this->db->one('SELECT * FROM subscriptions WHERE order_id=? AND user_id=?', [$order['id'], $user['id']]);
+            return $ui->buildOrderScreen($order, $subscription);
+        }
+        if ($screen === 'payments') {
+            $orders = $this->db->all('SELECT plan_name,price_minor,created_at,status FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 10', [$user['id']]);
+            $payments = array_map(static fn($row) => [
+                'date'=>gmdate('d.m', (int)$row['created_at']),
+                'product'=>(string)$row['plan_name'].' · '.match($row['status']) {'fulfilled'=>'Готово','paid'=>'Оплачено','pending'=>'Ожидает','canceled','cancelled'=>'Отмена',default=>(string)$row['status']},
+                'amount'=>Payments::decimal((int)$row['price_minor']).' ₽',
+            ], $orders);
+            return $ui->buildPaymentsScreen($payments);
+        }
+        if ($screen === 'network') {
+            $labels = ['worker'=>'Обработка задач','scheduler'=>'Планировщик','telegram'=>'Telegram-бот'];
+            $rows = [];
+            foreach ($labels as $name=>$label) {
+                $heartbeat = $this->db->one('SELECT seen_at FROM runtime_heartbeats WHERE name=?', [$name]);
+                $ok = $heartbeat && (int)$heartbeat['seen_at'] > time()-180;
+                $rows[] = ['name'=>$label, 'status'=>$ok ? '🟢 Работает' : '🟡 Нет свежего статуса'];
+            }
+            return $ui->buildNetworkStatusScreen($rows);
+        }
+        if ($screen === 'referrals' && $this->app) {
+            $stats = $this->app->referrals->stats($user['id']);
+            $bot = trim((string)($this->app->config['TELEGRAM_BOT_USERNAME'] ?? ''), '@ ');
+            $stats['referral_count'] = count($stats['referrals']);
+            $stats['link'] = $bot !== '' ? 'https://t.me/'.$bot.'?start=ref_'.$stats['code'] : '';
+            return $ui->buildReferralScreen($stats);
+        }
+        if ($screen === 'profile') return $ui->buildProfileScreen($user);
+        if ($screen === 'settings') return $ui->buildSettingsScreen([]);
+        if ($screen === 'support') return $ui->buildSupportScreen(['url'=>$this->supportUrl()]);
+        return $ui->buildHomeScreen($user);
+    }
+
+    private function uiPlan(array $plan, string $userId): array
+    {
+        $months = (int)($plan['duration_months'] ?? 0);
+        $days = (int)$plan['duration_days'];
+        $duration = $months > 0 ? $months.' мес.' : ($days % 30 === 0 && $days >= 30 ? (int)($days/30).' мес.' : $days.' дн.');
+        $trafficBytes = (int)$plan['traffic_bytes'];
+        $traffic = $trafficBytes <= 0 ? 'Безлимит' : number_format($trafficBytes / 1073741824, 0, ',', ' ').' GB';
+        $price = $this->app ? $this->app->billing->priceFor($userId, $plan) : (int)$plan['price_minor'];
+        return ['id'=>(string)$plan['id'],'duration'=>$duration,'traffic'=>$traffic,'price'=>Payments::decimal($price).' ₽'];
+    }
+
+    private function showUi(int $updateId, string $chatId, array $user, string $screen, string $argument = '', ?int $messageId = null): void
+    {
+        $richMessage = $this->uiScreen($screen, $user, $argument);
+        $isEdit = $messageId !== null && $messageId > 0;
+        $topic = $isEdit ? 'telegram.rich.edit' : 'telegram.rich.send';
+        $dedup = ($isEdit ? 'rich-edit:' : 'rich-send:').$updateId;
+        $payload = ['chat_id'=>$chatId,'rich_message'=>$richMessage,'_ui_user_id'=>$user['id'],
+            '_ui_screen'=>$screen,'_ui_context_id'=>$screen==='order'?$argument:null];
+        if ($isEdit) $payload['message_id'] = $messageId;
+        $this->db->transaction(function () use ($updateId, $topic, $dedup, $payload) {
+            if (!$this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING', [$updateId,time()])) return;
+            $this->outbox->enqueue($topic, $dedup, $payload);
+        });
+    }
+
+    private function uiEditFromCallback(int $updateId, string $chatId, array $user, string $screen, string $argument, array $callback): void
+    {
+        $messageId = $callback['message']['message_id'] ?? null;
+        if (!is_int($messageId) || $messageId < 1) return;
+        $this->showUi($updateId, $chatId, $user, $screen, $argument, $messageId);
+    }
+
     private function reply(int $updateId,string $chatId,string $text,?array $markup=null): void
     {
+        $messageId = $this->callbackMessage['message']['message_id'] ?? null;
+        if (is_int($messageId) && $messageId > 0) {
+            $blocks = [Blocks::paragraph($text)];
+            foreach (($markup['inline_keyboard'] ?? []) as $row) {
+                $buttons = [];
+                foreach ($row as $item) {
+                    if (!empty($item['callback_data'])) $buttons[] = Blocks::button((string)$item['text'], (string)$item['callback_data'], $item['style'] ?? null);
+                    elseif (!empty($item['url'])) $buttons[] = Blocks::urlButton((string)$item['text'], (string)$item['url'], $item['style'] ?? null);
+                    elseif (!empty($item['copy_text']['text'])) $buttons[] = Blocks::copyButton((string)$item['text'], (string)$item['copy_text']['text']);
+                }
+                if ($buttons) $blocks[] = Blocks::buttons($buttons);
+            }
+            $user = $this->db->one('SELECT id FROM users WHERE telegram_id=?',[$chatId]);
+            $payload = ['chat_id'=>$chatId,'message_id'=>$messageId,'rich_message'=>['blocks'=>$blocks],
+                '_ui_user_id'=>$user['id']??null,'_ui_screen'=>'message','_ui_context_id'=>null];
+            $this->db->transaction(function () use ($updateId,$payload) {
+                if ($this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$updateId,time()])) {
+                    $this->outbox->enqueue('telegram.rich.edit','rich-edit:'.$updateId,$payload);
+                }
+            });
+            return;
+        }
         $this->db->transaction(function () use ($updateId,$chatId,$text,$markup) {
             if ($this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$updateId,time()])) $this->outbox->enqueue('telegram.send','reply:'.$updateId,array_filter(['chat_id'=>$chatId,'text'=>$text,'reply_markup'=>$markup],fn($v)=>$v!==null));
         });
     }
     private function sendWelcome(int $id,string $tg): void
     {
-        $this->ensureUser($tg);
-        $text=$this->app?$this->app->branding->welcomeText():"Привет! Это дублер веб-кабинета.\nЗдесь можно купить подписку, оплатить и получить доступ — всё как на сайте.\n\nКабинет: ".$this->appUrl;
-        $this->reply($id,$tg,$text,$this->mainMenu());
+        $user=$this->ensureUser($tg);
+        if ($user) $this->showUi($id,$tg,$user,'home');
     }
     private function sendHelp(int $id,string $tg): void
     {
-        $text=$this->app?$this->app->branding->helpText():"Команды:\n/plans — тарифы\n/buy <id> — купить\n/status — подписки + pending заказы\n/orders — мои заказы\n/subs — мои подписки\n/cabinet — открыть веб-кабинет\n/login — вход в кабинет\n/myid — ваш chat_id и id аккаунта\n/support — поддержка\n\nКабинет и бот работают в тандеме: заказы и подписки общие.";
-        $this->reply($id,$tg,$text,$this->mainMenu());
+        $user=$this->ensureUser($tg);
+        if ($user) $this->showUi($id,$tg,$user,'support');
     }
     private function sendPlans(int $id,string $tg,?string $prefix=null): void
     {
-        $plans=$this->db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor');
-        if(!$plans){ $this->reply($id,$tg,'Пока нет доступных тарифов.',$this->mainMenu()); return; }
-        $lines=[];
-        $keyboard=[];
-        foreach($plans as $p){
-            $price=Payments::decimal((int)$p['price_minor']).' ₽';
-            $traffic=(int)$p['traffic_bytes']===0?'безлимит':(round((int)$p['traffic_bytes']/1073741824).' ГБ');
-            $lines[]=$p['name'].' · '.$price.' / '.$p['duration_days'].' дн. · '.$traffic.' · '.((int)$p['devices']===0?'безлимит устр.':'до '.$p['devices'].' устр.');
-            $keyboard[]= [['text'=>'Купить '.$p['name'].' · '.$price,'callback_data'=>'buy:'.$p['id']]];
-        }
-        $keyboard[]= [['text'=>'Мои подписки','callback_data'=>'menu:subs'],['text'=>'Меню','callback_data'=>'menu:main']];
-        $text=($prefix?$prefix."\n\n":'').implode("\n",$lines)."\n\nНажмите кнопку покупки или отправьте /buy <id>.";
-        $this->reply($id,$tg,$text,['inline_keyboard'=>$keyboard]);
+        $user=$this->ensureUser($tg);
+        if ($user) $this->showUi($id,$tg,$user,'plans');
     }
-    private function buyPlan(int $id,string $tg,array $user,string $planId): void
+    private function buyPlan(int $id,string $tg,array $user,string $planId,?array $callback=null): void
     {
         $planId=trim($planId);
         if(!preg_match('/^[a-zA-Z0-9:_-]{1,64}$/D',$planId)){ $this->reply($id,$tg,'Некорректный тариф.',$this->mainMenu()); return; }
@@ -311,7 +432,8 @@ final class Telegram
             // Refresh local copy (worker may have already created checkout_url)
             $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$order['id']]);
         }
-        $this->reply($id,$tg,$this->orderText($order)."\nКабинет: ".rtrim($this->appUrl,'/').'/orders/'.$order['id'],$this->orderKeyboard($order));
+        $messageId = $callback['message']['message_id'] ?? null;
+        $this->showUi($id,$tg,$user,'order',(string)$order['id'],is_int($messageId)?$messageId:null);
     }
     private function orderText(array $o): string
     {
@@ -346,17 +468,7 @@ final class Telegram
     }
     private function sendStatus(int $id,string $tg,array $user): void
     {
-        $subs=$this->db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 5',[$user['id']]);
-        $text=$subs?implode("\n",array_map(fn($s)=>'Подписка '.$s['plan_name'].': '.((int)$s['expires_at']<=time()?'истекла':$s['status']).' до '.gmdate('d.m.Y',(int)$s['expires_at']).($s['status']==='active' && (int)$s['expires_at']>time() && $s['subscription_url'] ? ' · '.$s['subscription_url'] : ''),$subs)):'Подписок пока нет.';
-        $orders=$this->db->all("SELECT * FROM orders WHERE user_id=? AND status='pending' ORDER BY created_at DESC LIMIT 3",[$user['id']]);
-        $keyboard=[];
-        foreach ($orders as $o){
-            $label=$o['plan_name'].': '.($o['provider']==='demo'?'демозаказ':($o['checkout_url']?'оплатить':'ссылка готовится'));
-            $keyboard[]= [['text'=>$label,'callback_data'=>'order:'.$o['id']]];
-        }
-        $keyboard[]= [['text'=>'Тарифы','callback_data'=>'menu:plans'],['text'=>'Меню','callback_data'=>'menu:main']];
-        if($orders) $text.="\n\nНеоплаченные заказы — нажмите чтобы открыть:";
-        $this->reply($id,$tg,$text,['inline_keyboard'=>$keyboard]);
+        $this->showUi($id,$tg,$user,'subscription');
     }
     private function promoError(string $key): string
     {
@@ -395,12 +507,7 @@ final class Telegram
     }
     private function sendReferral(int $id,string $tg,array $user): void
     {
-        if(!$this->app){ $this->reply($id,$tg,'Реферальная программа недоступна.',$this->mainMenu()); return; }
-        $stats=$this->app->referrals->stats($user['id']);
-        $username=$this->app->config['TELEGRAM_BOT_USERNAME']??'';
-        $text='👥 Реферальная программа'."\n\nПриглашайте друзей и получайте комиссию с их пополнений.\n\nВаш код: <b>".$stats['code']."</b>\nПриглашено: ".count($stats['referrals'])."\nОплативших: ".$stats['paid_referrals']."\nЗаработано: ".Payments::decimal($stats['earnings_kopeks']).' ₽';
-        if($username!=='') $text.="\n\nСсылка: https://t.me/".$username.'?start=ref_'.$stats['code'];
-        $this->reply($id,$tg,$text,['inline_keyboard'=>[[['text'=>'Меню','callback_data'=>'menu:main']]]]);
+        $this->showUi($id,$tg,$user,'referrals');
     }
     private function sendBalance(int $id,string $tg,array $user): void
     {
@@ -436,54 +543,19 @@ final class Telegram
     }
     private function sendOrders(int $id,string $tg,array $user): void
     {
-        $orders=$this->db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 10',[$user['id']]);
-        if(!$orders){ $this->reply($id,$tg,'Заказов пока нет. Выберите тариф:',['inline_keyboard'=>[[['text'=>'Тарифы','callback_data'=>'menu:plans']]]]); return; }
-        $lines=[];
-        $keyboard=[];
-        foreach($orders as $o){
-            $lines[]=$o['plan_name'].' · '.Payments::decimal((int)$o['price_minor']).' ₽ · '.$o['status'];
-            $keyboard[]= [['text'=>$o['plan_name'].' · '.$o['status'],'callback_data'=>'order:'.$o['id']]];
-        }
-        $keyboard[]= [['text'=>'Меню','callback_data'=>'menu:main']];
-        $this->reply($id,$tg,"Ваши заказы (общие с веб-кабинетом):\n".implode("\n",$lines),['inline_keyboard'=>$keyboard]);
+        $this->showUi($id,$tg,$user,'payments');
     }
     private function sendSubs(int $id,string $tg,array $user): void
     {
-        $subs=$this->db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 10',[$user['id']]);
-        if(!$subs){
-            // If this Telegram account looks like the dashboard owner (real email, not tg_*@telegram.local)
-            // but is unlinked from a Telegram chat_id, the dashboard data is on a different user row.
-            // Tell them how to /link so подписки would show up here.
-            $realEmail = !empty($user['email']) && !str_starts_with((string)$user['email'], 'tg_');
-            $this->reply($id, $tg, $realEmail
-                ? 'Этот Telegram не привязан к подписке. Если у вас есть кабинет на сайте — откройте его, нажмите «Привязать Telegram», скопируйте токен и отправьте сюда: /link <токен>. После этого подписки появятся.'
-                : 'Подписок пока нет. Выберите тариф:',
-                ['inline_keyboard'=>[
-                    $realEmail ? [] : [['text'=>'Тарифы','callback_data'=>'menu:plans']],
-                    [['text'=>'Кабинет','callback_data'=>'menu:cabinet'],['text'=>'Меню','callback_data'=>'menu:main']],
-                ]]);
-            return;
-        }
-        $lines=array_map(fn($s)=>$s['plan_name'].': '.((int)$s['expires_at']<=time()?'истекла':$s['status']).' до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC'.($s['subscription_url'] && (int)$s['expires_at']>time() ? ' · '.$s['subscription_url'] : '').((int)($s['auto_renew']??0)===1?' · автопродление вкл':''),$subs);
-        $keyboard=[];
-        foreach($subs as $s){
-            if($s['status']==='active' && (int)$s['expires_at']>time()){
-                $row=[['text'=>'Продлить '.$s['plan_name'],'callback_data'=>'renew:'.$s['id']]];
-                $row[]=['text'=>((int)($s['auto_renew']??0)===1?'Выключить автопродление ':'Включить автопродление'),'callback_data'=>'autorenew:'.$s['id']];
-                $keyboard[]=$row;
-            }
-        }
-        $keyboard[]= [['text'=>'Меню','callback_data'=>'menu:main']];
-        $this->reply($id,$tg,"Ваши подписки (общие с веб-кабинетом):\n".implode("\n",$lines),['inline_keyboard'=>$keyboard]);
+        $this->showUi($id,$tg,$user,'subscription');
     }
     private function sendCabinet(int $id,string $tg): void
     {
         if(!$this->login){ $this->reply($id,$tg,'Кабинет: '.$this->appUrl,$this->mainMenu()); return; }
-        $this->db->transaction(function()use($id,$tg){
-            if(!$this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$id,time()]))return;
-            $token=$this->login->magic($tg);
-            $this->outbox->enqueue('telegram.send','reply:'.$id,['chat_id'=>$tg,'text'=>'Одноразовая ссылка действует 5 минут. Не пересылайте её.','reply_markup'=>['inline_keyboard'=>[[['text'=>'Открыть кабинет','url'=>rtrim($this->appUrl,'/').'/telegram/magic#'.$token]]]]]);
-        });
+        $token=$this->login->magic($tg);
+        $this->reply($id,$tg,'Одноразовая ссылка действует 5 минут. Не пересылайте её.',[
+            'inline_keyboard'=>[[['text'=>'Открыть кабинет','url'=>rtrim($this->appUrl,'/').'/telegram/magic#'.$token]]],
+        ]);
     }
     private function handleCallback($updateId,$callback): void
     {
@@ -512,24 +584,33 @@ final class Telegram
         $user=$this->ensureUser($tg);
         if(!$user) return;
         if(!$this->gatePass($updateId,$tg)) return;
-        if($data==='menu:main'){ $this->reply($updateId,$tg,'Меню. Кабинет: '.$this->appUrl,$this->mainMenu()); return; }
-        if($data==='menu:plans'){ $this->sendPlans($updateId,$tg); return; }
-        if($data==='menu:subs'){ $this->sendSubs($updateId,$tg,$user); return; }
-        if($data==='menu:orders'){ $this->sendOrders($updateId,$tg,$user); return; }
+        if(str_starts_with($data,'ui:')){
+            $action=substr($data,3);
+            $screenMap=['home'=>'home','subscription'=>'subscription','servers'=>'servers','connect'=>'connect','plans'=>'plans','payments'=>'payments','network'=>'network','referrals'=>'referrals','profile'=>'profile','settings'=>'settings','support'=>'support'];
+            if(isset($screenMap[$action])){ $this->uiEditFromCallback($updateId,$tg,$user,$screenMap[$action],'',$callback); return; }
+            if(str_starts_with($action,'connect:')){
+                $device=substr($action,8);
+                if(in_array($device,['iphone','android','windows','macos','linux','openwrt'],true)) $this->uiEditFromCallback($updateId,$tg,$user,'connect-'.$device,'',$callback);
+                else $this->uiEditFromCallback($updateId,$tg,$user,'connect','',$callback);
+                return;
+            }
+            if(str_starts_with($action,'plan:')){ $this->uiEditFromCallback($updateId,$tg,$user,'plan',substr($action,5),$callback); return; }
+        }
+        if($data==='menu:main'){ $this->uiEditFromCallback($updateId,$tg,$user,'home','',$callback); return; }
+        if($data==='menu:plans'){ $this->uiEditFromCallback($updateId,$tg,$user,'plans','',$callback); return; }
+        if($data==='menu:subs'){ $this->uiEditFromCallback($updateId,$tg,$user,'subscription','',$callback); return; }
+        if($data==='menu:orders'){ $this->uiEditFromCallback($updateId,$tg,$user,'payments','',$callback); return; }
         if($data==='menu:cabinet'){ $this->sendCabinet($updateId,$tg); return; }
-        if($data==='menu:help'){ $this->sendHelp($updateId,$tg); return; }
+        if($data==='menu:help'){ $this->uiEditFromCallback($updateId,$tg,$user,'support','',$callback); return; }
         if(str_starts_with($data,'plan:')){
             $planId=substr($data,5);
             $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
             if(!$plan){ $this->reply($updateId,$tg,'Тариф недоступен.',$this->mainMenu()); return; }
-            $price=Payments::decimal((int)$plan['price_minor']).' ₽';
-            $traffic=(int)$plan['traffic_bytes']===0?'безлимит':(round((int)$plan['traffic_bytes']/1073741824).' ГБ');
-            $text=$plan['name'].' · '.$price.' / '.$plan['duration_days'].' дн. · '.$traffic.' · '.((int)$plan['devices']===0?'безлимит устр.':'до '.$plan['devices'].' устр.');
-            $this->reply($updateId,$tg,$text,['inline_keyboard'=>[[['text'=>'Купить · '.$price,'callback_data'=>'buy:'.$plan['id']]], [['text'=>'Назад','callback_data'=>'menu:plans']]]]);
+            $this->uiEditFromCallback($updateId,$tg,$user,'plan',$planId,$callback);
             return;
         }
         if(str_starts_with($data,'buy:')){
-            $this->buyPlan($updateId,$tg,$user,substr($data,4));
+            $this->buyPlan($updateId,$tg,$user,substr($data,4),$callback);
             return;
         }
         if(str_starts_with($data,'order:')){
@@ -537,7 +618,7 @@ final class Telegram
             if(!preg_match('/^[a-f0-9]{32}$/D',$orderId)){ $this->reply($updateId,$tg,'Заказ не найден.',$this->mainMenu()); return; }
             $order=$this->db->one('SELECT * FROM orders WHERE id=? AND user_id=?',[$orderId,$user['id']]);
             if(!$order){ $this->reply($updateId,$tg,'Заказ не найден.',$this->mainMenu()); return; }
-            $this->reply($updateId,$tg,$this->orderText($order)."\nКабинет: ".rtrim($this->appUrl,'/').'/orders/'.$order['id'],$this->orderKeyboard($order));
+            $this->uiEditFromCallback($updateId,$tg,$user,'order',$orderId,$callback);
             return;
         }
         if(str_starts_with($data,'topup-provider:')){
@@ -566,7 +647,7 @@ final class Telegram
             if(!$sub){ $this->reply($updateId,$tg,'Подписка не найдена.',$this->mainMenu()); return; }
             try {
                 $updated=$this->billing->setAutoRenew($user['id'],$subId,((int)($sub['auto_renew']??0)!==1));
-                $this->reply($updateId,$tg,((int)$updated['auto_renew']===1?'Автопродление включено. Списание около '.gmdate('d.m.Y',(int)$updated['renew_at']).'.':'Автопродление выключено.'),$this->mainMenu());
+                $this->uiEditFromCallback($updateId,$tg,$user,'subscription','',$callback);
             } catch (BillingError $e) { $this->reply($updateId,$tg,$e->getMessage(),$this->mainMenu()); }
             return;
         }
@@ -587,7 +668,8 @@ final class Telegram
             } else {
                 $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$order['id']]);
             }
-            $this->reply($updateId,$tg,'Продление подписки «'.$sub['plan_name'].'» (срок будет добавлен к текущему).\n'.$this->orderText($order)."\nКабинет: ".rtrim($this->appUrl,'/').'/orders/'.$order['id'],$this->orderKeyboard($order));
+            $messageId=$callback['message']['message_id']??null;
+            $this->showUi($updateId,$tg,$user,'order',(string)$order['id'],is_int($messageId)?$messageId:null);
             return;
         }
     }

@@ -33,6 +33,8 @@ final class Worker
                 'compensation.run'=>$this->compensationRun($payload['compensation_id']),
                 'compensation.grant'=>$this->compensationGrant($payload['compensation_id'],$payload['user_id']),
                 'telegram.send'=>$this->send($payload),
+                'telegram.rich.send'=>$this->send($payload,'sendRichMessage'),
+                'telegram.rich.edit'=>$this->send($payload,'editMessageText'),
                 'telegram.answer'=>$this->answer($payload),
                 default=>throw new \RuntimeException('Unknown outbox topic')
             };
@@ -209,7 +211,10 @@ final class Worker
             $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
             $this->timeline?->record($s['user_id'], 'subscription.active', ['subscription_id'=>$id]);
             $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
-            if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','activated:'.$id,['chat_id'=>$user['telegram_id'],'text'=>'Подписка готова. Откройте веб-кабинет или отправьте /status.']);
+            if ($user['telegram_id']) {
+                $updatedUi=(new \App\TelegramUI\Notifier($this->db,$this->outbox))->orderChanged((string)$s['user_id'],(string)$s['order_id']);
+                if(!$updatedUi) $this->outbox->enqueue('telegram.send','activated:'.$id,['chat_id'=>$user['telegram_id'],'text'=>'Подписка готова. Откройте веб-кабинет или отправьте /status.']);
+            }
         });
         $this->workflows?->succeeded($id,['remote_id'=>$remote['id'],'subscription_url'=>$remote['url']]);
     }
@@ -225,6 +230,9 @@ final class Worker
         $this->operationEvent($id,'provisioning.started','processing','Provisioning synchronization started');
         if($s['provision_driver']==='demo'){
             $this->markExtended($s,$orderId);
+            $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
+            $updatedUi=$orderId!==null && (new \App\TelegramUI\Notifier($this->db,$this->outbox))->orderChanged((string)$s['user_id'],$orderId);
+            if($user && $user['telegram_id'] && !$updatedUi) $this->outbox->enqueue('telegram.send','renewed:'.$id.':'.$s['expires_at'],['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
             return;
         }
         if ($s['remote_id']===null && (int)($s['remnawave_id']??0)<=0) { $this->provision($id); return; }
@@ -238,7 +246,8 @@ final class Worker
         $this->timeline?->record($s['user_id'], 'vpn.resource_updated', ['subscription_id'=>$id]);
         $this->operationEvent($id,'provisioning.completed','success','Remnawave synchronization successful',['expires_at'=>$s['expires_at']]);
         $user=$this->db->one('SELECT telegram_id FROM users WHERE id=?',[$s['user_id']]);
-        if ($user['telegram_id']) $this->outbox->enqueue('telegram.send','renewed:'.$id.':'.$s['expires_at'],['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
+        $updatedUi=$orderId!==null && (new \App\TelegramUI\Notifier($this->db,$this->outbox))->orderChanged((string)$s['user_id'],$orderId);
+        if ($user['telegram_id'] && !$updatedUi) $this->outbox->enqueue('telegram.send','renewed:'.$id.':'.$s['expires_at'],['chat_id'=>$user['telegram_id'],'text'=>'Подписка продлена до '.gmdate('d.m.Y H:i',(int)$s['expires_at']).' UTC.']);
     }
     private function verifyExtended(array $s, int $panelId): void
     {
@@ -339,11 +348,15 @@ final class Worker
             $this->outbox->enqueue('payment.create','checkout:'.$orderId,['order_id'=>$orderId]);
         });
     }
-    private function send(array $payload): void
+    private function send(array $payload, string $method = 'sendMessage'): void
     {
         if (!$this->botToken) throw new \RuntimeException('Telegram is not configured');
+        $uiUserId=$payload['_ui_user_id']??null;
+        $uiScreen=$payload['_ui_screen']??null;
+        $uiContextId=$payload['_ui_context_id']??null;
+        unset($payload['_ui_user_id'],$payload['_ui_screen'],$payload['_ui_context_id']);
         try {
-            $resp = $this->http->request('POST', rtrim($this->telegramApiBase, '/').'/bot'.$this->botToken.'/sendMessage', ['json' => $payload, 'timeout' => 10, 'max_duration' => 20, 'max_redirects' => 0]);
+            $resp = $this->http->request('POST', rtrim($this->telegramApiBase, '/').'/bot'.$this->botToken.'/'.$method, ['json' => $payload, 'timeout' => 10, 'max_duration' => 20, 'max_redirects' => 0]);
             // Inspect the body without throwing on HTTP status: a blocked chat
             // (403/400) is a permanent denial and must not be retried. Only
             // truly transient failures (429/5xx/network/timeout) should retry.
@@ -363,8 +376,18 @@ final class Worker
             // 429 rate-limit, 5xx, or unexpected: transient, keep backoff.
             throw new \RuntimeException('Telegram rejected message ('.$code.')');
         }
-        $user = $this->db->one('SELECT id FROM users WHERE telegram_id=?', [(string)($payload['chat_id'] ?? '')]);
-        if ($user) $this->timeline?->record($user['id'], 'telegram.notification_delivered', []);
+        if ($method !== 'editMessageText') {
+            $user = $this->db->one('SELECT id FROM users WHERE telegram_id=?', [(string)($payload['chat_id'] ?? '')]);
+            if ($user) $this->timeline?->record($user['id'], 'telegram.notification_delivered', []);
+        }
+        if (in_array($method,['sendRichMessage','editMessageText'],true) && is_string($uiUserId) && $uiUserId!=='') {
+            $messageId=(int)($result['result']['message_id']??$payload['message_id']??0);
+            if($messageId>0 && is_string($uiScreen) && $uiScreen!=='') {
+                $this->db->execute('INSERT INTO telegram_ui_state(user_id,chat_id,message_id,screen,context_id,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET chat_id=excluded.chat_id,message_id=excluded.message_id,screen=excluded.screen,context_id=excluded.context_id,updated_at=excluded.updated_at',[
+                    $uiUserId,(string)($payload['chat_id']??''),$messageId,$uiScreen,is_string($uiContextId)?$uiContextId:null,time()
+                ]);
+            }
+        }
     }
     private function answer(array $payload): void
     {

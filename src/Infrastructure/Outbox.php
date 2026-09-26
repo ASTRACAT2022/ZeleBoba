@@ -21,6 +21,8 @@ final class Outbox
         'subscription.admin_sync' => 80,
         'gift.create' => 70,
         'telegram.send' => 60,
+        'telegram.rich.send' => 110,
+        'telegram.rich.edit' => 110,
         'telegram.answer' => 60,
         'compensation.run' => 50,
         'compensation.grant' => 50,
