@@ -110,7 +110,7 @@ final class Screens
             Blocks::paragraph('Выберите устройство — покажем короткую инструкцию.'),
             Blocks::buttons([Blocks::button('iPhone', 'ui:connect:iphone'), Blocks::button('Android', 'ui:connect:android')]),
             Blocks::buttons([Blocks::button('Windows', 'ui:connect:windows'), Blocks::button('macOS', 'ui:connect:macos')]),
-            Blocks::buttons([Blocks::button('Linux', 'ui:connect:linux'), Blocks::button('OpenWrt', 'ui:connect:openwrt')]),
+            Blocks::buttons([Blocks::button('Linux', 'ui:connect:linux')]),
             Blocks::buttons([Blocks::button('← На главную', 'ui:home')]),
             self::footer(),
         ]];
@@ -121,14 +121,13 @@ final class Screens
         return ['blocks' => [
             Blocks::heading('Подключение · '.$device, 1),
             Blocks::list([
-                ['value'=>1, 'blocks'=>[Blocks::paragraph('Установите VPN-клиент для '.$device.'.')]],
-                ['value'=>2, 'blocks'=>[Blocks::paragraph('Нажмите «Добавить ASTRACAT».')]],
-                ['value'=>3, 'blocks'=>[Blocks::paragraph('Подтвердите добавление конфигурации.')]],
-                ['value'=>4, 'blocks'=>[Blocks::paragraph('Включите VPN в приложении.')]],
+                ['value'=>1, 'blocks'=>[Blocks::paragraph('Установите Happ или Incy для '.$device.'.')]],
+                ['value'=>2, 'blocks'=>[Blocks::paragraph('Нажмите «Скопировать ссылку» ниже.')]],
+                ['value'=>3, 'blocks'=>[Blocks::paragraph('Откройте Happ или Incy и нажмите «+».')]],
+                ['value'=>4, 'blocks'=>[Blocks::paragraph('Вставьте ссылку из буфера обмена.')]],
+                ['value'=>5, 'blocks'=>[Blocks::paragraph('Готово — включите VPN в клиенте.')]],
             ]),
-            Blocks::paragraph('Подписка готова к подключению.'),
-            ...($subscriptionUrl ? [Blocks::buttons([Blocks::urlButton('Добавить ASTRACAT', $subscriptionUrl, 'primary')]), Blocks::buttons([Blocks::copyButton('Скопировать ссылку', $subscriptionUrl)])] : [Blocks::paragraph('Ссылка подключения появится после активации подписки.')]),
-            Blocks::details('⚙ Ручная настройка', [Blocks::paragraph($subscriptionUrl ?? 'Ссылка подключения появится после активации подписки.')]),
+            ...($subscriptionUrl ? [Blocks::buttons([Blocks::copyButton('Скопировать ссылку', $subscriptionUrl)])] : [Blocks::paragraph('Ссылка подключения появится после активации подписки.')]),
             Blocks::buttons([Blocks::button('← Выбрать устройство', 'ui:connect')]),
             self::footer(),
         ]];
@@ -346,7 +345,6 @@ final class Screens
             'connect_windows' => ['label' => 'Инструкция · Windows', 'rich_message' => self::buildConnectionGuideScreen('Windows', $demoSubscription['subscription_url'])],
             'connect_macos' => ['label' => 'Инструкция · macOS', 'rich_message' => self::buildConnectionGuideScreen('macOS', $demoSubscription['subscription_url'])],
             'connect_linux' => ['label' => 'Инструкция · Linux', 'rich_message' => self::buildConnectionGuideScreen('Linux', $demoSubscription['subscription_url'])],
-            'connect_openwrt' => ['label' => 'Инструкция · OpenWrt', 'rich_message' => self::buildConnectionGuideScreen('OpenWrt', $demoSubscription['subscription_url'])],
             'plans' => ['label' => 'Продление', 'rich_message' => self::buildPlansScreen($demoPlans)],
             'plan_1' => ['label' => '1 месяц · 199 ₽', 'rich_message' => self::buildSelectedPlanScreen($demoPlans[0])],
             'plan_3' => ['label' => '3 месяца · 597 ₽', 'rich_message' => self::buildSelectedPlanScreen($demoPlans[1])],

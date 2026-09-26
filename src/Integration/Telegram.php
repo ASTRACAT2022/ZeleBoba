@@ -289,7 +289,7 @@ final class Telegram
         if (str_starts_with($screen, 'connect-')) {
             $device = substr($screen, 8);
             $subscription = $this->db->one("SELECT subscription_url FROM subscriptions WHERE user_id=? AND status='active' AND expires_at>? AND subscription_url IS NOT NULL ORDER BY expires_at DESC LIMIT 1", [$user['id'], time()]);
-            $devices = ['iphone'=>'iPhone','android'=>'Android','windows'=>'Windows','macos'=>'macOS','linux'=>'Linux','openwrt'=>'OpenWrt'];
+            $devices = ['iphone'=>'iPhone','android'=>'Android','windows'=>'Windows','macos'=>'macOS','linux'=>'Linux'];
             return $ui->buildConnectionGuideScreen($devices[$device] ?? 'устройство', $subscription['subscription_url'] ?? null);
         }
         if ($screen === 'servers') return $ui->buildServersScreen([]);
@@ -590,7 +590,7 @@ final class Telegram
             if(isset($screenMap[$action])){ $this->uiEditFromCallback($updateId,$tg,$user,$screenMap[$action],'',$callback); return; }
             if(str_starts_with($action,'connect:')){
                 $device=substr($action,8);
-                if(in_array($device,['iphone','android','windows','macos','linux','openwrt'],true)) $this->uiEditFromCallback($updateId,$tg,$user,'connect-'.$device,'',$callback);
+                if(in_array($device,['iphone','android','windows','macos','linux'],true)) $this->uiEditFromCallback($updateId,$tg,$user,'connect-'.$device,'',$callback);
                 else $this->uiEditFromCallback($updateId,$tg,$user,'connect','',$callback);
                 return;
             }

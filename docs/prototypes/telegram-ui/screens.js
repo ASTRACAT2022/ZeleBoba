@@ -477,10 +477,6 @@ window.TG_UI_SCREENS = {
                         {
                             "text": "Linux",
                             "callback_data": "ui:connect:linux"
-                        },
-                        {
-                            "text": "OpenWrt",
-                            "callback_data": "ui:connect:openwrt"
                         }
                     ],
                     "align": "center"
@@ -519,7 +515,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Установите VPN-клиент для iPhone."
+                                    "text": "Установите Happ или Incy для iPhone."
                                 }
                             ]
                         },
@@ -528,7 +524,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Нажмите «Добавить ASTRACAT»."
+                                    "text": "Нажмите «Скопировать ссылку» ниже."
                                 }
                             ]
                         },
@@ -537,7 +533,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Подтвердите добавление конфигурации."
+                                    "text": "Откройте Happ или Incy и нажмите «+»."
                                 }
                             ]
                         },
@@ -546,27 +542,21 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Включите VPN в приложении."
+                                    "text": "Вставьте ссылку из буфера обмена."
+                                }
+                            ]
+                        },
+                        {
+                            "value": 5,
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "Готово — включите VPN в клиенте."
                                 }
                             ]
                         }
                     ],
                     "is_ordered": true
-                },
-                {
-                    "type": "paragraph",
-                    "text": "Подписка готова к подключению."
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "Добавить ASTRACAT",
-                            "url": "https://example.invalid/subscription/demo",
-                            "style": "primary"
-                        }
-                    ],
-                    "align": "center"
                 },
                 {
                     "type": "buttons",
@@ -579,16 +569,6 @@ window.TG_UI_SCREENS = {
                         }
                     ],
                     "align": "center"
-                },
-                {
-                    "type": "details",
-                    "summary": "⚙ Ручная настройка",
-                    "blocks": [
-                        {
-                            "type": "paragraph",
-                            "text": "https://example.invalid/subscription/demo"
-                        }
-                    ]
                 },
                 {
                     "type": "buttons",
@@ -624,7 +604,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Установите VPN-клиент для Android."
+                                    "text": "Установите Happ или Incy для Android."
                                 }
                             ]
                         },
@@ -633,7 +613,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Нажмите «Добавить ASTRACAT»."
+                                    "text": "Нажмите «Скопировать ссылку» ниже."
                                 }
                             ]
                         },
@@ -642,7 +622,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Подтвердите добавление конфигурации."
+                                    "text": "Откройте Happ или Incy и нажмите «+»."
                                 }
                             ]
                         },
@@ -651,27 +631,21 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Включите VPN в приложении."
+                                    "text": "Вставьте ссылку из буфера обмена."
+                                }
+                            ]
+                        },
+                        {
+                            "value": 5,
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "Готово — включите VPN в клиенте."
                                 }
                             ]
                         }
                     ],
                     "is_ordered": true
-                },
-                {
-                    "type": "paragraph",
-                    "text": "Подписка готова к подключению."
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "Добавить ASTRACAT",
-                            "url": "https://example.invalid/subscription/demo",
-                            "style": "primary"
-                        }
-                    ],
-                    "align": "center"
                 },
                 {
                     "type": "buttons",
@@ -684,16 +658,6 @@ window.TG_UI_SCREENS = {
                         }
                     ],
                     "align": "center"
-                },
-                {
-                    "type": "details",
-                    "summary": "⚙ Ручная настройка",
-                    "blocks": [
-                        {
-                            "type": "paragraph",
-                            "text": "https://example.invalid/subscription/demo"
-                        }
-                    ]
                 },
                 {
                     "type": "buttons",
@@ -729,7 +693,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Установите VPN-клиент для Windows."
+                                    "text": "Установите Happ или Incy для Windows."
                                 }
                             ]
                         },
@@ -738,7 +702,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Нажмите «Добавить ASTRACAT»."
+                                    "text": "Нажмите «Скопировать ссылку» ниже."
                                 }
                             ]
                         },
@@ -747,7 +711,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Подтвердите добавление конфигурации."
+                                    "text": "Откройте Happ или Incy и нажмите «+»."
                                 }
                             ]
                         },
@@ -756,27 +720,21 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Включите VPN в приложении."
+                                    "text": "Вставьте ссылку из буфера обмена."
+                                }
+                            ]
+                        },
+                        {
+                            "value": 5,
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "Готово — включите VPN в клиенте."
                                 }
                             ]
                         }
                     ],
                     "is_ordered": true
-                },
-                {
-                    "type": "paragraph",
-                    "text": "Подписка готова к подключению."
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "Добавить ASTRACAT",
-                            "url": "https://example.invalid/subscription/demo",
-                            "style": "primary"
-                        }
-                    ],
-                    "align": "center"
                 },
                 {
                     "type": "buttons",
@@ -789,16 +747,6 @@ window.TG_UI_SCREENS = {
                         }
                     ],
                     "align": "center"
-                },
-                {
-                    "type": "details",
-                    "summary": "⚙ Ручная настройка",
-                    "blocks": [
-                        {
-                            "type": "paragraph",
-                            "text": "https://example.invalid/subscription/demo"
-                        }
-                    ]
                 },
                 {
                     "type": "buttons",
@@ -834,7 +782,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Установите VPN-клиент для macOS."
+                                    "text": "Установите Happ или Incy для macOS."
                                 }
                             ]
                         },
@@ -843,7 +791,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Нажмите «Добавить ASTRACAT»."
+                                    "text": "Нажмите «Скопировать ссылку» ниже."
                                 }
                             ]
                         },
@@ -852,7 +800,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Подтвердите добавление конфигурации."
+                                    "text": "Откройте Happ или Incy и нажмите «+»."
                                 }
                             ]
                         },
@@ -861,27 +809,21 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Включите VPN в приложении."
+                                    "text": "Вставьте ссылку из буфера обмена."
+                                }
+                            ]
+                        },
+                        {
+                            "value": 5,
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "Готово — включите VPN в клиенте."
                                 }
                             ]
                         }
                     ],
                     "is_ordered": true
-                },
-                {
-                    "type": "paragraph",
-                    "text": "Подписка готова к подключению."
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "Добавить ASTRACAT",
-                            "url": "https://example.invalid/subscription/demo",
-                            "style": "primary"
-                        }
-                    ],
-                    "align": "center"
                 },
                 {
                     "type": "buttons",
@@ -894,16 +836,6 @@ window.TG_UI_SCREENS = {
                         }
                     ],
                     "align": "center"
-                },
-                {
-                    "type": "details",
-                    "summary": "⚙ Ручная настройка",
-                    "blocks": [
-                        {
-                            "type": "paragraph",
-                            "text": "https://example.invalid/subscription/demo"
-                        }
-                    ]
                 },
                 {
                     "type": "buttons",
@@ -939,7 +871,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Установите VPN-клиент для Linux."
+                                    "text": "Установите Happ или Incy для Linux."
                                 }
                             ]
                         },
@@ -948,7 +880,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Нажмите «Добавить ASTRACAT»."
+                                    "text": "Нажмите «Скопировать ссылку» ниже."
                                 }
                             ]
                         },
@@ -957,7 +889,7 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Подтвердите добавление конфигурации."
+                                    "text": "Откройте Happ или Incy и нажмите «+»."
                                 }
                             ]
                         },
@@ -966,27 +898,21 @@ window.TG_UI_SCREENS = {
                             "blocks": [
                                 {
                                     "type": "paragraph",
-                                    "text": "Включите VPN в приложении."
+                                    "text": "Вставьте ссылку из буфера обмена."
+                                }
+                            ]
+                        },
+                        {
+                            "value": 5,
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "Готово — включите VPN в клиенте."
                                 }
                             ]
                         }
                     ],
                     "is_ordered": true
-                },
-                {
-                    "type": "paragraph",
-                    "text": "Подписка готова к подключению."
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "Добавить ASTRACAT",
-                            "url": "https://example.invalid/subscription/demo",
-                            "style": "primary"
-                        }
-                    ],
-                    "align": "center"
                 },
                 {
                     "type": "buttons",
@@ -999,121 +925,6 @@ window.TG_UI_SCREENS = {
                         }
                     ],
                     "align": "center"
-                },
-                {
-                    "type": "details",
-                    "summary": "⚙ Ручная настройка",
-                    "blocks": [
-                        {
-                            "type": "paragraph",
-                            "text": "https://example.invalid/subscription/demo"
-                        }
-                    ]
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "← Выбрать устройство",
-                            "callback_data": "ui:connect"
-                        }
-                    ],
-                    "align": "center"
-                },
-                {
-                    "type": "footer",
-                    "text": "ASTRACAT  •  status.astracat.network"
-                }
-            ]
-        }
-    },
-    "connect_openwrt": {
-        "label": "Инструкция · OpenWrt",
-        "rich_message": {
-            "blocks": [
-                {
-                    "type": "heading",
-                    "text": "Подключение · OpenWrt",
-                    "size": 1
-                },
-                {
-                    "type": "list",
-                    "items": [
-                        {
-                            "value": 1,
-                            "blocks": [
-                                {
-                                    "type": "paragraph",
-                                    "text": "Установите VPN-клиент для OpenWrt."
-                                }
-                            ]
-                        },
-                        {
-                            "value": 2,
-                            "blocks": [
-                                {
-                                    "type": "paragraph",
-                                    "text": "Нажмите «Добавить ASTRACAT»."
-                                }
-                            ]
-                        },
-                        {
-                            "value": 3,
-                            "blocks": [
-                                {
-                                    "type": "paragraph",
-                                    "text": "Подтвердите добавление конфигурации."
-                                }
-                            ]
-                        },
-                        {
-                            "value": 4,
-                            "blocks": [
-                                {
-                                    "type": "paragraph",
-                                    "text": "Включите VPN в приложении."
-                                }
-                            ]
-                        }
-                    ],
-                    "is_ordered": true
-                },
-                {
-                    "type": "paragraph",
-                    "text": "Подписка готова к подключению."
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "Добавить ASTRACAT",
-                            "url": "https://example.invalid/subscription/demo",
-                            "style": "primary"
-                        }
-                    ],
-                    "align": "center"
-                },
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "text": "Скопировать ссылку",
-                            "copy_text": {
-                                "text": "https://example.invalid/subscription/demo"
-                            }
-                        }
-                    ],
-                    "align": "center"
-                },
-                {
-                    "type": "details",
-                    "summary": "⚙ Ручная настройка",
-                    "blocks": [
-                        {
-                            "type": "paragraph",
-                            "text": "https://example.invalid/subscription/demo"
-                        }
-                    ]
                 },
                 {
                     "type": "buttons",
