@@ -15,7 +15,7 @@
 <section class="panel detail primary-subscription" aria-labelledby="sub-state">
   <div class="section-heading subscription-primary-heading" >
     <h2 id="sub-state">{{ primary.plan_name|default('Основная подписка') }}</h2>
-    <span class="badge active">{{ primary.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
+    <span class="badge active">{{ primary.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>{% if primary.plan_archived %}<span class="badge plain">Архив · тариф больше не продаётся</span>{% endif %}
   </div>
   <div class="meta-grid">
     <div class="meta-item"><span class="meta-label">Статус</span><span class="meta-value">● Работает</span></div>
@@ -25,7 +25,7 @@
   </div>
   <div class="inline-layout-3">
     {% if primary.subscription_url %}<button class="button" type="button" data-copy="{{ primary.subscription_url }}" data-copy-label="Ссылка скопирована">Скопировать ссылку</button>{% endif %}
-    {% if primary.status == 'active' %}<form method="post" action="/subscriptions/{{ primary.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ primary.id }}:{{ now }}"><button class="button secondary">Продлить подписку</button></form>{% endif %}
+    {% if primary.status == 'active' and not primary.plan_archived %}<form method="post" action="/subscriptions/{{ primary.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ primary.id }}:{{ now }}"><button class="button secondary">Продлить подписку</button></form>{% endif %}
     <a class="button ghost" href="/plans">Сменить тариф</a>
   </div>
   {% if primary.subscription_url %}<p class="hint mt-12">Скопируйте ссылку, откройте Happ или Incy, нажмите «+» и вставьте её из буфера.</p>{% endif %}
@@ -39,12 +39,12 @@
   {% for s in active %}{% if s.id != primary.id %}
     <article class="subscription-list-item">
       <div class="subscription-list-item__heading">
-        <div class="subscription-list-item__info"><strong>{{ s.plan_name|default('Подписка') }}</strong><small class="muted">до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
+        <div class="subscription-list-item__info"><strong>{{ s.plan_name|default('Подписка') }}</strong><small class="muted">{% if s.plan_archived %}<span class="badge plain">Архив · тариф больше не продаётся</span><br>{% endif %}до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
         <span class="badge active">{{ s.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
       </div>
       <div class="subscription-list-item__actions">
         {% if s.subscription_url %}<button class="button small secondary" type="button" data-copy="{{ s.subscription_url }}" data-copy-label="Ссылка скопирована">Скопировать ссылку</button>{% endif %}
-        {% if s.status == 'active' %}<form method="post" action="/subscriptions/{{ s.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ s.id }}:{{ now }}"><button class="button small secondary">Продлить</button></form>{% endif %}
+        {% if s.status == 'active' and not s.plan_archived %}<form method="post" action="/subscriptions/{{ s.id }}/renew"><input type="hidden" name="_csrf" value="{{ user.csrf }}"><input type="hidden" name="key" value="{{ s.id }}:{{ now }}"><button class="button small secondary">Продлить</button></form>{% endif %}
       </div>
     </article>
   {% endif %}{% endfor %}
