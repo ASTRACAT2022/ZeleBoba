@@ -76,6 +76,98 @@ final class ReferralService
             }
         });
     }
+    /** Count the first successful, non-renewal subscription payment from a referred user. */
+    public function processPaidSubscription(string $orderId): void
+    {
+        $settings=$this->subscriptionRewardSettings();
+        if (!$this->programEnabled() || !$settings['enabled']) return;
+        $this->db->transaction(function() use ($orderId,$settings) {
+            $order=$this->db->one("SELECT id,user_id,plan_id,status,renewal_subscription_id FROM orders WHERE id=?",[$orderId]);
+            if (!$order || !in_array($order['status'],['paid','fulfilled'],true) || $order['renewal_subscription_id']!==null) return;
+            $referral=$this->db->one('SELECT id,referred_by_id FROM users WHERE id=?'.$this->db->lock(),[$order['user_id']]);
+            $referrerId=$referral['referred_by_id']??null;
+            if (!$referrerId || $referrerId===$referral['id']) return;
+            $referrer=$this->db->one('SELECT id,telegram_id FROM users WHERE id=?'.$this->db->lock(),[$referrerId]);
+            if (!$referrer) return;
+
+            $inserted=$this->db->execute('INSERT INTO referral_subscription_payments(id,referrer_id,referral_id,order_id,paid_at) VALUES(?,?,?,?,?) ON CONFLICT(referral_id) DO NOTHING',[
+                Database::id(),$referrerId,$referral['id'],$orderId,time(),
+            ]);
+            if (!$inserted) return;
+            $paidCount=(int)$this->db->one('SELECT COUNT(*) AS c FROM referral_subscription_payments WHERE referrer_id=?',[$referrerId])['c'];
+            $now=time();
+            $this->db->execute('INSERT INTO referral_subscription_progress(referrer_id,paid_in_cycle,referrals_required,months_per_reward,updated_at) VALUES(?,0,?,?,?) ON CONFLICT(referrer_id) DO NOTHING',[$referrerId,$settings['required'],$settings['months'],$now]);
+            $progress=$this->db->one('SELECT * FROM referral_subscription_progress WHERE referrer_id=?'.$this->db->lock(),[$referrerId]);
+            if ((int)$progress['paid_in_cycle']===0) {
+                $this->db->execute('UPDATE referral_subscription_progress SET referrals_required=?,months_per_reward=?,updated_at=? WHERE referrer_id=?',[$settings['required'],$settings['months'],$now,$referrerId]);
+                $progress['referrals_required']=$settings['required'];
+                $progress['months_per_reward']=$settings['months'];
+            }
+            $inCycle=(int)$progress['paid_in_cycle']+1;
+            $required=(int)$progress['referrals_required'];
+            $months=(int)$progress['months_per_reward'];
+            if ($inCycle<$required) {
+                $this->db->execute('UPDATE referral_subscription_progress SET paid_in_cycle=?,updated_at=? WHERE referrer_id=?',[$inCycle,$now,$referrerId]);
+                return;
+            }
+
+            $milestone=(int)($this->db->one('SELECT COALESCE(MAX(milestone),0)+1 AS n FROM referral_subscription_rewards WHERE referrer_id=?',[$referrerId])['n']??1);
+            $rewardId=Database::id();
+            $subscriptionId=$this->grantReferralMonths($referrerId,(string)$order['plan_id'],$rewardId,$months);
+            $this->db->execute('INSERT INTO referral_subscription_rewards(id,referrer_id,milestone,subscription_id,created_at,paid_count_at_award,months_awarded) VALUES(?,?,?,?,?,?,?) ON CONFLICT(referrer_id,milestone) DO NOTHING',[$rewardId,$referrerId,$milestone,$subscriptionId,$now,$paidCount,$months]);
+            $this->db->execute('UPDATE referral_subscription_progress SET paid_in_cycle=0,referrals_required=?,months_per_reward=?,updated_at=? WHERE referrer_id=?',[$settings['required'],$settings['months'],$now,$referrerId]);
+            $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)',[Database::id(),'system','referral.month_awarded',$referrerId,$now]);
+            if ($referrer['telegram_id']) $this->outbox->enqueue('telegram.send','referral-month:'.$rewardId,[
+                'chat_id'=>$referrer['telegram_id'],'text'=>'Поздравляем! '.$required.' приглашённых оплатили подписку — вам начислено '.$months.' мес. ASTRACAT VPN.',
+            ]);
+        });
+    }
+    private function grantReferralMonths(string $userId,string $fallbackPlanId,string $rewardId,int $months): string
+    {
+        $now=time();
+        $sub=$this->db->one("SELECT * FROM subscriptions WHERE user_id=? AND status IN ('active','provisioning') AND expires_at>? ORDER BY expires_at DESC LIMIT 1".$this->db->lock(),[$userId,$now]);
+        if ($sub) {
+            $expires=(new \App\Subscriptions\SubscriptionService($this->db,$this->outbox))->expiryAfter(max($now,(int)$sub['expires_at']),0,$months);
+            $this->db->execute('UPDATE subscriptions SET expires_at=?,updated_at=?,version=version+1 WHERE id=?',[$expires,$now,$sub['id']]);
+            $topic=$sub['status']==='provisioning'?'subscription.provision':'subscription.extend';
+            $this->outbox->enqueue($topic,'referral-month:'.$rewardId.':'.$sub['id'],['subscription_id'=>$sub['id']]);
+            return (string)$sub['id'];
+        }
+
+        // Reuse the referrer's most recent tariff; if they have never bought one,
+        // use the tariff from the qualifying invitee's successful order.
+        $plan=$this->db->one("SELECT p.* FROM orders o JOIN plans p ON p.id=o.plan_id WHERE o.user_id=? AND o.status IN ('paid','fulfilled') ORDER BY COALESCE(o.paid_at,o.created_at) DESC LIMIT 1",[$userId]);
+        $plan??=$this->db->one('SELECT * FROM plans WHERE id=?',[$fallbackPlanId]);
+        if (!$plan) throw new \RuntimeException('Referral month cannot be provisioned without a plan');
+        $id=Database::id();
+        $version=$this->db->one('SELECT id FROM plan_versions WHERE plan_id=? ORDER BY version_number DESC LIMIT 1',[$plan['id']]);
+        $expires=(new \App\Subscriptions\SubscriptionService($this->db,$this->outbox))->expiryAfter($now,0,$months);
+        $trafficBytes=(int)$plan['traffic_bytes'];$devices=(int)$plan['devices'];
+        $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,traffic_used_gb,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,NULL,?,'provisioning',?,?,?,?,0,?,?,'pending',?,?,?)",[
+            $id,$userId,$expires,$now,$trafficBytes/1073741824,$devices,$plan['id'],$version['id']??null,$now,$trafficBytes,$now,
+        ]);
+        $driver=(string)($this->config['PROVISION_DRIVER']??'demo');
+        $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,state,created_at,updated_at) VALUES(?,?,?,'pending',?,?)",[Database::id(),$id,$driver,$now,$now]);
+        $this->outbox->enqueue('subscription.provision','referral-month:'.$rewardId.':'.$id,['subscription_id'=>$id]);
+        return $id;
+    }
+    private function programEnabled(): bool
+    {
+        $row=$this->db->one("SELECT value FROM app_settings WHERE name='REFERRAL_PROGRAM_ENABLED'");
+        return ($row['value']??$this->config['REFERRAL_PROGRAM_ENABLED']??'1')==='1';
+    }
+    private function subscriptionRewardSettings(): array
+    {
+        $read=function(string $key,string $fallback):string {
+            $row=$this->db->one('SELECT value FROM app_settings WHERE name=?',[$key]);
+            return (string)($row['value']??$this->config[$key]??$fallback);
+        };
+        return [
+            'enabled'=>$read('REFERRAL_SUBSCRIPTION_REWARD_ENABLED','1')==='1',
+            'required'=>max(1,min(100,(int)$read('REFERRAL_SUBSCRIPTION_REWARD_INVITES','5'))),
+            'months'=>max(1,min(12,(int)$read('REFERRAL_SUBSCRIPTION_REWARD_MONTHS','1'))),
+        ];
+    }
     private function commissionPercent(array $referrer, bool $isFirstPayment): int
     {
         $base = (int)($referrer['referral_commission_percent'] ?? $this->config['REFERRAL_COMMISSION_PERCENT'] ?? 25);
@@ -103,10 +195,20 @@ final class ReferralService
     public function stats(string $userId): array
     {
         $code = $this->ensureCode($userId);
-        $referrals = $this->db->all('SELECT id,email,telegram_id,created_at,has_made_first_topup FROM users WHERE referred_by_id=? ORDER BY created_at DESC', [$userId]);
+        $referrals = $this->db->all('SELECT u.id,u.email,u.telegram_id,u.created_at,u.has_made_first_topup,CASE WHEN EXISTS(SELECT 1 FROM referral_subscription_payments rp WHERE rp.referral_id=u.id) THEN 1 ELSE 0 END AS subscription_paid FROM users u WHERE u.referred_by_id=? ORDER BY u.created_at DESC', [$userId]);
         $earnings = (int)($this->db->one('SELECT COALESCE(SUM(amount_kopeks),0) AS s FROM referral_earnings WHERE user_id=?', [$userId])['s'] ?? 0);
         $paid = (int)($this->db->one('SELECT COUNT(*) AS c FROM users WHERE referred_by_id=? AND has_made_first_topup=1', [$userId])['c'] ?? 0);
-        return ['code' => $code, 'referrals' => $referrals, 'earnings_kopeks' => $earnings, 'paid_referrals' => $paid];
+        $subscriptionPaid=(int)($this->db->one('SELECT COUNT(*) AS c FROM referral_subscription_payments WHERE referrer_id=?',[$userId])['c']??0);
+        $freeMonths=(int)($this->db->one('SELECT COALESCE(SUM(months_awarded),0) AS c FROM referral_subscription_rewards WHERE referrer_id=?',[$userId])['c']??0);
+        $settings=$this->subscriptionRewardSettings();
+        $progress=$this->db->one('SELECT paid_in_cycle,referrals_required,months_per_reward FROM referral_subscription_progress WHERE referrer_id=?',[$userId]);
+        $paidInCycle=(int)($progress['paid_in_cycle']??0);
+        $required=(int)($progress['referrals_required']??$settings['required']);
+        $months=(int)($progress['months_per_reward']??$settings['months']);
+        return ['code' => $code, 'referrals' => $referrals, 'earnings_kopeks' => $earnings, 'paid_referrals' => $paid,
+            'subscription_paid_referrals'=>$subscriptionPaid,'free_months_earned'=>$freeMonths,
+            'subscription_reward_enabled'=>$settings['enabled'],'subscription_reward_months_per_cycle'=>$months,
+            'subscription_paid_progress'=>$paidInCycle,'subscription_paid_required'=>$required,'subscription_paid_to_next'=>max(0,$required-$paidInCycle)];
     }
     /** Create a withdrawal request. */
     public function requestWithdrawal(string $userId, int $amountKopeks, string $details): array

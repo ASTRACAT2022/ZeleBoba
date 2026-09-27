@@ -3,7 +3,7 @@
   <div>
     <p class="eyebrow">Партнёрская программа</p>
     <h1>Рефералы</h1>
-    <p class="muted">Получайте комиссию с пополнений приглашённых.</p>
+    <p class="muted">Бесплатное продление за оплативших приглашённых, плюс комиссия с пополнений.</p>
   </div>
   <div class="price">{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</div>
 </header>
@@ -20,6 +20,15 @@
   </div>
 </section>
 
+<section class="panel detail" aria-labelledby="referral-months-title">
+  <div class="panel-head"><div><h2 id="referral-months-title">{% if stats.subscription_reward_enabled %}{{ stats.subscription_paid_required }} оплат подписки = {{ stats.subscription_reward_months_per_cycle }} мес. в подарок{% else %}Бонус за приглашённых выключен{% endif %}</h2><p class="muted">Считаются первые успешные оплаты приглашённых. Одно приглашение учитывается один раз; продления и пополнения баланса не входят.</p></div></div>
+  <div class="stat-grid">
+    <div class="stat-card"><span class="stat-label">Приглашённые с оплаченной подпиской</span><span class="stat-value">{{ stats.subscription_paid_referrals }}</span></div>
+    <div class="stat-card accent"><span class="stat-label">Бесплатных месяцев начислено</span><span class="stat-value">{{ stats.free_months_earned }}</span></div>
+    {% if stats.subscription_reward_enabled %}<div class="stat-card"><span class="stat-label">До следующей награды</span><span class="stat-value">{{ stats.subscription_paid_progress }} / {{ stats.subscription_paid_required }}</span><span class="stat-meta">Ещё {{ stats.subscription_paid_to_next }} оплат</span></div>{% endif %}
+  </div>
+</section>
+
 <section class="panel">
   <div class="panel-head"><h2>Статистика</h2></div>
   {% if stats.referrals %}
@@ -28,14 +37,14 @@
     <tbody>{% for r in stats.referrals %}<tr>
       <td data-label="Пользователь">{{ r.email ?? ('TG ' ~ r.telegram_id) }}</td>
       <td data-label="Регистрация">{{ r.created_at|date('d.m.Y') }}</td>
-      <td class="table-actions" data-label="Статус"><span class="badge {{ r.has_made_first_topup ? 'fulfilled' : 'pending' }}">{{ r.has_made_first_topup ? 'Оплатил' : 'Не оплатил' }}</span></td>
+      <td class="table-actions" data-label="Статус"><span class="badge {{ r.subscription_paid ? 'fulfilled' : 'pending' }}">{{ r.subscription_paid ? 'Оплата засчитана' : 'Пока не засчитан' }}</span></td>
     </tr>{% endfor %}</tbody>
   </table></div>
   {% else %}<div class="empty"><span aria-hidden="true">↗</span><h3>Пока нет рефералов</h3><p>Поделитесь ссылкой — статистика появится здесь.</p></div>{% endif %}
   <div class="panel-body pt-0" >
     <div class="stat-grid">
       <div class="stat-card"><span class="stat-label">Приглашено</span><span class="stat-value">{{ stats.referrals|length }}</span></div>
-      <div class="stat-card"><span class="stat-label">Оплативших</span><span class="stat-value">{{ stats.paid_referrals }}</span></div>
+      <div class="stat-card"><span class="stat-label">С пополнением баланса</span><span class="stat-value">{{ stats.paid_referrals }}</span></div>
       <div class="stat-card accent"><span class="stat-label">Заработано</span><span class="stat-value">{{ (stats.earnings_kopeks / 100)|round(0, 'floor') }} ₽</span></div>
     </div>
   </div>

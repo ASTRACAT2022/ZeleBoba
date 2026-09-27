@@ -13,6 +13,7 @@ final class Settings
         'PAYMENT_DRIVER'=>'demo','PROVISION_DRIVER'=>'demo',
         'PLATEGA_ENABLED'=>'0','PLATEGA_MERCHANT_ID'=>'','PLATEGA_SECRET'=>'','PLATEGA_API_BASE'=>'https://app.platega.io',
         'REFERRAL_PROGRAM_ENABLED'=>'1','REFERRAL_MINIMUM_TOPUP_KOPEKS'=>'10000','REFERRAL_FIRST_TOPUP_BONUS_KOPEKS'=>'10000','REFERRAL_INVITER_BONUS_KOPEKS'=>'10000','REFERRAL_COMMISSION_PERCENT'=>'25','REFERRAL_FIRST_PAYMENT_COMMISSION_PERCENT'=>'','REFERRAL_RECURRING_COMMISSION_TIERS'=>'','REFERRAL_MAX_COMMISSION_PAYMENTS'=>'0',
+        'REFERRAL_SUBSCRIPTION_REWARD_ENABLED'=>'1','REFERRAL_SUBSCRIPTION_REWARD_INVITES'=>'5','REFERRAL_SUBSCRIPTION_REWARD_MONTHS'=>'1',
         'REFERRAL_WITHDRAWAL_ENABLED'=>'0','REFERRAL_WITHDRAWAL_MIN_AMOUNT_KOPEKS'=>'100000','REFERRAL_WITHDRAWAL_COOLDOWN_DAYS'=>'30','REFERRAL_WITHDRAWAL_SUSPICIOUS_MIN_DEPOSIT_KOPEKS'=>'50000','REFERRAL_WITHDRAWAL_SUSPICIOUS_MAX_DEPOSITS_PER_MONTH'=>'10',
         'CABINET_GIFT_ENABLED'=>'0',
         'TRIAL_DURATION_DAYS'=>'3','TRIAL_TRAFFIC_LIMIT_GB'=>'10','TRIAL_DEVICE_LIMIT'=>'2','TRIAL_ADD_REMAINING_DAYS_TO_PAID'=>'0','TRIAL_PAYMENT_ENABLED'=>'0','TRIAL_ACTIVATION_PRICE'=>'0',
@@ -100,7 +101,7 @@ final class Settings
         if (mb_strlen($v['SMTP_FROM_NAME'])>60) throw new BillingError('SMTP_FROM_NAME: до 60 символов.');
         if ($v['PLATEGA_ENABLED']==='1' && ($v['PLATEGA_MERCHANT_ID']==='' || $v['PLATEGA_SECRET']==='')) throw new BillingError('Platega включена, но не заполнены ключи.');
         if ($v['PLATEGA_API_BASE']!=='' && (!filter_var($v['PLATEGA_API_BASE'],FILTER_VALIDATE_URL) || !str_starts_with($v['PLATEGA_API_BASE'],'https://'))) throw new BillingError('PLATEGA_API_BASE: нужен HTTPS URL.');
-        foreach (['REFERRAL_PROGRAM_ENABLED','REFERRAL_WITHDRAWAL_ENABLED','CABINET_GIFT_ENABLED','TRIAL_ADD_REMAINING_DAYS_TO_PAID','TRIAL_PAYMENT_ENABLED','EARLY_RENEWAL_BONUS_ENABLED'] as $key) if (!in_array($v[$key],['0','1'],true)) throw new BillingError('Некорректная настройка '.$key);
+        foreach (['REFERRAL_PROGRAM_ENABLED','REFERRAL_SUBSCRIPTION_REWARD_ENABLED','REFERRAL_WITHDRAWAL_ENABLED','CABINET_GIFT_ENABLED','TRIAL_ADD_REMAINING_DAYS_TO_PAID','TRIAL_PAYMENT_ENABLED','EARLY_RENEWAL_BONUS_ENABLED'] as $key) if (!in_array($v[$key],['0','1'],true)) throw new BillingError('Некорректная настройка '.$key);
         foreach (['TRIAL_DURATION_DAYS','TRIAL_TRAFFIC_LIMIT_GB','TRIAL_DEVICE_LIMIT','TRIAL_ACTIVATION_PRICE'] as $key) if (!preg_match('/^[0-9]{1,6}$/D',$v[$key])) throw new BillingError('Некорректная настройка '.$key);
         foreach (['REFERRAL_MINIMUM_TOPUP_KOPEKS','REFERRAL_FIRST_TOPUP_BONUS_KOPEKS','REFERRAL_INVITER_BONUS_KOPEKS','REFERRAL_WITHDRAWAL_MIN_AMOUNT_KOPEKS','REFERRAL_WITHDRAWAL_COOLDOWN_DAYS','REFERRAL_WITHDRAWAL_SUSPICIOUS_MIN_DEPOSIT_KOPEKS','REFERRAL_WITHDRAWAL_SUSPICIOUS_MAX_DEPOSITS_PER_MONTH'] as $key) if (!preg_match('/^[0-9]{1,10}$/D',$v[$key])) throw new BillingError('Некорректная настройка '.$key);
         if (!preg_match('/^[0-9]{1,3}$/D',$v['REFERRAL_COMMISSION_PERCENT']) || (int)$v['REFERRAL_COMMISSION_PERCENT']>100) throw new BillingError('Комиссия: 0–100%.');
@@ -110,6 +111,8 @@ final class Settings
         if (!preg_match('/^[0-9]{1,2}$/D',$v['AUTORENEW_MAX_FAILS']) || (int)$v['AUTORENEW_MAX_FAILS']<1 || (int)$v['AUTORENEW_MAX_FAILS']>10) throw new BillingError('Автопродление: максимум попыток — от 1 до 10.');
         if (!preg_match('/^[0-9]{1,2}$/D',$v['EARLY_RENEWAL_WINDOW_DAYS']) || (int)$v['EARLY_RENEWAL_WINDOW_DAYS']<1 || (int)$v['EARLY_RENEWAL_WINDOW_DAYS']>30) throw new BillingError('Раннее продление: окно должно быть от 1 до 30 дней.');
         if (!preg_match('/^[0-9]{1,3}$/D',$v['EARLY_RENEWAL_BONUS_DAYS']) || (int)$v['EARLY_RENEWAL_BONUS_DAYS']<1 || (int)$v['EARLY_RENEWAL_BONUS_DAYS']>365) throw new BillingError('Раннее продление: бонус должен быть от 1 до 365 дней.');
+        if (!preg_match('/^[0-9]{1,3}$/D',$v['REFERRAL_SUBSCRIPTION_REWARD_INVITES']) || (int)$v['REFERRAL_SUBSCRIPTION_REWARD_INVITES']<1 || (int)$v['REFERRAL_SUBSCRIPTION_REWARD_INVITES']>100) throw new BillingError('Реферальная награда: число оплативших приглашённых должно быть от 1 до 100.');
+        if (!preg_match('/^[0-9]{1,2}$/D',$v['REFERRAL_SUBSCRIPTION_REWARD_MONTHS']) || (int)$v['REFERRAL_SUBSCRIPTION_REWARD_MONTHS']<1 || (int)$v['REFERRAL_SUBSCRIPTION_REWARD_MONTHS']>12) throw new BillingError('Реферальная награда: срок должен быть от 1 до 12 месяцев.');
         if ($v['APP_ENV']==='prod' && (!$this->db->postgres() || !str_starts_with($v['APP_URL'],'https://'))) throw new BillingError('Боевой режим требует PostgreSQL и HTTPS.');
         if ($v['PURCHASES_ENABLED']==='1') {
             foreach(self::purchaseErrors($v) as $error) throw new BillingError($error);

@@ -298,7 +298,7 @@ final class Application
                     if($job['topic']==='subscription.extend' && preg_match('/^comp-days:[0-9a-f]+:([0-9a-f]+)$/iD',(string)$job['dedup_key'],$match))$job['subscription_id']=$match[1];
                 }
                 unset($job);
-                return $this->render('admin',['jobs'=>$jobs,'recent'=>$db->all('SELECT o.*,u.email FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 30'),'plans'=>$db->all('SELECT * FROM plans ORDER BY price_minor'),'audit'=>$db->all('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 20'),'maintenance'=>$this->app->maintenance->isMaintenance(),'metrics'=>$metrics,'platform'=>$platform]);
+                return $this->render('admin',['jobs'=>$jobs,'plans'=>$db->all('SELECT * FROM plans ORDER BY price_minor'),'audit'=>$db->all('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 20'),'maintenance'=>$this->app->maintenance->isMaintenance(),'metrics'=>$metrics,'platform'=>$platform]);
             case 'retry':
                 $db->transaction(function () use ($db,$id,$uid) {
                     if ($db->execute("UPDATE outbox SET status='pending',attempts=0,available_at=?,locked_until=NULL,lock_token=NULL WHERE id=? AND status='dead'",[time(),$id])) $this->app->billing->audit($uid,'job.retried',$id);

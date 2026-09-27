@@ -1,0 +1,25 @@
+<section class="panel detail" id="referral-rewards">
+  <div class="section-title">
+    <span class="section-number">07</span>
+    <div>
+      <h2>Бонус за приглашённых</h2>
+      <p class="muted">Бесплатное продление за уникальных приглашённых, впервые оплативших подписку.</p>
+    </div>
+  </div>
+  <div class="form-grid">
+    <label>Реферальная награда
+      <select name="REFERRAL_SUBSCRIPTION_REWARD_ENABLED">
+        <option value="0" {{ values.REFERRAL_SUBSCRIPTION_REWARD_ENABLED == '0' ? 'selected' : '' }}>Выключена</option>
+        <option value="1" {{ values.REFERRAL_SUBSCRIPTION_REWARD_ENABLED == '1' ? 'selected' : '' }}>Включена</option>
+      </select>
+    </label>
+    <label>Оплативших приглашённых для награды
+      <input type="number" min="1" max="100" name="REFERRAL_SUBSCRIPTION_REWARD_INVITES" value="{{ values.REFERRAL_SUBSCRIPTION_REWARD_INVITES }}" required>
+      <small>Учитывается первая успешная оплата подписки каждого приглашённого.</small>
+    </label>
+    <label>Бесплатных месяцев за цикл
+      <input type="number" min="1" max="12" name="REFERRAL_SUBSCRIPTION_REWARD_MONTHS" value="{{ values.REFERRAL_SUBSCRIPTION_REWARD_MONTHS }}" required>
+    </label>
+  </div>
+  <p class="muted">Продления и пополнения баланса не считаются. Новые условия применяются со следующего цикла; текущий прогресс сохраняется по прежним условиям.</p>
+</section>

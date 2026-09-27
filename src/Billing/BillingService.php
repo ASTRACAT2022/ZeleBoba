@@ -8,8 +8,10 @@ final class BillingService
 {
     private ?\App\Billing\TopupService $topups = null;
     private ?CreatorService $creators = null;
+    private ?ReferralService $referrals = null;
     public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null, private ?CustomerTimeline $timeline=null) {}
     public function setCreators(CreatorService $creators): void { $this->creators=$creators; }
+    public function setReferrals(ReferralService $referrals): void { $this->referrals=$referrals; }
     public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null, ?string $renewSubscriptionId=null, ?string $landingSlug=null): array
     {
         if ($this->config!==null) {
@@ -152,6 +154,7 @@ final class BillingService
                 ],$op['correlation_id']);
                 $this->db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$op['correlation_id'],'provision:'.$sub]);
             }
+            if (!$renewSub && $order['renewal_subscription_id']===null) $this->referrals?->processPaidSubscription($orderId);
             $this->audit('provider:'.$provider,'payment.settled',$orderId);
             $operations->event($op['id'],'provisioning.queued','processing','Provisioning queued',['metadata'=>['order_id'=>$orderId]]);
         }); if(!($op['existing']??false))$operations->complete($op['id']); } catch (\Throwable $e) { if(!($op['existing']??false))$operations->fail($op['id'],$e); throw $e; }

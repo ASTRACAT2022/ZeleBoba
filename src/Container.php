@@ -89,6 +89,7 @@ final class Container
         $this->billing->setTopups($this->topups);
         $this->promocodes=new PromoCodeService($this->db,$this->outbox,$this->wallet);
         $this->referrals=new ReferralService($this->db,$this->outbox,$this->wallet,$config);
+        $this->billing->setReferrals($this->referrals);
         $this->creators=new CreatorService($this->db);
         $this->billing->setCreators($this->creators);
         $this->gifts=new GiftService($this->db,$this->outbox,$this->wallet,$config);
