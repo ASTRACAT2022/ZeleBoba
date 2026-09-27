@@ -487,12 +487,11 @@ html[data-theme="dark"] .alert-danger { color: var(--color-critical); }
   .sidebar { width: 100%; min-width: 0; }
   .sidebar nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-1); }
   .sidebar nav a { min-width: 0; justify-content: center; padding-inline: var(--space-2); text-align: center; white-space: normal; }
-  .sidebar nav[aria-label="Дополнительная навигация"] a:first-child:nth-last-child(3) { grid-column: 2; }
   .main > header { align-items: flex-start; text-align: left; }
 }
 @media (max-width: 480px) {
   .sidebar nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sidebar nav[aria-label="Дополнительная навигация"] a:last-child:nth-child(3) { grid-column: 1 / -1; justify-self: center; width: calc(50% - var(--space-1)); }
+  .sidebar nav[aria-label="Дополнительная навигация"] a { grid-column: auto; justify-self: stretch; width: auto; }
 }
 @media (max-width: 640px) {
   .meta-grid:has(> .meta-item:nth-child(3):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
