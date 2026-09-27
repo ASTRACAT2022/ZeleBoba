@@ -34,6 +34,27 @@ trait AdminActions
             return $this->render('admin-creators-reconciliation',['last'=>$db->one('SELECT * FROM creator_reconciliation_runs ORDER BY started_at DESC LIMIT 1'),'missing'=>$db->all("SELECT p.id,p.amount_minor,p.paid_at FROM payments p JOIN creator_attributions a ON a.user_id=p.user_id LEFT JOIN creator_commissions c ON c.payment_id=p.id WHERE p.status='succeeded' AND c.id IS NULL LIMIT 100")]);
         }
         if($handler==='admin-plans')return $this->render('admin-plans',['plans'=>$db->all('SELECT * FROM plans ORDER BY active DESC,price_minor')]);
+        if($handler==='admin-plan-delete'){
+            $db->transaction(function()use($db,$id,$uid){
+                if(!$db->one('SELECT id FROM plans WHERE id=?'.$db->lock(),[$id]))throw new BillingError('Тариф не найден.');
+                $references=(int)($db->one('SELECT '
+                    .'(SELECT COUNT(*) FROM orders WHERE plan_id=?) + '
+                    .'(SELECT COUNT(*) FROM subscriptions WHERE plan_id=?) + '
+                    .'(SELECT COUNT(*) FROM subscriptions WHERE renew_plan_id=?) + '
+                    .'(SELECT COUNT(*) FROM order_items WHERE plan_id=?) + '
+                    .'(SELECT COUNT(*) FROM promocodes WHERE plan_id=?) + '
+                    .'(SELECT COUNT(*) FROM guest_purchases WHERE plan_id=?) + '
+                    .'(SELECT COUNT(*) FROM advertising_campaigns WHERE plan_id=?) + '
+                    .'(SELECT COUNT(*) FROM compensations WHERE plan_id=?) AS total',array_fill(0,8,$id))['total']??0);
+                if($references>0)throw new BillingError('Тариф уже связан с заказами, подписками или настройками и сохранён в истории. Скрытые тарифы с такими связями удалить нельзя.');
+                // Versions without orders or subscriptions are unused snapshots,
+                // so they can be removed together with this otherwise unreferenced plan.
+                $db->execute('DELETE FROM plan_versions WHERE plan_id=?',[$id]);
+                $db->execute('DELETE FROM plans WHERE id=?',[$id]);
+                $this->app->billing->audit($uid,'plan.deleted',$id);
+            });
+            return new RedirectResponse('/admin/plans?deleted=1',303);
+        }
         if($handler==='admin-plan-save'){
             $name=trim($input->get('name',''));$price=filter_var($input->get('price_minor'),FILTER_VALIDATE_INT);$days=$input->getInt('duration_days');$devices=$input->getInt('devices');$traffic=filter_var($input->get('traffic_gb'),FILTER_VALIDATE_INT);$squad=trim($input->get('squad_uuid',''));
             // Optional per-tariff auto-renew tuning; empty string means "use global default" (NULL).
