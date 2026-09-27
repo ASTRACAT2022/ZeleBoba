@@ -14,6 +14,7 @@
   <span class="{{ order.status == 'pending' ? 'current' : 'complete' }}">2 · Оплата</span>
   <span class="{{ order.status == 'fulfilled' ? 'complete' : '' }}">3 · Доступ выдан</span>
 </div>
+{% if order.early_renewal_bonus_days|default(0) > 0 and order.status in ['pending', 'paid', 'fulfilled'] %}<div class="alert alert-info mt-16"><span class="alert-icon" aria-hidden="true">◆</span><span>{% if order.status == 'pending' %}После оплаты к подписке будет добавлено {{ order.early_renewal_bonus_days }} дн.{% else %}За раннее продление к подписке добавлено {{ order.early_renewal_bonus_days }} дн.{% endif %}</span></div>{% endif %}
 
 <section class="panel detail narrow-640" >
 

@@ -1,0 +1,25 @@
+<section class="panel detail" id="early-renewal">
+  <div class="section-title">
+    <span class="section-number">06</span>
+    <div>
+      <h2>Бонус за раннее продление</h2>
+      <p class="muted">Начисляется после подтверждённой оплаты продления активной подписки.</p>
+    </div>
+  </div>
+  <div class="form-grid">
+    <label>Функция
+      <select name="EARLY_RENEWAL_BONUS_ENABLED">
+        <option value="0" {{ values.EARLY_RENEWAL_BONUS_ENABLED == '0' ? 'selected' : '' }}>Выключена</option>
+        <option value="1" {{ values.EARLY_RENEWAL_BONUS_ENABLED == '1' ? 'selected' : '' }}>Включена</option>
+      </select>
+    </label>
+    <label>Окно до окончания, дней
+      <input type="number" min="1" max="30" name="EARLY_RENEWAL_WINDOW_DAYS" value="{{ values.EARLY_RENEWAL_WINDOW_DAYS }}" required>
+      <small>Продление учитывается, если до окончания осталось не больше этого срока.</small>
+    </label>
+    <label>Бонус, дней
+      <input type="number" min="1" max="365" name="EARLY_RENEWAL_BONUS_DAYS" value="{{ values.EARLY_RENEWAL_BONUS_DAYS }}" required>
+    </label>
+  </div>
+  <p class="muted">Настройки фиксируются в заказе при его создании. Бонус добавляется к сроку подписки ровно один раз после подтверждения платежа.</p>
+</section>

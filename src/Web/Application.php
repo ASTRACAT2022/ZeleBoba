@@ -138,7 +138,15 @@ final class Application
         switch ($handler) {
             case 'logout': $this->app->auth->logout($this->request->cookies->get('zb_session','')); $response=new RedirectResponse('/login'); $response->headers->clearCookie('zb_session'); return $response;
             case 'home':
-                return $this->render('home',['subscriptions'=>$db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices,COALESCE(o.traffic_bytes,0) AS traffic_bytes,CASE WHEN p.archived_at IS NOT NULL THEN 1 ELSE 0 END AS plan_archived FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50',[$uid]),'orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 5',[$uid]),'autorenew_enabled'=>$this->app->config['AUTORENEW_ENABLED']==='1']);
+                $settings=$this->app->settings->values();
+                return $this->render('home',[
+                    'subscriptions'=>$db->all('SELECT s.*,COALESCE(o.plan_name,p.name) AS plan_name,COALESCE(o.devices,s.device_limit) AS devices,COALESCE(o.traffic_bytes,0) AS traffic_bytes,CASE WHEN p.archived_at IS NOT NULL THEN 1 ELSE 0 END AS plan_archived FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50',[$uid]),
+                    'orders'=>$db->all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 5',[$uid]),
+                    'autorenew_enabled'=>$settings['AUTORENEW_ENABLED']==='1',
+                    'early_renewal_bonus_enabled'=>$settings['EARLY_RENEWAL_BONUS_ENABLED']==='1',
+                    'early_renewal_window_days'=>(int)$settings['EARLY_RENEWAL_WINDOW_DAYS'],
+                    'early_renewal_bonus_days'=>(int)$settings['EARLY_RENEWAL_BONUS_DAYS'],
+                ]);
             case 'plans':
                 $plans=$db->all('SELECT * FROM plans WHERE active=1 ORDER BY price_minor');
                 foreach ($plans as &$plan) $plan['price_minor']=$this->app->billing->priceFor($uid,$plan);

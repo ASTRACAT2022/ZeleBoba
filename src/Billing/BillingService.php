@@ -26,6 +26,16 @@ final class BillingService
             }
             $plan=$this->db->one('SELECT * FROM plans WHERE id=? AND active=1',[$planId]);
             if (!$plan) throw new BillingError('Тариф недоступен.');
+            $createdAt=time();$renewalSub=null;$renewalBonusDays=0;
+            if($renewSubscriptionId!==null){
+                $renewalSub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$renewSubscriptionId]);
+                if(!$renewalSub || $renewalSub['user_id']!==$userId)throw new BillingError('Подписка для продления не найдена.');
+                $enabled=$this->settingValue('EARLY_RENEWAL_BONUS_ENABLED','0')==='1';
+                $windowDays=(int)$this->settingValue('EARLY_RENEWAL_WINDOW_DAYS','7');
+                $bonusDays=(int)$this->settingValue('EARLY_RENEWAL_BONUS_DAYS','3');
+                $remaining=(int)$renewalSub['expires_at']-$createdAt;
+                if($enabled && $renewalSub['status']==='active' && $remaining>0 && $remaining<=$windowDays*86400 && $bonusDays>0 && $bonusDays<=365)$renewalBonusDays=$bonusDays;
+            }
             $user=$this->db->one('SELECT * FROM users WHERE id=?',[$userId]);
             if ($landingSlug!==null && $landingSlug!=='') {
                 $landings=new LandingService($this->db,$this->outbox);
@@ -43,7 +53,7 @@ final class BillingService
             // A checkout is pinned to an immutable product version. Later plan
             // edits must never change the terms that an existing customer paid for.
             $version=$this->db->one('SELECT id FROM plan_versions WHERE plan_id=? ORDER BY version_number DESC LIMIT 1',[$planId]);
-            $this->db->execute("INSERT INTO orders(id,user_id,plan_id,plan_version_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,status,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)",[$id,$userId,$planId,$version['id']??null,$key,$plan['price_minor'],$plan['currency'],$plan['name'],$plan['duration_days'],$plan['traffic_bytes'],$plan['devices'],$this->provider,time()]);
+            $this->db->execute("INSERT INTO orders(id,user_id,plan_id,plan_version_id,idempotency_key,price_minor,currency,plan_name,duration_days,traffic_bytes,devices,early_renewal_bonus_days,status,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'pending',?,?)",[$id,$userId,$planId,$version['id']??null,$key,$plan['price_minor'],$plan['currency'],$plan['name'],$plan['duration_days'],$plan['traffic_bytes'],$plan['devices'],$renewalBonusDays,$this->provider,$createdAt]);
             $this->db->execute('INSERT INTO order_items(id,order_id,product_type,plan_id,quantity,unit_price_minor,total_minor,metadata,created_at) VALUES(?,?,?,?,?,?,?,?,?)',[
                 Database::id(),$id,'subscription',$planId,1,(int)$plan['price_minor'],(int)$plan['price_minor'],json_encode(['duration_days'=>(int)$plan['duration_days']],JSON_THROW_ON_ERROR),time()
             ]);
@@ -54,8 +64,6 @@ final class BillingService
             $this->audit($userId,'order.created',$id);
             $this->timeline?->record($userId, 'payment.created', ['amount_kopeks'=>(int)$plan['price_minor'], 'order_id'=>$id]);
             if ($renewSubscriptionId!==null) {
-                $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$renewSubscriptionId]);
-                if (!$sub || $sub['user_id']!==$userId) throw new BillingError('Подписка для продления не найдена.');
                 $this->db->execute('UPDATE subscriptions SET renew_order_id=? WHERE id=?',[$id,$renewSubscriptionId]);
                 $this->audit($userId,'subscription.renew_ordered',$renewSubscriptionId);
             }
@@ -113,12 +121,13 @@ final class BillingService
             );
             if ($renewSub) {
                 $newExpiry=(new SubscriptionService($this->db,$this->outbox))->extend($renewSub['id'],$order,$now);
+                $bonusDays=(int)($order['early_renewal_bonus_days']??0);
                 $this->db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$op['correlation_id'],'extend:'.$renewSub['id'].':'.$orderId]);
                 $this->db->execute('UPDATE operations SET subscription_id=? WHERE id=?',[$renewSub['id'],$op['id']]);
-                $operations->event($op['id'],'subscription.extended','success','Subscription extended',['subscription_id'=>$renewSub['id'],'metadata'=>['expires_at_before'=>(int)$renewSub['expires_at'],'expires_at_after'=>$newExpiry]]);
+                $operations->event($op['id'],'subscription.extended','success','Subscription extended',['subscription_id'=>$renewSub['id'],'metadata'=>['expires_at_before'=>(int)$renewSub['expires_at'],'expires_at_after'=>$newExpiry,'early_renewal_bonus_days'=>$bonusDays]]);
                 $this->db->execute('UPDATE subscriptions SET renew_order_id=NULL,renew_at=?,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?',[(int)$renewSub['auto_renew']===1?$this->renewAt($newExpiry,(int)$order['duration_days']):null,$renewSub['id']]);
                 $this->audit('provider:'.$provider,'subscription.renewed',$renewSub['id']);
-                $this->timeline?->record($order['user_id'], 'subscription.renewed', ['subscription_id'=>$renewSub['id'], 'expires_at'=>$newExpiry], $now);
+                $this->timeline?->record($order['user_id'], 'subscription.renewed', ['subscription_id'=>$renewSub['id'], 'expires_at'=>$newExpiry,'early_renewal_bonus_days'=>$bonusDays], $now);
             } else {
                 $sub=Database::id();
                 // Each purchase is an independent subscription unless it is a renewal order.
@@ -198,6 +207,11 @@ final class BillingService
     {
         $row=$this->db->one("SELECT value FROM app_settings WHERE name='AUTORENEW_ENABLED'");
         return ($row && $row['value']==='1') || (($this->config['AUTORENEW_ENABLED']??'0')==='1' && !$row);
+    }
+    private function settingValue(string $key,string $default): string
+    {
+        $row=$this->db->one('SELECT value FROM app_settings WHERE name=?',[$key]);
+        return (string)($row['value']??$this->config[$key]??\App\Settings\Settings::DEFAULTS[$key]??$default);
     }
     /** Enable or disable auto-renew for a subscription. Returns updated row. */
     public function setAutoRenew(string $userId,string $subscriptionId,bool $enable): array

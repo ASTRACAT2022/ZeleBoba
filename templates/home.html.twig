@@ -1,5 +1,6 @@
 {% extends 'base.html.twig' %}{% block title %}Обзор{% endblock %}{% block content %}
 {% set active = subscriptions|filter(s => s.status in ['active', 'trial'] and s.expires_at > now) %}
+{% set renewable = active|filter(s => s.status == 'active' and not s.plan_archived) %}
 {% set primary = active|first %}
 
 <header>
@@ -7,6 +8,7 @@
     <p class="eyebrow">Личный кабинет</p>
     <h1>{{ site_name }} VPN</h1>
     <p class="muted">Состояние подписки, оплата и доступ — в одном месте.</p>
+    {% if early_renewal_bonus_enabled and renewable|length > 0 %}<p class="hint">Продлите подписку в последние {{ early_renewal_window_days }} дн. до окончания и получите бонус +{{ early_renewal_bonus_days }} дн. к сроку.</p>{% endif %}
   </div>
 </header>
 

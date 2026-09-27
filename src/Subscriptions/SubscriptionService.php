@@ -31,6 +31,9 @@ final class SubscriptionService
         // paid renewal from calendar-month billing into a day-based period.
         $months=(int)$order['duration_months'];
         $expires=$this->expiryAfter(max($now,(int)$sub['expires_at']), (int)$order['duration_days'], $months);
+        // The bonus is captured on the renewal order at checkout and is only
+        // applied here, after verified payment, inside the same transaction.
+        $expires+=max(0,min(365,(int)($order['early_renewal_bonus_days']??0)))*86400;
         $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',lifecycle_status='active',updated_at=?,version=version+1 WHERE id=?",[$expires,$now,$subscriptionId]);
         $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
             Database::id(),'subscription.extend','extend:'.$subscriptionId.':'.$order['id'],json_encode(['subscription_id'=>$subscriptionId,'order_id'=>$order['id']],JSON_THROW_ON_ERROR),80,$now,$now,$order['id']
