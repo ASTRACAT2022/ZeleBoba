@@ -145,11 +145,11 @@ final class PaymentService
             if (($this->config['APP_ENV']??'dev')==='prod' && !empty($result['test'])) throw new BillingError('Тестовый платёж запрещён в production.');
             if ($isOrder) $this->billing->settle($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency'],$correlationId);
             else $this->billing->settleTopup($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency']);
-            $this->attempts?->completed($providerId,$actualId,'paid');
+            $this->attempts?->completed($providerId,$actualId,'paid',$result);
         } elseif (($result['status']??'')==='canceled') {
             $table=$isOrder?'orders':'topups';
             $this->db->execute("UPDATE ".$table." SET status='canceled' WHERE id=? AND provider=? AND status='pending'",[$entity['id'],$providerId]);
-            $this->attempts?->completed($providerId,$actualId,'canceled');
+            $this->attempts?->completed($providerId,$actualId,'canceled',$result);
         }
     }
     /** Handle a provider webhook. Returns true if the webhook was ours. */

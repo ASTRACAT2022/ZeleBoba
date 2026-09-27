@@ -8,7 +8,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 final class Worker
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null, private ?DurableWorkflow $workflows=null, private ?BillingService $billing=null) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Payments $payments, private Provisioner $provisioner, private HttpClientInterface $http, private string $botToken, private bool $allowDemo=true, private string $telegramApiBase='https://astracattg.netlify.app', private ?TopupService $topups=null, private ?\App\Billing\AutoPurchaseService $autoPurchase=null, private ?PaymentService $paymentService=null, private ?\App\Billing\ReferralService $referrals=null, private ?\App\Billing\BroadcastService $broadcasts=null, private ?\App\Billing\CompensationService $compensations=null, private string $defaultProvisionDriver='demo', private ?CustomerTimeline $timeline=null, private ?DurableWorkflow $workflows=null, private ?BillingService $billing=null, private ?\App\Billing\AnalyticsService $analytics=null) {}
     public function handle(string $topic,array $payload): void
     {
         $span=Telemetry::start('billing.outbox.process',['messaging.operation'=>'process','messaging.destination.name'=>$topic]);
@@ -155,6 +155,7 @@ final class Worker
         // Legacy subscriptions have no operation row yet and remain supported.
         if ($this->workflows!==null && $this->db->one("SELECT id FROM provisioning_operations WHERE subscription_id=? AND operation_type='activate'",[$id]) && !$lease) return;
         $s=$this->subscription($id);
+        if($s)$this->trackProvisioning($s,'provisioning_started',$lease['id']??null);
         // A local remote_id is only a remembered result, not proof that the
         // account still exists in the panel. A crash after local activation
         // must be recovered by a live read before completing the workflow.
@@ -177,6 +178,7 @@ final class Worker
                 }
             }
             $this->workflows?->succeeded($id,['remote_id'=>$verifiedId,'subscription_url'=>$verifiedUrl]);
+            $this->trackProvisioning($s,'provisioning_succeeded',$lease['id']??null);
             return;
         }
         if (!$s || !in_array($s['status'],['provisioning','active','trial'],true) || $s['remote_id']!==null || (int)$s['expires_at']<=time()) return;
@@ -198,6 +200,7 @@ final class Worker
             // not. Preserve UNKNOWN and let the next leased run verify the
             // deterministic remote identity instead of treating it as failure.
             $this->workflows?->unknown($id,$e);
+            $this->trackProvisioning($s,'provisioning_failed',$lease['id']??null,['error_type'=>get_class($e)]);
             throw $e;
         }
         $this->db->transaction(function () use ($s,$remote,$id) {
@@ -217,6 +220,13 @@ final class Worker
             }
         });
         $this->workflows?->succeeded($id,['remote_id'=>$remote['id'],'subscription_url'=>$remote['url']]);
+        $this->trackProvisioning($s,'provisioning_succeeded',$lease['id']??null);
+    }
+    private function trackProvisioning(array $subscription,string $event,?string $operationId,array $extra=[]): void
+    {
+        if(!$this->analytics)return;$operationId??=(string)($this->db->one("SELECT id FROM provisioning_operations WHERE subscription_id=? AND operation_type='activate' ORDER BY created_at DESC LIMIT 1",[$subscription['id']])['id']??$subscription['id']);
+        $this->analytics->track($event,(string)$subscription['user_id'],null,null,['order_id'=>$subscription['order_id']??null,'subscription_id'=>(string)$subscription['id'],'plan_id'=>$subscription['plan_id']??null,'provisioning_operation_id'=>$operationId]+$extra,$event.':'.$operationId);
+        if($event==='provisioning_succeeded')$this->analytics->track('subscription_activated',(string)$subscription['user_id'],null,null,['subscription_id'=>(string)$subscription['id'],'plan_id'=>$subscription['plan_id']??null,'reason'=>'provisioning'],'subscription_activated:'.$operationId);
     }
     private function extend(string $id, ?string $orderId=null): void
     {

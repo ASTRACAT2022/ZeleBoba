@@ -9,9 +9,11 @@ final class BillingService
     private ?\App\Billing\TopupService $topups = null;
     private ?CreatorService $creators = null;
     private ?ReferralService $referrals = null;
+    private ?AnalyticsService $analytics = null;
     public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null, private ?CustomerTimeline $timeline=null) {}
     public function setCreators(CreatorService $creators): void { $this->creators=$creators; }
     public function setReferrals(ReferralService $referrals): void { $this->referrals=$referrals; }
+    public function setAnalytics(AnalyticsService $analytics): void { $this->analytics=$analytics; }
     public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null, ?string $renewSubscriptionId=null, ?string $landingSlug=null): array
     {
         if ($this->config!==null) {
@@ -78,7 +80,8 @@ final class BillingService
         if ($paymentId==='' || strlen($paymentId)>100 || $amount<=0) throw new BillingError('Некорректный платёж.');
         $operations=new OperationsService($this->db);
         $op=$operations->start('payment.apply',['order_id'=>$orderId,'metadata'=>['provider'=>$provider,'provider_payment_id'=>$paymentId,'amount_minor'=>$amount,'currency'=>$currency]],$correlationId??'cor_'.substr(hash('sha256',$provider.':'.$paymentId),0,40));
-        try { $this->db->transaction(function () use ($orderId,$provider,$paymentId,$amount,$currency,$operations,$op) {
+        $analyticsSnapshot=null;
+        try { $this->db->transaction(function () use ($orderId,$provider,$paymentId,$amount,$currency,$operations,$op,&$analyticsSnapshot) {
             if ($this->db->postgres()) $this->db->execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',[$provider.':'.$paymentId]);
             $order=$this->db->one('SELECT * FROM orders WHERE id=?'.$this->db->lock(),[$orderId]);
             if (!$order || $order['provider']!==$provider || (int)$order['price_minor']!==$amount || $order['currency']!==$currency || ($order['provider_payment_id']!==null && $order['provider_payment_id']!==$paymentId)) throw new BillingError('Платёж не соответствует заказу.');
@@ -90,11 +93,22 @@ final class BillingService
             }
             if (!\App\Infrastructure\StateMachine::can('order', (string)$order['status'], 'paid')) throw new BillingError('Заказ уже обработан.');
             $now=time();
+            $renewSub=$order['renewal_subscription_id']!==null
+                ? $this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$order['renewal_subscription_id']])
+                : $this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
+            $priorPaid=(int)($this->db->one("SELECT COUNT(*) c FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.user_id=? AND p.status='succeeded' AND p.provider_payment_id NOT LIKE 'balance_%' AND o.price_minor>400",[$order['user_id']])['c']??0);
+            if($renewSub)$purpose='renewal';
+            elseif((int)$order['price_minor']<=400)$purpose='trial';
+            elseif($priorPaid===0)$purpose='first_purchase';
+            else {
+                $active=$this->db->one("SELECT s.plan_id,COALESCE(o.price_minor,p.price_minor) paid_price FROM subscriptions s LEFT JOIN orders o ON o.id=s.order_id LEFT JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.lifecycle_status IN ('active','pending') AND s.expires_at>? AND s.subscription_origin IN ('purchase','renewal') ORDER BY s.expires_at DESC LIMIT 1",[$order['user_id'],$now]);
+                $purpose=$active?((int)$order['price_minor']>(int)$active['paid_price']?'upgrade':'other'):'reactivation';
+            }
             $this->db->execute('INSERT INTO payment_receipts VALUES(?,?,?,?,?,?)',[$provider,$paymentId,$orderId,$amount,$currency,$now]);
-            $this->db->execute("INSERT INTO payments(id,order_id,user_id,provider,provider_payment_id,amount_minor,currency,status,created_at,paid_at) VALUES(?,?,?,?,?,?,?,'succeeded',?,?) ON CONFLICT(provider,provider_payment_id) DO NOTHING",[
-                Database::id(),$orderId,$order['user_id'],$provider,$paymentId,$amount,$currency,$now,$now
+            $this->db->execute("INSERT INTO payments(id,order_id,user_id,provider,provider_payment_id,amount_minor,currency,status,created_at,paid_at,payment_purpose) VALUES(?,?,?,?,?,?,?,'succeeded',?,?,?) ON CONFLICT(provider,provider_payment_id) DO NOTHING",[
+                Database::id(),$orderId,$order['user_id'],$provider,$paymentId,$amount,$currency,$now,$now,$purpose
             ]);
-            $payment=$this->db->one('SELECT id FROM payments WHERE provider=? AND provider_payment_id=?',[$provider,$paymentId]);
+            $payment=$this->db->one('SELECT * FROM payments WHERE provider=? AND provider_payment_id=?',[$provider,$paymentId]);
             // Creator credit is part of the same verified-payment transaction;
             // its payment_id unique index makes provider retries harmless.
             if ($payment && $this->creators) $this->creators->recordPayment($payment['id']);
@@ -108,10 +122,6 @@ final class BillingService
             $operations->event($op['id'],'order.paid','success','Order marked as paid',['metadata'=>['status_before'=>'pending_payment','status_after'=>'paid']]);
             $this->timeline?->record($order['user_id'], 'payment.paid', ['amount_kopeks'=>$amount, 'order_id'=>$orderId], $now);
             $this->db->execute('UPDATE users SET has_had_paid_subscription=1 WHERE id=?',[$order['user_id']]);
-            // Renewal: extend the existing subscription instead of creating a new one.
-            $renewSub=$order['renewal_subscription_id']!==null
-                ? $this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$order['renewal_subscription_id']])
-                : $this->db->one('SELECT * FROM subscriptions WHERE renew_order_id=?'.$this->db->lock(),[$orderId]);
             // Record the purchase transaction for analytics (wallet history).
             $type = $renewSub ? 'subscription_renewal' : 'subscription_purchase';
             // Wallet debits already write the authoritative transaction. Do
@@ -135,7 +145,7 @@ final class BillingService
                 // Each purchase is an independent subscription unless it is a renewal order.
                 $months=(int)$order['duration_months'];
                 $expiry=(new SubscriptionService($this->db,$this->outbox))->expiryAfter($now,(int)$order['duration_days'],$months);
-                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,traffic_used_gb,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at) VALUES(?,?,?,'provisioning',?,?,?,?,0,?,?,'pending',?,?,?)",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
+                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,traffic_used_gb,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at,subscription_origin) VALUES(?,?,?,'provisioning',?,?,?,?,0,?,?,'pending',?,?,?,'purchase')",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
                 // Daily-priced tariffs auto-enable the daily charge: while the
                 // wallet covers the daily price the subscription renews itself.
                 if ((int)$order['duration_days']<=1 && $this->autoRenewEnabled()) {
@@ -155,9 +165,12 @@ final class BillingService
                 $this->db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$op['correlation_id'],'provision:'.$sub]);
             }
             if (!$renewSub && $order['renewal_subscription_id']===null) $this->referrals?->processPaidSubscription($orderId);
+            $analyticsSnapshot=['order'=>$order,'payment'=>$payment,'purpose'=>$purpose,'subscription_id'=>$renewSub['id']??($sub??null)];
             $this->audit('provider:'.$provider,'payment.settled',$orderId);
             $operations->event($op['id'],'provisioning.queued','processing','Provisioning queued',['metadata'=>['order_id'=>$orderId]]);
-        }); if(!($op['existing']??false))$operations->complete($op['id']); } catch (\Throwable $e) { if(!($op['existing']??false))$operations->fail($op['id'],$e); throw $e; }
+        }); if(!($op['existing']??false))$operations->complete($op['id']);
+            if($analyticsSnapshot&&$this->analytics)try{$this->analytics->trackSettledOrder($analyticsSnapshot['order'],$analyticsSnapshot['payment'],$analyticsSnapshot['purpose'],$analyticsSnapshot['subscription_id']);}catch(\Throwable $analyticsError){error_log('analytics.payment_settled failed: '.get_class($analyticsError));}
+        } catch (\Throwable $e) { if(!($op['existing']??false))$operations->fail($op['id'],$e); throw $e; }
     }
     /** Personal discounts do not stack with landing discounts. */
     public function priceFor(string $userId,array $plan): int

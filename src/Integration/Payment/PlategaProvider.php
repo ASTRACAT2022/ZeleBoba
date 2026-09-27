@@ -143,8 +143,8 @@ final class PlategaProvider extends AbstractProvider
             $order,
             $user,
             'Подписка: '.($order['plan_name'] ?? 'VPN'),
-            $app.'/orders/'.$order['id'],
-            $app.'/orders/'.$order['id']
+            $app.'/orders/'.$order['id'].'?payment_returned=1',
+            $app.'/orders/'.$order['id'].'?payment_returned=1&payment_result=failed'
         );
     }
 
@@ -176,6 +176,10 @@ final class PlategaProvider extends AbstractProvider
         if (!isset($metadata['order_id'],$metadata['topup_id']) && !empty($res['orderId'])) $metadata=['order_id'=>(string)$res['orderId'],'topup_id'=>(string)$res['orderId']];
         return [
             'status' => $status === 'CONFIRMED' ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED', 'CANCELED'], true) ? 'canceled' : 'pending'),
+            'provider_status' => $status,
+            'provider_error_code' => isset($res['errorCode']) ? (string)$res['errorCode'] : (isset($res['code']) && $status!=='CONFIRMED' ? (string)$res['code'] : null),
+            'provider_error_message' => isset($res['errorMessage']) ? (string)$res['errorMessage'] : (isset($res['message']) && $status!=='CONFIRMED' ? (string)$res['message'] : null),
+            'payment_method' => isset($res['paymentMethod']) ? (string)$res['paymentMethod'] : null,
             'amount_kopeks' => $amountMinor - $commissionMinor,
             'currency' => (string)($res['paymentDetails']['currency'] ?? 'RUB'),
             'payment_id' => $actualId,

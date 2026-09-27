@@ -4,7 +4,7 @@ namespace App\Billing;
 use App\Infrastructure\{Database,Outbox};
 final class TopupService
 {
-    public function __construct(private Database $db, private Outbox $outbox, private Wallet $wallet, private string $provider, private ?array $config = null) {}
+    public function __construct(private Database $db, private Outbox $outbox, private Wallet $wallet, private string $provider, private ?array $config = null,private ?AnalyticsService $analytics=null) {}
     /** Create a topup order. Returns the topup row. */
     public function create(string $userId, int $amountKopeks, string $key, ?string $provider = null): array
     {
@@ -36,7 +36,8 @@ final class TopupService
     /** Settle a topup after provider verification. Credits the wallet exactly once. */
     public function settle(string $topupId, string $provider, string $paymentId, int $amount, string $currency): void
     {
-        $this->db->transaction(function () use ($topupId, $provider, $paymentId, $amount, $currency) {
+        $snapshot=null;
+        $this->db->transaction(function () use ($topupId, $provider, $paymentId, $amount, $currency,&$snapshot) {
             if ($this->db->postgres()) $this->db->execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',[$provider.':'.$paymentId]);
             $topup = $this->db->one('SELECT * FROM topups WHERE id=?' . $this->db->lock(), [$topupId]);
             if (!$topup || $topup['provider'] !== $provider || (int)$topup['amount_kopeks'] !== $amount || $topup['currency'] !== $currency) throw new BillingError('Платёж не соответствует пополнению.');
@@ -56,7 +57,9 @@ final class TopupService
             $this->outbox->enqueue('topup.after', 'topup-after:' . $topupId, ['topup_id' => $topupId, 'user_id' => $topup['user_id']]);
             $this->outbox->enqueue('referral.topup', 'referral-topup:' . $topupId, ['topup_id'=>$topupId,'user_id' => $topup['user_id'], 'amount_kopeks' => $amount]);
             $this->db->execute('INSERT INTO audit_log VALUES(?,?,?,?,?)', [Database::id(), 'provider:' . $provider, 'topup.settled', $topupId, $now]);
+            $snapshot=['id'=>$topupId,'user_id'=>$topup['user_id'],'provider'=>$provider,'provider_payment_id'=>$paymentId,'amount_kopeks'=>$amount,'currency'=>$currency,'paid_at'=>$now];
         });
+        if($snapshot&&$this->analytics)$this->analytics->trackSettledTopup($snapshot);
     }
     public function cancel(string $topupId): void
     {

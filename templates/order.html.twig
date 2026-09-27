@@ -32,7 +32,7 @@
     </form>
   {% elseif order.checkout_url %}
     <div class="mt-18">
-      <a class="button large full" href="{{ order.checkout_url }}" rel="noreferrer">
+      <a class="button large full" href="{{ payment_attempt ? '/checkout/' ~ payment_attempt.id ~ '/redirect' : order.checkout_url }}" rel="noreferrer">
         {% if order.provider == 'platega' %}Оплатить {{ order.price_minor|rub }} через Platega ↗{% else %}Оплатить {{ order.price_minor|rub }} ↗{% endif %}
       </a>
     </div>

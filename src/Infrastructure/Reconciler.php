@@ -216,11 +216,16 @@ final class Reconciler
             // Self-heal subscription expiry: keep status AND lifecycle_status consistent
             // so the "active-but-expired" invariant (lifecycle_status='active' && expires_at<=now)
             // never accumulates. lifecycle_status is the source the invariant checks.
+            $expiryNow=time();
+            $expiredForAnalytics=$db->all("SELECT id,user_id,plan_id,expires_at FROM subscriptions WHERE lifecycle_status IN ('active','grace') AND expires_at<=? AND subscription_origin IN ('purchase','renewal')",[$expiryNow]);
             $db->execute("UPDATE subscriptions SET status='expired', lifecycle_status='expired' WHERE status='active' AND expires_at<=?",[time()]);
             // Also sweep subs whose lifecycle_status still says active/grace but the date passed
             // (drift from webhooks, manual edits or interrupted renewals) so the dashboard
             // self-cleans. Keyed on lifecycle_status, since status may already be 'expired'.
             $db->execute("UPDATE subscriptions SET status='expired', lifecycle_status='expired' WHERE lifecycle_status IN ('active','grace') AND expires_at<=?",[time()]);
+            if(isset($this->app->analytics))foreach($expiredForAnalytics as $expired){
+                $this->app->analytics->track('subscription_expired',(string)$expired['user_id'],null,null,['subscription_id'=>(string)$expired['id'],'plan_id'=>$expired['plan_id']??null,'reason'=>'term_ended','expires_at'=>(int)$expired['expires_at']],'subscription_expired:'.$expired['id'].':'.$expired['expires_at'],(int)$expired['expires_at']);
+            }
             // Auto-close operational cases whose underlying violation is already gone
             // (the billing self-healed the data, so the open case is stale). This keeps the
             // "Требуют внимания" queue honest without manual review for self-healed issues.

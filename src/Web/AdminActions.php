@@ -187,6 +187,24 @@ trait AdminActions
             $earnings=$this->app->reporting->earningsOverview();
             return $this->render('admin-reports',['stats'=>$stats,'daily'=>$daily,'by_provider'=>$byProvider,'by_plan'=>$byPlan,'by_type'=>$byType,'top_customers'=>$topCustomers,'top'=>$top,'days'=>$days,'earnings'=>$earnings]);
         }
+        if($handler==='admin-analytics'){
+            $days=$this->request->query->getInt('days',30);if(!in_array($days,[7,30,90],true))$days=30;
+            return $this->render('admin-analytics',['stats'=>$this->app->analytics->dashboard($days),'days'=>$days,'path'=>'/admin/analytics']);
+        }
+        if($handler==='admin-payments-analytics'){
+            $days=$this->request->query->getInt('days',30);if(!in_array($days,[7,30,90],true))$days=30;
+            $stats=$this->app->analytics->dashboard($days);
+            return $this->render('admin-analytics-payments',['stats'=>$stats,'days'=>$days,'path'=>'/admin/analytics/payments']);
+        }
+        if($handler==='admin-acquisition'){
+            $days=$this->request->query->getInt('days',30);if(!in_array($days,[7,30,90],true))$days=30;
+            $stats=$this->app->analytics->dashboard($days);
+            return $this->render('admin-acquisition',['campaigns'=>$stats['campaigns'],'days'=>$days,'path'=>'/admin/analytics/acquisition']);
+        }
+        if($handler==='admin-marketing-campaign-create'){
+            $this->app->analytics->createCampaign($input->all(),$uid);
+            return new RedirectResponse('/admin/analytics/acquisition',303);
+        }
         if($handler==='admin-monitoring')return $this->render('admin-monitoring',['events'=>$this->app->monitoring->recentEvents(),'errors'=>$this->app->monitoring->errors(),'anomalies'=>$this->app->monitoring->trafficAnomalies()]);
         if($handler==='admin-operations'){
             $period=$this->request->query->get('period','7d');

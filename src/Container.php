@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace App;
 use App\Infrastructure\{Database,Outbox,Worker,SecretRedactor,KillSwitch,CircuitBreaker,RateLimiter,WebhookGuard,OptimisticLock,WorkerHeartbeat,FourEyes,DurableWorkflow};
-use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,CreatorService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline,RefundService};
+use App\Billing\{BillingService,Wallet,TopupService,CartService,AutoPurchaseService,PromoCodeService,ReferralService,CreatorService,GiftService,TrialService,BroadcastService,ChannelService,LandingService,ContestService,PollService,CampaignService,RbacService,ReportingService,MonitoringService,BackupService,MaintenanceService,UserAdminService,CompensationService,CustomerTimeline,RefundService,AnalyticsService};
 use App\Subscriptions\SubscriptionMergeService;
 use App\Identity\{Auth,TelegramLogin,Mfa};
 use App\Settings\{Settings,Vault,Branding};
@@ -35,6 +35,7 @@ final class Container
     public readonly CampaignService $campaigns;
     public readonly RbacService $rbac;
     public readonly ReportingService $reporting;
+    public readonly AnalyticsService $analytics;
     public readonly MonitoringService $monitoring;
     public readonly BackupService $backups;
     public readonly MaintenanceService $maintenance;
@@ -78,14 +79,16 @@ final class Container
         $this->outbox=new Outbox($this->db,$this->settings->vault);
         $this->workflows=new DurableWorkflow($this->db,$this->outbox);
         $this->operations=new OperationsService($this->db);
+        $this->analytics=new AnalyticsService($this->db);
         $this->intelligence=new OperationsIntelligence($this->db,new ConsistencyChecker($this->db));
         $this->demoEvents=new DemoEvents($this->db);
         $this->timeline=new CustomerTimeline($this->db);
         $this->billing=new BillingService($this->db,$this->outbox,$config['PAYMENT_DRIVER'],$config,$this->timeline);
+        $this->billing->setAnalytics($this->analytics);
         $this->wallet=new Wallet($this->db);
         $this->refunds=new RefundService($this->db,$this->wallet);
         $this->carts=new CartService($this->db);
-        $this->topups=new TopupService($this->db,$this->outbox,$this->wallet,$config['PAYMENT_DRIVER'],$config);
+        $this->topups=new TopupService($this->db,$this->outbox,$this->wallet,$config['PAYMENT_DRIVER'],$config,$this->analytics);
         $this->billing->setTopups($this->topups);
         $this->promocodes=new PromoCodeService($this->db,$this->outbox,$this->wallet);
         $this->referrals=new ReferralService($this->db,$this->outbox,$this->wallet,$config);
@@ -123,10 +126,10 @@ final class Container
         $this->providers=new ProviderRegistry($http,$config);
         foreach ([new PlategaProvider($http,$config,$this->circuitBreaker)] as $provider) $this->providers->register($provider);
         $this->mailer=new Mailer($this->db,$config);
-        $this->paymentService=new PaymentService($this->db,$this->billing,$http,$config,$this->providers,new PaymentEventStore($this->db),$this->webhookGuard,$this->mailer,new PaymentAttemptStore($this->db));
+        $this->paymentService=new PaymentService($this->db,$this->billing,$http,$config,$this->providers,new PaymentEventStore($this->db),$this->webhookGuard,$this->mailer,new PaymentAttemptStore($this->db,$this->analytics));
         $tgBase=rtrim($config['TELEGRAM_API_BASE']??'https://astracattg.netlify.app','/');
         if ($tgBase==='') $tgBase='https://astracattg.netlify.app';
-        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID'],$this->circuitBreaker),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations,$config['PROVISION_DRIVER'],$this->timeline,$this->workflows,$this->billing);
+        $this->worker=new Worker($this->db,$this->outbox,$this->payments,new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID'],$this->circuitBreaker),$http,$config['TELEGRAM_BOT_TOKEN'],$config['APP_ENV']!=='prod',$tgBase,$this->topups,$this->autoPurchase,$this->paymentService,$this->referrals,$this->broadcasts,$this->compensations,$config['PROVISION_DRIVER'],$this->timeline,$this->workflows,$this->billing,$this->analytics);
         $this->auth=new Auth($this->db);$this->mfa=new Mfa($this->db,$this->settings->vault);
         $this->telegramLogin=new TelegramLogin($this->db,$this->auth);
         $this->telegram=new Telegram($this->db,$this->outbox,$this->billing,$config['APP_URL'],$this->telegramLogin,$tgBase,$http);
