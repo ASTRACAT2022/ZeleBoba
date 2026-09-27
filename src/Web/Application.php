@@ -114,7 +114,7 @@ final class Application
             str_starts_with($handler,'admin-compensation') => 'admin.compensations',
             str_starts_with($handler,'admin-user'), str_starts_with($handler,'admin-subscription') => 'admin.users',
             str_starts_with($handler,'admin-config'), $handler==='admin-check', $handler==='admin-readiness' => 'admin.settings',
-            str_starts_with($handler,'admin-analytics') || str_starts_with($handler,'admin-marketing-campaign') => 'admin.reports',
+            str_starts_with($handler,'admin-analytics') || str_ends_with($handler,'-analytics') || $handler==='admin-acquisition' || str_starts_with($handler,'admin-marketing-campaign') => 'admin.reports',
             $handler==='admin-sync' => 'admin.sync',
             str_starts_with($handler,'admin-promocode') => 'admin.promocodes',
             str_starts_with($handler,'admin-withdrawal') => 'admin.withdrawals',
