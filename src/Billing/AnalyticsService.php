@@ -113,29 +113,30 @@ final class AnalyticsService
     public function dashboard(int $days=30): array
     {
         $days=max(1,min(90,$days));$now=time();$since=$now-$days*86400;$today=(new \DateTimeImmutable('today',new \DateTimeZone('Europe/Moscow')))->getTimestamp();
-        $payments=$this->db->all("SELECT p.id,p.user_id,p.amount_minor,p.paid_at,p.payment_purpose,o.plan_id,o.duration_days,o.price_minor FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.status='succeeded' AND p.provider_payment_id NOT LIKE 'balance_%' AND p.provider='platega' AND p.paid_at>=? ORDER BY p.paid_at",[$since]);
-        $revenue=0;$newRevenue=0;$renewalRevenue=0;$purposeCounts=[];$buyers=[];$newBuyers=[];$checks=[];
-        foreach($payments as $p){$amount=(int)$p['amount_minor'];$revenue+=$amount;$checks[]=$amount;$buyers[$p['user_id']]=true;$purpose=(string)($p['payment_purpose']??'unknown');$purposeCounts[$purpose]=($purposeCounts[$purpose]??0)+1;if($purpose==='renewal')$renewalRevenue+=$amount;if(in_array($purpose,['first_purchase','reactivation'],true)){$newRevenue+=$amount;if($purpose==='first_purchase')$newBuyers[$p['user_id']]=true;}}
+        $insights=new RevenueInsights($this->db);
+        $breakdown=$insights->revenueBreakdown($since);
+        $payments=$insights->subscriptionPayments($since);
+        $revenue=$breakdown['total'];$newRevenue=$breakdown['new']+$breakdown['reactivation'];$renewalRevenue=$breakdown['renewal'];
+        $purposeCounts=$breakdown['counts'];$buyers=array_fill_keys(array_keys($breakdown['buyers']),true);$newBuyers=array_fill_keys(array_keys($breakdown['new_buyers']),true);$checks=array_map(static fn($p)=>(int)$p['amount_minor'],$payments);
         $registrations=(int)($this->db->one('SELECT COUNT(*) c FROM users WHERE created_at>=?',[$since])['c']??0);
         $registeredBuyers=(int)($this->db->one("SELECT COUNT(DISTINCT u.id) c FROM users u JOIN payments p ON p.user_id=u.id WHERE u.created_at>=? AND p.paid_at>=? AND p.status='succeeded' AND p.provider='platega' AND p.provider_payment_id NOT LIKE 'balance_%'",[$since,$since])['c']??0);
         $attempts=(int)($this->db->one("SELECT COUNT(*) c FROM payment_attempts WHERE created_at>=? AND status IN ('succeeded','failed','cancelled','expired')",[$since])['c']??0);
         $succeeded=(int)($this->db->one("SELECT COUNT(*) c FROM payment_attempts WHERE created_at>=? AND status='succeeded'",[$since])['c']??0);
         $median=0;$durations=$this->db->all("SELECT succeeded_at-created_at AS seconds FROM payment_attempts WHERE created_at>=? AND succeeded_at IS NOT NULL",[$since]);$vals=array_map(static fn($r)=>(int)$r['seconds'],$durations);sort($vals);if($vals)$median=$vals[(int)floor((count($vals)-1)/2)];
-        $funnel=[];foreach(['landing_viewed'=>'Посетители','registered'=>'Регистрации','pricing_viewed'=>'Открыли тарифы','plan_selected'=>'Выбрали тариф','checkout_started'=>'Начали оплату','payment_created'=>'Создали платёж','payment_succeeded'=>'Оплатили','provisioning_succeeded'=>'Получили доступ','renewal_succeeded'=>'Продлили'] as $event=>$label){$row=$this->db->one('SELECT COUNT(DISTINCT COALESCE(user_id,anonymous_id)) c FROM analytics_events WHERE event_name=? AND occurred_at>=?',[$event,$since]);$funnel[]=['event'=>$event,'label'=>$label,'users'=>(int)($row['c']??0)];}
-        for($i=0;$i<count($funnel);$i++){$prev=$i===0?null:$funnel[$i-1]['users'];$current=$funnel[$i]['users'];$funnel[$i]['conversion']=$prev>0?round($current*100/$prev,1):null;$funnel[$i]['dropoff']=$prev>0?round(max(0,$prev-$current)*100/$prev,1):null;}
+        $funnelResult=$insights->funnel($since);$funnel=$funnelResult['stages'];
         $daily=[];$zone=new \DateTimeZone('Europe/Moscow');for($i=$days-1;$i>=0;$i--){$day=(new \DateTimeImmutable('@'.($today-$i*86400)))->setTimezone($zone)->format('Y-m-d');$daily[$day]=['total'=>0,'new'=>0,'renewal'=>0];}
-        foreach($payments as $p){$day=(new \DateTimeImmutable('@'.(int)$p['paid_at']))->setTimezone($zone)->format('Y-m-d');if(!isset($daily[$day]))continue;$amount=(int)$p['amount_minor'];$daily[$day]['total']+=$amount;$purpose=$p['payment_purpose']??'';if(in_array($purpose,['first_purchase','reactivation'],true))$daily[$day]['new']+=$amount;if($purpose==='renewal')$daily[$day]['renewal']+=$amount;}
+        foreach($payments as $p){$day=(new \DateTimeImmutable('@'.(int)$p['paid_at']))->setTimezone($zone)->format('Y-m-d');if(!isset($daily[$day]))continue;$amount=(int)$p['amount_minor'];$daily[$day]['total']+=$amount;$rp=$p['revenue_purpose'];if(in_array($rp,['new','reactivation'],true))$daily[$day]['new']+=$amount;if($rp==='renewal')$daily[$day]['renewal']+=$amount;}
         $todayRevenue=$this->cashReceiptsSince($today);
         $weekRevenue=$this->cashReceiptsSince($now-7*86400);
         $monthRevenue=$this->cashReceiptsSince($now-30*86400);
-        $provisioningGap=(int)($this->db->one("SELECT COUNT(*) c FROM payments p LEFT JOIN subscriptions s ON s.order_id=p.order_id LEFT JOIN provisioning_operations po ON po.order_id=p.order_id AND po.operation_type='activate' AND po.status='succeeded' WHERE p.status='succeeded' AND p.provider_payment_id NOT LIKE 'balance_%' AND (s.id IS NULL OR po.id IS NULL)")['c']??0);
+        $provisioning=$insights->provisioningHealth($since);
         $sinceRow=$this->db->one("SELECT MIN(paid_at) since FROM (SELECT paid_at FROM payments WHERE status='succeeded' AND provider='platega' AND provider_payment_id NOT LIKE 'balance_%' UNION ALL SELECT paid_at FROM topups WHERE status='paid' AND provider='platega') history");
         $migrationRow=$this->db->one("SELECT applied_at FROM migrations WHERE version='045_business_analytics.sql'");
         $maxDaily=max(1,...array_values(array_map(static fn($day)=>$day['total'],$daily)));$points=['total'=>[],'new'=>[],'renewal'=>[]];$i=0;
         foreach($daily as $day){$x=count($daily)>1?round($i*800/(count($daily)-1),1):400;foreach(['total','new','renewal'] as $series)$points[$series][]=$x.','.round(180-($day[$series]/$maxDaily)*160,1);$i++;}
-        return ['days'=>$days,'since'=>$since,'history_since'=>$sinceRow['since']?gmdate('d M Y',(int)$sinceRow['since']):null,'events_since'=>isset($migrationRow['applied_at'])?gmdate('d M Y',(int)$migrationRow['applied_at']):null,'revenue'=>$revenue,'today_revenue'=>$todayRevenue,'revenue_7d'=>$weekRevenue,'revenue_30d'=>$monthRevenue,'chart_points'=>array_map(static fn($list)=>implode(' ',$list),$points),'new_revenue'=>$newRevenue,'renewal_revenue'=>$renewalRevenue,
+        return ['days'=>$days,'since'=>$since,'history_since'=>$sinceRow['since']?gmdate('d M Y',(int)$sinceRow['since']):null,'revenue'=>$revenue,'today_revenue'=>$todayRevenue,'revenue_7d'=>$weekRevenue,'revenue_30d'=>$monthRevenue,'chart_points'=>array_map(static fn($list)=>implode(' ',$list),$points),'new_revenue'=>$newRevenue,'renewal_revenue'=>$renewalRevenue,
             'paid_customers'=>count($buyers),'new_paid_customers'=>count($newBuyers),'renewals'=>$purposeCounts['renewal']??0,'arppu'=>count($buyers)?intdiv($revenue,count($buyers)):0,'average_check'=>$checks?intdiv($revenue,count($checks)):0,'median_time_to_pay'=>$median,'registrations'=>$registrations,'conversion'=>$registrations?round($registeredBuyers*100/$registrations,1):0,
-            'payment_success_rate'=>$attempts?round($succeeded*100/$attempts,1):0,'funnel'=>$funnel,'daily'=>$daily,'provisioning_gap'=>$provisioningGap,'payment_attempts'=>$this->paymentStats($since),'campaigns'=>$this->campaignStats($since),'trial'=>$this->trialStats($since),'churn'=>$this->churnStats($since),'cohorts'=>$this->cohorts($since),'health'=>$this->health()];
+            'payment_success_rate'=>$attempts?round($succeeded*100/$attempts,1):0,'funnel'=>$funnel,'funnel_meta'=>$funnelResult,'daily'=>$daily,'provisioning'=>$provisioning,'payment_attempts'=>$this->paymentStats($since),'campaigns'=>$this->campaignStats($since),'trial'=>$insights->trialConversion(),'churn'=>$insights->churn(),'cohorts'=>$this->cohorts($since),'reactivations'=>$breakdown['reactivations'],'health'=>$this->health($insights)];
     }
 
     private function cashReceiptsSince(int $since): int
@@ -166,20 +167,6 @@ final class AnalyticsService
         }unset($campaign);return $campaigns;
     }
 
-    private function trialStats(int $since): array
-    {
-        $trial=$this->db->all("SELECT p.user_id,MIN(p.paid_at) paid_at FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.status='succeeded' AND p.provider='platega' AND p.provider_payment_id NOT LIKE 'balance_%' AND p.paid_at>=? AND o.price_minor=400 GROUP BY p.user_id",[$since]);
-        $out=['buyers'=>count($trial),'converted'=>[],'revenue_after'=>0,'arppu_after'=>0];foreach([1,3,7,14,30] as $window)$out['converted'][$window]=0;$convertedUsers=[];
-        foreach($trial as $t){$purchase=$this->db->one("SELECT p.user_id,p.amount_minor,p.paid_at,o.plan_id,o.price_minor FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.status='succeeded' AND p.provider='platega' AND p.provider_payment_id NOT LIKE 'balance_%' AND p.user_id=? AND p.paid_at>? AND p.paid_at<=? AND o.price_minor>400 ORDER BY p.paid_at LIMIT 1",[$t['user_id'],$t['paid_at'],(int)$t['paid_at']+30*86400]);if(!$purchase)continue;$day=(int)floor(((int)$purchase['paid_at']-(int)$t['paid_at'])/86400);foreach([1,3,7,14,30] as $window)if($day<=$window)$out['converted'][$window]++;$out['revenue_after']+=(int)$purchase['amount_minor'];$convertedUsers[$t['user_id']]=true;}
-        $out['conversion_rate']=$out['buyers']?round(($out['converted'][30]??0)*100/$out['buyers'],1):0;$out['converted_buyers']=count($convertedUsers);if($convertedUsers)$out['arppu_after']=intdiv($out['revenue_after'],count($convertedUsers));return $out;
-    }
-
-    private function churnStats(int $since): array
-    {
-        $expired=$this->db->all("SELECT s.id,s.user_id,s.expires_at FROM subscriptions s WHERE s.subscription_origin IN ('purchase','renewal') AND s.lifecycle_status='expired' AND s.expires_at>=? AND s.expires_at<=?",[$since,time()]);$result=['expired'=>count($expired),'windows'=>[]];
-        foreach([1,3,7,30] as $days){$renewed=0;foreach($expired as $s){$found=$this->db->one("SELECT id FROM orders WHERE user_id=? AND renewal_subscription_id=? AND status IN ('paid','fulfilled') AND paid_at BETWEEN ? AND ? LIMIT 1",[$s['user_id'],$s['id'],$s['expires_at'],$s['expires_at']+$days*86400]);if($found)$renewed++;}$result['windows'][$days]=['renewed'=>$renewed,'churned'=>max(0,count($expired)-$renewed),'rate'=>count($expired)?round(max(0,count($expired)-$renewed)*100/count($expired),1):null];}return $result;
-    }
-
     private function cohorts(int $since): array
     {
         $rows=$this->db->all("SELECT user_id,paid_at FROM payments WHERE status='succeeded' AND provider='platega' AND provider_payment_id NOT LIKE 'balance_%' ORDER BY user_id,paid_at");$customers=[];
@@ -202,16 +189,20 @@ final class AnalyticsService
     private function campaignDate(mixed $value): ?int
     { if(!is_string($value)||$value==='')return null;$date=\DateTimeImmutable::createFromFormat('!Y-m-d',$value,new \DateTimeZone('UTC'));return $date&&$date->format('Y-m-d')===$value?$date->getTimestamp():throw new BillingError('Неверный формат даты кампании.'); }
 
-    private function health(): array
+    private function health(?RevenueInsights $insights=null): array
     {
+        $insights ??= new RevenueInsights($this->db);
+        $attr=$insights->attributionHealth();
+        $stale=$insights->staleAttempts();
         return [
             'payments_without_event'=>(int)($this->db->one("SELECT COUNT(*) c FROM payments p LEFT JOIN analytics_events e ON e.event_key='payment_succeeded:'||p.id WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id NOT LIKE 'balance_%' AND e.id IS NULL")['c']??0),
             'topups_without_event'=>(int)($this->db->one("SELECT COUNT(*) c FROM topups t LEFT JOIN analytics_events e ON e.event_key='topup_succeeded:'||t.id WHERE t.provider='platega' AND t.status='paid' AND e.id IS NULL")['c']??0),
             'successful_without_subscription'=>(int)($this->db->one("SELECT COUNT(*) c FROM payments p LEFT JOIN subscriptions s ON s.order_id=p.order_id WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id NOT LIKE 'balance_%' AND s.id IS NULL")['c']??0),
-            'successful_without_provisioning'=>(int)($this->db->one("SELECT COUNT(*) c FROM payments p JOIN subscriptions s ON s.order_id=p.order_id LEFT JOIN provisioning_operations po ON po.subscription_id=s.id AND po.operation_type='activate' AND po.status='succeeded' WHERE p.provider='platega' AND p.status='succeeded' AND p.provider_payment_id NOT LIKE 'balance_%' AND po.id IS NULL")['c']??0),
             'subscriptions_without_origin'=>(int)($this->db->one("SELECT COUNT(*) c FROM subscriptions WHERE subscription_origin IS NULL")['c']??0),
-            'stale_attempts'=>(int)($this->db->one("SELECT COUNT(*) c FROM payment_attempts WHERE status IN ('creating','pending','unknown') AND created_at<?",[time()-86400])['c']??0),
-            'unknown_attribution'=>(int)($this->db->one("SELECT COUNT(*) c FROM users u LEFT JOIN analytics_attribution a ON a.user_id=u.id WHERE a.user_id IS NULL")['c']??0),
+            'stale_attempts'=>array_sum($stale),
+            'stale_attempts_detail'=>$stale,
+            'unknown_attribution'=>$attr['legacy_pre_tracking']+$attr['missing_post_tracking'],
+            'attribution_detail'=>$attr,
             'dead_analytics_jobs'=>(int)($this->db->one("SELECT COUNT(*) c FROM outbox WHERE topic='analytics.record' AND status='dead'")['c']??0),
         ];
     }
