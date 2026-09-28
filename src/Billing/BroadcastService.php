@@ -9,7 +9,7 @@ final class BroadcastService
     public function create(string $targetType, string $text, string $adminId, string $adminName, string $category = 'system'): array
     {
         if (mb_strlen($text) < 1 || mb_strlen($text) > 4000) throw new BillingError('Текст рассылки: 1–4000 символов.');
-        if (!in_array($targetType, ['all','active','inactive','paid','trial','telegram','email'], true)) throw new BillingError('Некорректный сегмент.');
+        if (!in_array($targetType, ['all','active','inactive','paid','trial','telegram','email','comp_disabled'], true)) throw new BillingError('Некорректный сегмент.');
         $id = Database::id();
         $now = time();
         $this->db->transaction(function () use ($id,$targetType,$text,$adminId,$adminName,$category,$now) {
@@ -76,6 +76,10 @@ final class BroadcastService
             'paid' => $this->db->all("SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL AND disabled=0 AND has_had_paid_subscription=1"),
             'trial' => $this->db->all("SELECT DISTINCT u.telegram_id FROM users u JOIN subscriptions s ON s.user_id=u.id WHERE u.telegram_id IS NOT NULL AND u.disabled=0 AND s.is_trial=1 AND s.status IN ('active','trial')"),
             'telegram' => $this->db->all("SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL AND disabled=0"),
+            // Users whose 2026-09-24 compensation subscription was disabled and who
+            // have no other live subscription. Used for the "compensation ended"
+            // notice so it never reaches the whole base or people still covered.
+            'comp_disabled' => $this->db->all("SELECT DISTINCT u.telegram_id FROM users u JOIN subscriptions s ON s.user_id=u.id WHERE u.telegram_id IS NOT NULL AND u.disabled=0 AND s.status='disabled' AND s.created_at>=1790260625 AND EXISTS(SELECT 1 FROM compensation_grants g WHERE g.user_id=u.id) AND NOT EXISTS(SELECT 1 FROM subscriptions s2 WHERE s2.user_id=u.id AND s2.status IN ('active','trial') AND s2.expires_at>?)", [$now]),
             default => [],
         };
         return array_values(array_filter(array_map(fn($r) => (string)($r['telegram_id'] ?? ''), $rows), fn($v) => $v !== ''));
