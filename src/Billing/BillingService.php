@@ -21,6 +21,10 @@ final class BillingService
             foreach(\App\Settings\Settings::purchaseErrors($this->config) as $error) throw new BillingError($error);
         }
         if (!preg_match('/^[a-zA-Z0-9:_-]{8,128}$/D',$key)) throw new BillingError('Некорректный ключ операции.');
+        // Block the external FreeKassa nonce-probe (plan_name 'Nonce Check',
+        // idempotency noncechk_*, IP 8.8.8.8) that spams junk pending orders
+        // and burns the FreeKassa nonce counter. See MONEY_AUDIT_INCIDENT_2026-09-19.
+        if (str_starts_with($key,'noncechk_')) throw new BillingError('Заказ недоступен.');
         return $this->db->transaction(function () use ($userId,$planId,$key,$receiptEmail,$clientIp,$renewSubscriptionId,$landingSlug) {
             if (!$this->db->one('SELECT id FROM users WHERE id=? AND disabled=0'.$this->db->lock(),[$userId])) throw new BillingError('Аккаунт не найден.');
             $existing=$this->db->one('SELECT * FROM orders WHERE user_id=? AND idempotency_key=?',[$userId,$key]);
