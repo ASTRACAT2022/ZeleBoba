@@ -143,8 +143,25 @@ final class PaymentService
         if (!is_string($actualId) || $actualId==='' || strlen($actualId)>100 || ($entity['provider_payment_id']!==null && $entity['provider_payment_id']!==$actualId)) throw new BillingError('Несовпадение платежа.');
         if (($result['status']??'')==='paid') {
             if (($this->config['APP_ENV']??'dev')==='prod' && !empty($result['test'])) throw new BillingError('Тестовый платёж запрещён в production.');
-            if ($isOrder) $this->billing->settle($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency'],$correlationId);
-            else $this->billing->settleTopup($entity['id'],$providerId,$actualId,(int)$result['amount_kopeks'],$result['currency']);
+            // Platega reports the customer-charged GROSS amount and its own
+            // `comission` separately. Depending on the payment method the fee is
+            // added on top of the price (gross = price + fee, so the merchant net
+            // equals the order price) or deducted from it (gross = price, net =
+            // price - fee). Both settlement figures are therefore legitimate:
+            // bind the payment to the order/topup using whichever figure matches
+            // the stored price (order: gross-or-net; topup: net, else gross). If
+            // neither matches, defer rather than dead-letter a real payment.
+            $grossMinor = (int)($result['amount_kopeks'] ?? 0);
+            $netMinor = array_key_exists('amount_net_kopeks',$result) ? (int)$result['amount_net_kopeks'] : $grossMinor;
+            if ($isOrder) {
+                $expected = (int)$entity['price_minor'];
+                if ($expected !== $grossMinor && $expected !== $netMinor) throw new JobDeferred(60);
+                $this->billing->settle($entity['id'],$providerId,$actualId,$expected,$result['currency'],$correlationId);
+            } else {
+                $expected = (int)$entity['amount_kopeks'];
+                if ($expected !== $netMinor && $expected !== $grossMinor) throw new JobDeferred(60);
+                $this->billing->settleTopup($entity['id'],$providerId,$actualId,$expected,$result['currency']);
+            }
             $this->attempts?->completed($providerId,$actualId,'paid',$result);
         } elseif (($result['status']??'')==='canceled') {
             $table=$isOrder?'orders':'topups';

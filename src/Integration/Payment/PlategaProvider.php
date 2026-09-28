@@ -159,13 +159,12 @@ final class PlategaProvider extends AbstractProvider
         // Keep the local payment pending and retry authoritative verification.
         $res = $this->get('transaction/'.rawurlencode($paymentId), []);
         $status = strtoupper((string)($res['status'] ?? ''));
-        // Platega returns paymentDetails.amount in RUB rubles (gross) with a
-        // separate `comission` field; the merchant-receivable (net) amount =
-        // paymentDetails.amount - comission. ZeleBoba settles against the order
-        // amount (net), so report the NET amount back in kopeks. Without this, a
-        // customer charge of 199.00 + 9% commission (216.91) was read as 21691
-        // kopeks vs the order's 19900 -> settle() rejected "Платёж не
-        // соответствует заказу" and the Reconciler re-verified forever.
+        // Platega reports `paymentDetails.amount` = the GROSS amount the customer
+        // was charged, and `comission` = Platega's own fee. Both `amount_kopeks`
+        // (gross) and `amount_net_kopeks` (gross - comission) are returned so the
+        // caller can bind the payment to whichever figure its entity stores:
+        // balance topups store the merchant-receivable NET amount, while
+        // subscription orders store the GROSS price the customer agreed to.
         $amountMinor = self::minor(self::normalizeAmount((string)($res['paymentDetails']['amount'] ?? 0)));
         $commissionMinor = self::minor(self::normalizeAmount((string)($res['comission'] ?? 0)));
         if ($commissionMinor > $amountMinor) throw new BillingError('Platega: некорректная комиссия.');
@@ -180,7 +179,8 @@ final class PlategaProvider extends AbstractProvider
             'provider_error_code' => isset($res['errorCode']) ? (string)$res['errorCode'] : (isset($res['code']) && $status!=='CONFIRMED' ? (string)$res['code'] : null),
             'provider_error_message' => isset($res['errorMessage']) ? (string)$res['errorMessage'] : (isset($res['message']) && $status!=='CONFIRMED' ? (string)$res['message'] : null),
             'payment_method' => isset($res['paymentMethod']) ? (string)$res['paymentMethod'] : null,
-            'amount_kopeks' => $amountMinor - $commissionMinor,
+            'amount_kopeks' => $amountMinor,
+            'amount_net_kopeks' => $amountMinor - $commissionMinor,
             'currency' => (string)($res['paymentDetails']['currency'] ?? 'RUB'),
             'payment_id' => $actualId,
             'metadata' => $metadata,

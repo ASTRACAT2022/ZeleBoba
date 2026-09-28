@@ -306,6 +306,13 @@ final class Telegram
         if ($screen === 'order') {
             $order = $this->db->one('SELECT * FROM orders WHERE id=? AND user_id=?', [$argument, $user['id']]);
             if (!$order) return ['blocks'=>[Blocks::heading('Заказ не найден'), Blocks::buttons([Blocks::button('Мои платежи','ui:payments'), Blocks::button('На главную','ui:home')])]];
+            // Create the checkout on open if it is still missing, so the payment
+            // link is available without an extra «Обновить» press. Idempotent and
+            // guarded by the same durable attempt as the worker.
+            if ($order['status']==='pending' && empty($order['checkout_url']) && $order['provider']!=='demo' && $this->app) {
+                try { $this->app->paymentService->createOrder((string)$order['id']); } catch (\Throwable $e) {}
+                $order = $this->db->one('SELECT * FROM orders WHERE id=?', [$order['id']]);
+            }
             $subscription = $this->db->one('SELECT * FROM subscriptions WHERE order_id=? AND user_id=?', [$order['id'], $user['id']]);
             return $ui->buildOrderScreen($order, $subscription);
         }
@@ -429,7 +436,18 @@ final class Telegram
             try { $this->billing->settle($order['id'],'demo','demo_'.$order['id'],(int)$order['price_minor'],$order['currency']); } catch (BillingError) {}
             $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$order['id']]);
         } else {
-            // Refresh local copy (worker may have already created checkout_url)
+            // Create the checkout synchronously so the payment link is ready the
+            // moment the order screen opens (no «Обновить» press needed). This is
+            // idempotent and shares the durable-attempt guard with the worker, so
+            // a concurrent payment.create job cannot double-charge.
+            try {
+                if(!$order['checkout_url'] && $this->app){
+                    $this->app->paymentService->createOrder((string)$order['id']);
+                }
+            } catch (\Throwable $e) {
+                // Provider slow/unknown: worker owns the durable attempt and will
+                // finish it; the «Обновить» button stays as recovery.
+            }
             $order=$this->db->one('SELECT * FROM orders WHERE id=?',[$order['id']]);
         }
         $messageId = $callback['message']['message_id'] ?? null;

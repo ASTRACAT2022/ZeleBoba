@@ -12,6 +12,15 @@ final class PaymentAttemptStore
         $key='checkout:'.$type.':'.$entity['id']; $now=time();
         $attempt=$this->db->transaction(function() use($type,$entity,$key,$now) {
             $existing=$this->db->one('SELECT * FROM payment_attempts WHERE idempotency_key=?'.$this->db->lock(),[$key]);
+            // A terminal failed attempt (provider timed out, outcome unknown) can
+            // never resolve itself and must not block a customer from paying. Its
+            // idempotency key is retired and a fresh attempt with a new key is
+            // created so the checkout can be reissued safely. In-flight states
+            // (creating/unknown/pending) still return the original intent.
+            if($existing && $existing['status']==='failed') {
+                $this->db->execute("UPDATE payment_attempts SET idempotency_key=? WHERE id=? AND status='failed'",[$key.':retired:'.substr(Database::id(),0,8),$existing['id']]);
+                $existing=null;
+            }
             if($existing) { $existing['created']=false; return $existing; }
             $id=Database::id(); $correlation='checkout:'.$type.':'.$entity['id'];
             $amount=(int)($type==='order'?$entity['price_minor']:$entity['amount_kopeks']);

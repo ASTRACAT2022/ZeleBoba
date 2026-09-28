@@ -202,7 +202,9 @@ final class Screens
         if ($subscription && isset($subscription['expires_at'])) $rows[] = ['Действует до', gmdate('d.m.Y', (int)$subscription['expires_at'])];
         $blocks = [Blocks::heading($status === 'fulfilled' ? 'Подписка готова' : 'Заказ', 1), Blocks::table($rows)];
         if ($status === 'pending' && !empty($order['checkout_url'])) $blocks[] = Blocks::buttons([Blocks::urlButton('Оплатить', (string)$order['checkout_url'], 'primary')]);
-        if ($status === 'pending') $blocks[] = Blocks::buttons([Blocks::button('Обновить статус', 'order:'.$order['id'])]);
+        if ($status === 'pending' && empty($order['checkout_url'])) $blocks[] = Blocks::paragraph('Готовим ссылку на оплату — она появится здесь через несколько секунд.');
+        // Fallback for a genuinely slow provider: allow a manual refresh.
+        if ($status === 'pending' && empty($order['checkout_url'])) $blocks[] = Blocks::buttons([Blocks::button('Обновить статус', 'order:'.$order['id'])]);
         if ($subscription && !empty($subscription['subscription_url'])) {
             $blocks[] = Blocks::buttons([Blocks::urlButton('Подключиться', (string)$subscription['subscription_url'], 'primary')]);
             $blocks[] = Blocks::buttons([Blocks::copyButton('Скопировать ссылку', (string)$subscription['subscription_url'])]);
