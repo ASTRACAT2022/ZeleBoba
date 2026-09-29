@@ -18,9 +18,13 @@ final class Notifier
         $order = $this->db->one('SELECT * FROM orders WHERE id=? AND user_id=?', [$orderId,$userId]);
         if (!$order) return true;
         $subscription = $this->db->one('SELECT * FROM subscriptions WHERE order_id=? AND user_id=?', [$orderId,$userId]);
+        $provisioningDelay = $order['status']==='paid'
+            && (int)($order['paid_at']??0)>0
+            && (time()-(int)$order['paid_at'])>=60
+            && (!$subscription || $subscription['status']==='provisioning');
         $payload = [
             'chat_id'=>$state['chat_id'], 'message_id'=>(int)$state['message_id'],
-            'rich_message'=>Screens::buildOrderScreen($order,$subscription),
+            'rich_message'=>Screens::buildOrderScreen($order,$subscription,$provisioningDelay),
             '_ui_user_id'=>$userId, '_ui_screen'=>'order', '_ui_context_id'=>$orderId,
         ];
         $this->outbox->enqueue('telegram.rich.edit','rich-order:'.$orderId.':'.$order['status'].':'.(int)($subscription['updated_at'] ?? 0),$payload);

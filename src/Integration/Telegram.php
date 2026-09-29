@@ -314,7 +314,11 @@ final class Telegram
                 $order = $this->db->one('SELECT * FROM orders WHERE id=?', [$order['id']]);
             }
             $subscription = $this->db->one('SELECT * FROM subscriptions WHERE order_id=? AND user_id=?', [$order['id'], $user['id']]);
-            return $ui->buildOrderScreen($order, $subscription);
+            $provisioningDelay = $order['status']==='paid'
+                && (int)($order['paid_at']??0)>0
+                && (time()-(int)$order['paid_at'])>=60
+                && (!$subscription || $subscription['status']==='provisioning');
+            return $ui->buildOrderScreen($order, $subscription, $provisioningDelay);
         }
         if ($screen === 'payments') {
             $orders = $this->db->all('SELECT plan_name,price_minor,created_at,status FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 10', [$user['id']]);

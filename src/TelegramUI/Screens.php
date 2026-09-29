@@ -184,7 +184,7 @@ final class Screens
         ]];
     }
 
-    public static function buildOrderScreen(array $order, ?array $subscription = null): array
+    public static function buildOrderScreen(array $order, ?array $subscription = null, bool $provisioningDelay = false): array
     {
         $status = (string)($order['status'] ?? 'pending');
         $statusLabel = match ($status) {
@@ -201,6 +201,7 @@ final class Screens
         ];
         if ($subscription && isset($subscription['expires_at'])) $rows[] = ['Действует до', gmdate('d.m.Y', (int)$subscription['expires_at'])];
         $blocks = [Blocks::heading($status === 'fulfilled' ? 'Подписка готова' : 'Заказ', 1), Blocks::table($rows)];
+        if ($status === 'paid' && $provisioningDelay) $blocks[] = Blocks::paragraph('⚠️ Временные проблемы с выдачей доступа. Ваш заказ принят и будет обработан в течение 24 часов — возможно, даже раньше. Оплачивать повторно не нужно.');
         if ($status === 'pending' && !empty($order['checkout_url'])) $blocks[] = Blocks::buttons([Blocks::urlButton('Оплатить', (string)$order['checkout_url'], 'primary')]);
         if ($status === 'pending' && empty($order['checkout_url'])) $blocks[] = Blocks::paragraph('Готовим ссылку на оплату — она появится здесь через несколько секунд.');
         // Fallback for a genuinely slow provider: allow a manual refresh.

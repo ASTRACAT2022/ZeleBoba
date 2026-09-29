@@ -2,6 +2,7 @@
 {% set active = subscriptions|filter(s => s.status in ['active', 'trial'] and s.expires_at > now) %}
 {% set renewable = active|filter(s => s.status == 'active' and not s.plan_archived) %}
 {% set primary = active|first %}
+{% set delayed_order = orders|filter(o => o.status == 'paid' and o.paid_at and (now - o.paid_at) >= 60)|first %}
 
 <header data-traffic-dashboard-refresh>
   <div>
@@ -11,6 +12,10 @@
     {% if early_renewal_bonus_enabled and renewable|length > 0 %}<p class="hint">Продлите подписку в последние {{ early_renewal_window_days }} дн. до окончания и получите бонус +{{ early_renewal_bonus_days }} дн. к сроку.</p>{% endif %}
   </div>
 </header>
+
+{% if delayed_order %}
+<div class="alert alert-warning mt-16" role="status"><span class="alert-icon" aria-hidden="true">◆</span><span><strong>Временные проблемы с выдачей доступа.</strong> Ваш заказ {% if delayed_order.plan_name %}«{{ delayed_order.plan_name }}»{% endif %} оплачен и будет обработан в течение 24 часов — возможно, даже раньше. Оплачивать повторно не нужно. <a href="/orders/{{ delayed_order.id }}">Подробнее</a></span></div>
+{% endif %}
 
 {% if primary %}
 {# ---------- Primary subscription state ---------- #}

@@ -43,7 +43,11 @@
   {% endif %}
 
 {% elseif order.status == 'paid' %}
-  <div class="alert alert-success"><span class="alert-icon" aria-hidden="true">✓</span><span><strong>Оплата получена.</strong> Настраиваем вашу подписку — оплачивать повторно не нужно.</span></div>
+  {% if provisioning_delay %}
+    <div class="alert alert-warning"><span class="alert-icon" aria-hidden="true">◆</span><span><strong>Временные проблемы с выдачей доступа.</strong> Ваш заказ принят и будет обработан в течение 24 часов — возможно, даже раньше. Оплачивать повторно не нужно.</span></div>
+  {% else %}
+    <div class="alert alert-success"><span class="alert-icon" aria-hidden="true">✓</span><span><strong>Оплата получена.</strong> Настраиваем вашу подписку — оплачивать повторно не нужно.</span></div>
+  {% endif %}
   <a class="button secondary full mt-16" href="/orders/{{ order.id }}" >Обновить статус</a>
 
 {% elseif order.status == 'fulfilled' %}

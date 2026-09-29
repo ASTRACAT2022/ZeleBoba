@@ -189,7 +189,20 @@ final class Application
                     $this->app->billing->settle($id,'demo','demo_'.$id,(int)$order['price_minor'],$order['currency']);
                     return new RedirectResponse('/orders/'.$id,303);
                 }
-                return $this->render('order',['order'=>$order,'subscription'=>$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$id]),'payment_attempt'=>$db->one("SELECT * FROM payment_attempts WHERE entity_type='order' AND entity_id=? ORDER BY created_at DESC LIMIT 1",[$id])]);
+                $subscription=$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$id]);
+                // Provisioning delay: the payment is settled but the subscription is
+                // still not handed out. Anchor the clock to paid_at (not the order's
+                // creation) and require a pending/in-flight provisioning state, so a
+                // fulfilled order or a terminal failure never shows the notice.
+                $provisioningDelay=false;
+                if(in_array($order['status'],['paid'],true) && $subscription && in_array($subscription['status'],['provisioning'],true)){
+                    $paidAt=(int)($order['paid_at']??0);
+                    $provisioningDelay=$paidAt>0 && (time()-$paidAt)>=60;
+                }elseif($order['status']==='paid' && !$subscription){
+                    $paidAt=(int)($order['paid_at']??0);
+                    $provisioningDelay=$paidAt>0 && (time()-$paidAt)>=60;
+                }
+                return $this->render('order',['order'=>$order,'subscription'=>$subscription,'provisioning_delay'=>$provisioningDelay,'payment_attempt'=>$db->one("SELECT * FROM payment_attempts WHERE entity_type='order' AND entity_id=? ORDER BY created_at DESC LIMIT 1",[$id])]);
             case 'autorenew':
                 $enable=$input->get('enable','')==='1';
                 $this->app->billing->setAutoRenew($uid,$id,$enable);
