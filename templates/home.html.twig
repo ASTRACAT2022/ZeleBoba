@@ -3,7 +3,7 @@
 {% set renewable = active|filter(s => s.status == 'active' and not s.plan_archived) %}
 {% set primary = active|first %}
 
-<header>
+<header data-traffic-dashboard-refresh>
   <div>
     <p class="eyebrow">Личный кабинет</p>
     <h1>{{ site_name }} VPN</h1>
@@ -22,7 +22,7 @@
   <div class="meta-grid">
     <div class="meta-item"><span class="meta-label">Статус</span><span class="meta-value">● Работает</span></div>
     <div class="meta-item"><span class="meta-label">Действует до</span><span class="meta-value">{{ primary.expires_at|date('d.m.Y') }}</span></div>
-    <div class="meta-item"><span class="meta-label">Трафик</span><span class="meta-value">{% if primary.traffic_limit_gb > 0 %}{{ (primary.traffic_used_gb|default(0))|round }} / {{ primary.traffic_limit_gb|round }} ГБ{% else %}{{ (primary.traffic_used_gb|default(0))|round }} ГБ использовано · безлимит{% endif %}</span></div>
+    <div class="meta-item"><span class="meta-label">Трафик</span><span class="meta-value">{% if primary.traffic_limit_gb > 0 %}{{ (primary.traffic_used_gb|default(0))|round(3) }} / {{ primary.traffic_limit_gb|round }} ГБ{% else %}{{ (primary.traffic_used_gb|default(0))|round(3) }} ГБ использовано · безлимит{% endif %}</span>{% if primary.traffic_usage_synced_at|default(null) %}<small class="muted">Обновлено {{ primary.traffic_usage_synced_at|date('d.m.Y H:i') }}</small>{% else %}<small class="muted">Ожидается первая синхронизация</small>{% endif %}</div>
     <div class="meta-item"><span class="meta-label">Устройства</span><span class="meta-value">{{ primary.devices == 0 ? 'Без ограничений' : ('до ' ~ primary.devices) }}</span></div>
   </div>
   <div class="inline-layout-3">
@@ -41,7 +41,7 @@
   {% for s in active %}{% if s.id != primary.id %}
     <article class="subscription-list-item">
       <div class="subscription-list-item__heading">
-        <div class="subscription-list-item__info"><strong>{{ s.plan_name|default('Подписка') }}</strong><small class="muted">{% if s.plan_archived %}<span class="badge plain">Архив · тариф больше не продаётся</span><br>{% endif %}до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}</small></div>
+        <div class="subscription-list-item__info"><strong>{{ s.plan_name|default('Подписка') }}</strong><small class="muted">{% if s.plan_archived %}<span class="badge plain">Архив · тариф больше не продаётся</span><br>{% endif %}до {{ s.expires_at|date('d.m.Y') }} · {% if s.traffic_limit_gb > 0 %}{{ (s.traffic_used_gb|default(0))|round(3) }} / {{ s.traffic_limit_gb|round }} ГБ{% else %}безлимит{% endif %}{% if s.traffic_usage_synced_at|default(null) %}<br>Обновлено {{ s.traffic_usage_synced_at|date('d.m.Y H:i') }}{% endif %}</small></div>
         <span class="badge active">{{ s.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>
       </div>
       <div class="subscription-list-item__actions">

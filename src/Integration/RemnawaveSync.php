@@ -112,6 +112,40 @@ final class RemnawaveSync
         }
         return $report;
     }
+
+    /** Refresh cached per-subscription usage, never write panel state. */
+    public function syncTrafficUsage(int $limit=100): array
+    {
+        $now=time();$cutoff=$now-600;$limit=max(1,min(1000,$limit));
+        $rows=$this->db->all(
+            "SELECT s.*
+               FROM subscriptions s
+               LEFT JOIN orders o ON o.id=s.order_id
+              WHERE s.status IN ('active','trial') AND s.expires_at>?
+                AND (o.provision_driver='remnawave' OR EXISTS (SELECT 1 FROM provisioning_accounts pa WHERE pa.subscription_id=s.id AND pa.provider='remnawave'))
+                AND (s.traffic_usage_checked_at IS NULL OR s.traffic_usage_checked_at<=?)
+              ORDER BY COALESCE(s.traffic_usage_checked_at,0),s.created_at
+              LIMIT ?",
+            [$now,$cutoff,$limit]
+        );
+        $report=['checked'=>0,'updated'=>0,'errors'=>0];
+        foreach($rows as $subscription){
+            $report['checked']++;
+            try{
+                $remote=$this->provisioner->resolve($subscription);
+                $bytes=$remote['userTraffic']['usedTrafficBytes']??null;
+                if(!$remote||!is_numeric($bytes)||(float)$bytes<0)throw new \RuntimeException('Remnawave traffic usage unavailable');
+                $this->db->execute('UPDATE subscriptions SET traffic_used_gb=?,traffic_usage_checked_at=?,traffic_usage_synced_at=? WHERE id=?',[(float)$bytes/1073741824,$now,$now,$subscription['id']]);
+                $report['updated']++;
+            }catch(\Throwable $e){
+                // Keep the last known usage and back off this row for ten minutes.
+                $this->db->execute('UPDATE subscriptions SET traffic_usage_checked_at=? WHERE id=?',[$now,$subscription['id']]);
+                $report['errors']++;
+            }
+        }
+        return $report;
+    }
+
     private function markActive(string $subscriptionId,string $externalId): void
     {
         $this->db->execute("UPDATE provisioning_accounts SET state='active',external_user_id=?,last_synced_at=?,last_error=NULL,updated_at=? WHERE subscription_id=?",[$externalId,time(),time(),$subscriptionId]);

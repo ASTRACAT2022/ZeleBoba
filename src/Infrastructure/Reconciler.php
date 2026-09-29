@@ -213,6 +213,21 @@ final class Reconciler
                     }
                 }
             }
+            // The client reads cached usage from subscriptions. Poll a bounded
+            // batch each scheduler tick; each row is checked at most every 10 min.
+            $remnawaveUrl=(string)($this->app->config['REMNAWAVE_URL']??'');
+            if(str_starts_with($remnawaveUrl,'https://')){
+                try{
+                    $usageSync=new \App\Integration\RemnawaveSync($db,new \App\Integration\RemnawaveProvisioner(
+                        \Symfony\Component\HttpClient\HttpClient::create(),
+                        $remnawaveUrl,
+                        $this->app->config['REMNAWAVE_TOKEN']??'',
+                        $this->app->config['REMNAWAVE_SQUAD_UUID']??''
+                    ));
+                    $usageReport=$usageSync->syncTrafficUsage(100);
+                    if($usageReport['errors']>0)error_log(json_encode(['event'=>'remnawave.traffic_usage_sync','updated'=>$usageReport['updated'],'errors'=>$usageReport['errors']]));
+                }catch(\Throwable $e){error_log(json_encode(['event'=>'remnawave.traffic_usage_sync.failed','error'=>get_class($e)]));}
+            }
             // Self-heal subscription expiry: keep status AND lifecycle_status consistent
             // so the "active-but-expired" invariant (lifecycle_status='active' && expires_at<=now)
             // never accumulates. lifecycle_status is the source the invariant checks.

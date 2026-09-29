@@ -7,6 +7,11 @@
    - Warns on unsaved form changes for long admin forms.
 */
 (() => {
+  // Refresh cached subscription usage displayed by the server rendered dashboard.
+  if (document.querySelector('[data-traffic-dashboard-refresh]')) {
+    window.setTimeout(() => window.location.reload(), 10 * 60 * 1000);
+  }
+
   // --- submit loading state ---
   document.addEventListener('submit', (event) => {
     const form = event.target;
