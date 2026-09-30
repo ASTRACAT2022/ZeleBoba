@@ -232,20 +232,18 @@ trait AdminActions
             $supportSummary=$this->app->operations->supportSummary($id);
             return $this->render('admin-operation',['operation'=>$operation,'supportSummary'=>$supportSummary]);
         }
-        if($handler==='admin-provisioning')return $this->render('admin-provisioning',['accounts'=>$db->all("SELECT p.*,s.expires_at,s.lifecycle_status,u.email,u.telegram_id FROM provisioning_accounts p JOIN subscriptions s ON s.id=p.subscription_id JOIN users u ON u.id=s.user_id ORDER BY CASE p.state WHEN 'failed' THEN 0 WHEN 'retry' THEN 1 ELSE 2 END,p.updated_at DESC LIMIT 200")]);
+        if($handler==='admin-provisioning')return $this->render('admin-provisioning',['accounts'=>$db->all("SELECT s.id,s.id AS subscription_id,COALESCE(o.provision_driver,'demo') AS provider,s.expires_at,s.lifecycle_status,u.email,u.telegram_id,s.sync_status AS state,s.sync_error AS last_error,s.synced_at AS last_synced_at,s.updated_at FROM subscriptions s JOIN users u ON u.id=s.user_id LEFT JOIN orders o ON o.id=s.order_id ORDER BY CASE s.sync_status WHEN 'error' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,s.updated_at DESC LIMIT 200")]);
         if($handler==='admin-provisioning-retry'){
             $reason=trim($input->get('reason','')); if($reason===''||mb_strlen($reason)>200)throw new BillingError('Укажите причину повторной синхронизации (до 200 символов).');
-            $account=$db->one('SELECT p.*,s.remote_id,s.user_id FROM provisioning_accounts p JOIN subscriptions s ON s.id=p.subscription_id WHERE p.id=?'.$db->lock(),[$id]); if(!$account)throw new BillingError('Provisioning account не найден.');
-            $operation=$this->app->operations->start('provisioning.retry',['user_id'=>$account['user_id'],'subscription_id'=>$account['subscription_id'],'metadata'=>['requested_by'=>$uid,'reason'=>$reason]]);
-            $topic=$account['remote_id']===null?'subscription.provision':'subscription.extend';
-            $db->transaction(function()use($db,$account,$topic,$operation,$reason,$uid){
-                $db->execute("UPDATE provisioning_accounts SET state='retry',last_error=NULL,updated_at=? WHERE id=?",[time(),$account['id']]);
-                $key='manual-retry:'.$account['subscription_id'].':'.$operation['id'];
-                $this->app->outbox->enqueue($topic,$key,['subscription_id'=>$account['subscription_id']],0);
-                $db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$operation['correlation_id'],$key]);
-                $this->app->billing->audit($uid,'provisioning.retry_requested',$account['subscription_id']);
+            $account=$db->one('SELECT id,remote_id,user_id FROM subscriptions WHERE id=?'.$db->lock(),[$id]); if(!$account)throw new BillingError('Подписка не найдена.');
+            $operation=$this->app->operations->start('provisioning.retry',['user_id'=>$account['user_id'],'subscription_id'=>$account['id'],'metadata'=>['requested_by'=>$uid,'reason'=>$reason]]);
+            $db->transaction(function()use($db,$account,$uid,$reason){
+                $db->execute("UPDATE subscriptions SET sync_status='pending',sync_error=NULL,updated_at=? WHERE id=?",[time(),$account['id']]);
+                $this->app->billing->audit($uid,'provisioning.retry_requested',$account['id']);
             });
-            $this->app->operations->event($operation['id'],'provisioning.queued','warning','Manual retry queued',['metadata'=>['reason'=>$reason]]);
+            $syncStatus=$this->app->subscriptionSync->syncOne($account['id']);
+            $this->app->operations->event($operation['id'],'provisioning.retry_finished',$syncStatus==='synced'?'success':'failed','Manual Remnawave sync finished',['metadata'=>['reason'=>$reason,'sync_status'=>$syncStatus]]);
+            $this->app->operations->complete($operation['id'],$syncStatus==='synced'?'success':'failed',$syncStatus==='synced'?'Подписка синхронизирована':'Ошибка синхронизации');
             return new RedirectResponse('/admin/operations/'.$operation['id'],303);
         }
         if($handler==='admin-explain'){$state=(new \App\Observability\StateExplanation($db))->subscription($id);if(!$state)throw new BillingError('Подписка не найдена.');return $this->render('admin-explain',['state'=>$state,'subscription_id'=>$id]);}

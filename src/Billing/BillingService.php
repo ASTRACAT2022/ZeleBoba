@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace App\Billing;
-use App\Infrastructure\{Database,Outbox,DurableWorkflow};
+use App\Infrastructure\{Database,Outbox};
 use App\Subscriptions\SubscriptionService;
 use App\Observability\OperationsService;
 final class BillingService
@@ -10,10 +10,12 @@ final class BillingService
     private ?CreatorService $creators = null;
     private ?ReferralService $referrals = null;
     private ?AnalyticsService $analytics = null;
+    private ?\App\Subscriptions\SubscriptionSyncService $subscriptionSync = null;
     public function __construct(private Database $db, private Outbox $outbox, private string $provider, private ?array $config=null, private ?CustomerTimeline $timeline=null) {}
     public function setCreators(CreatorService $creators): void { $this->creators=$creators; }
     public function setReferrals(ReferralService $referrals): void { $this->referrals=$referrals; }
     public function setAnalytics(AnalyticsService $analytics): void { $this->analytics=$analytics; }
+    public function setSubscriptionSync(\App\Subscriptions\SubscriptionSyncService $sync): void { $this->subscriptionSync=$sync; }
     public function order(string $userId, string $planId, string $key, ?string $receiptEmail=null, ?string $clientIp=null, ?string $renewSubscriptionId=null, ?string $landingSlug=null): array
     {
         if ($this->config!==null) {
@@ -85,14 +87,20 @@ final class BillingService
         $operations=new OperationsService($this->db);
         $op=$operations->start('payment.apply',['order_id'=>$orderId,'metadata'=>['provider'=>$provider,'provider_payment_id'=>$paymentId,'amount_minor'=>$amount,'currency'=>$currency]],$correlationId??'cor_'.substr(hash('sha256',$provider.':'.$paymentId),0,40));
         $analyticsSnapshot=null;
-        try { $this->db->transaction(function () use ($orderId,$provider,$paymentId,$amount,$currency,$operations,$op,&$analyticsSnapshot) {
+        $syncSubscriptionId=null;
+        try { $this->db->transaction(function () use ($orderId,$provider,$paymentId,$amount,$currency,$operations,$op,&$analyticsSnapshot,&$syncSubscriptionId) {
             if ($this->db->postgres()) $this->db->execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',[$provider.':'.$paymentId]);
             $order=$this->db->one('SELECT * FROM orders WHERE id=?'.$this->db->lock(),[$orderId]);
             if (!$order || $order['provider']!==$provider || (int)$order['price_minor']!==$amount || $order['currency']!==$currency || ($order['provider_payment_id']!==null && $order['provider_payment_id']!==$paymentId)) throw new BillingError('Платёж не соответствует заказу.');
             if ($this->db->one("SELECT id FROM topups WHERE provider=? AND provider_payment_id=? AND status='paid'",[$provider,$paymentId])) throw new BillingError('Платёж уже использован для пополнения.');
             $receipt=$this->db->one('SELECT * FROM payment_receipts WHERE provider=? AND payment_id=?',[$provider,$paymentId]);
             if ($receipt) {
-                if ($receipt['order_id']!==$orderId) throw new BillingError('Платёж уже принадлежит другому заказу.');
+                if ($receipt['order_id']!==$orderId || (int)$receipt['amount_minor']!==$amount || $receipt['currency']!==$currency)
+                    throw new BillingError('Повторный платёж не совпадает с сохранённым.');
+                $existingPayment=$this->db->one('SELECT order_id,user_id,amount_minor,currency,status FROM payments WHERE provider=? AND provider_payment_id=?',[$provider,$paymentId]);
+                if (!$existingPayment || $existingPayment['order_id']!==$orderId || $existingPayment['user_id']!==$order['user_id']
+                    || (int)$existingPayment['amount_minor']!==$amount || $existingPayment['currency']!==$currency || $existingPayment['status']!=='succeeded')
+                    throw new BillingError('Сохранённый платёж требует сверки.');
                 return;
             }
             if (!\App\Infrastructure\StateMachine::can('order', (string)$order['status'], 'paid')) throw new BillingError('Заказ уже обработан.');
@@ -113,6 +121,9 @@ final class BillingService
                 Database::id(),$orderId,$order['user_id'],$provider,$paymentId,$amount,$currency,$now,$now,$purpose
             ]);
             $payment=$this->db->one('SELECT * FROM payments WHERE provider=? AND provider_payment_id=?',[$provider,$paymentId]);
+            if (!$payment || $payment['order_id']!==$orderId || $payment['user_id']!==$order['user_id']
+                || (int)$payment['amount_minor']!==$amount || $payment['currency']!==$currency || $payment['status']!=='succeeded')
+                throw new BillingError('Платёж уже принадлежит другому заказу.');
             // Creator credit is part of the same verified-payment transaction;
             // its payment_id unique index makes provider retries harmless.
             if ($payment && $this->creators) $this->creators->recordPayment($payment['id']);
@@ -136,9 +147,9 @@ final class BillingService
                 [Database::id(), $this->nextTxSeq(), $order['user_id'], $type, -$amount, 'Оплата заказа: '.$order['plan_name'], $provider, $paymentId, $now, $now]
             );
             if ($renewSub) {
-                $newExpiry=(new SubscriptionService($this->db,$this->outbox))->extend($renewSub['id'],$order,$now);
+                $newExpiry=(new SubscriptionService($this->db,$this->outbox))->extend($renewSub['id'],$order,$now,false);
+                $syncSubscriptionId=(string)$renewSub['id'];
                 $bonusDays=(int)($order['early_renewal_bonus_days']??0);
-                $this->db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$op['correlation_id'],'extend:'.$renewSub['id'].':'.$orderId]);
                 $this->db->execute('UPDATE operations SET subscription_id=? WHERE id=?',[$renewSub['id'],$op['id']]);
                 $operations->event($op['id'],'subscription.extended','success','Subscription extended',['subscription_id'=>$renewSub['id'],'metadata'=>['expires_at_before'=>(int)$renewSub['expires_at'],'expires_at_after'=>$newExpiry,'early_renewal_bonus_days'=>$bonusDays]]);
                 $this->db->execute('UPDATE subscriptions SET renew_order_id=NULL,renew_at=?,renew_failed_at=NULL,renew_fail_count=0 WHERE id=?',[(int)$renewSub['auto_renew']===1?$this->renewAt($newExpiry,(int)$order['duration_days']):null,$renewSub['id']]);
@@ -149,31 +160,35 @@ final class BillingService
                 // Each purchase is an independent subscription unless it is a renewal order.
                 $months=(int)$order['duration_months'];
                 $expiry=(new SubscriptionService($this->db,$this->outbox))->expiryAfter($now,(int)$order['duration_days'],$months);
-                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,traffic_used_gb,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at,subscription_origin) VALUES(?,?,?,'provisioning',?,?,?,?,0,?,?,'pending',?,?,?,'purchase')",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
+                // PostgreSQL is the source of truth: a paid subscription is active
+                // even while the access panel is unavailable. sync_status tracks
+                // delivery to Remnawave independently from the entitlement.
+                $this->db->execute("INSERT INTO subscriptions(id,order_id,user_id,status,expires_at,created_at,traffic_limit_gb,device_limit,traffic_used_gb,plan_id,plan_version_id,lifecycle_status,starts_at,traffic_limit_bytes,updated_at,subscription_origin,sync_status) VALUES(?,?,?,'active',?,?,?,?,0,?,?,'active',?,?,?,'purchase','pending')",[$sub,$orderId,$order['user_id'],$expiry,$now,(int)$order['traffic_bytes']/1073741824,(int)$order['devices'],$order['plan_id'],$order['plan_version_id']??null,$now,(int)$order['traffic_bytes'],$now]);
                 // Daily-priced tariffs auto-enable the daily charge: while the
                 // wallet covers the daily price the subscription renews itself.
                 if ((int)$order['duration_days']<=1 && $this->autoRenewEnabled()) {
-                    $this->db->execute('UPDATE subscriptions SET auto_renew=1,renew_plan_id=?,renew_price_minor=?,last_daily_charge_at=? WHERE id=? AND status=\'provisioning\'',[$order['plan_id'],(int)$order['price_minor'],$now,$sub]);
+                    $this->db->execute('UPDATE subscriptions SET auto_renew=1,renew_plan_id=?,renew_price_minor=?,last_daily_charge_at=? WHERE id=? AND status=\'active\'',[$order['plan_id'],(int)$order['price_minor'],$now,$sub]);
                     $this->timeline?->record($order['user_id'], 'subscription.daily_auto_enabled', ['subscription_id'=>$sub,'plan_id'=>$order['plan_id']], $now);
                 }
                 $this->db->execute('UPDATE operations SET subscription_id=? WHERE id=?',[$sub,$op['id']]);
                 $operations->event($op['id'],'subscription.created','success','Subscription created',['subscription_id'=>$sub,'metadata'=>['expires_at_after'=>$expiry]]);
-                $this->db->execute("INSERT INTO provisioning_accounts(id,subscription_id,provider,state,created_at,updated_at) VALUES(?,?,?,'pending',?,?)",[Database::id(),$sub,$order['provision_driver']??'demo',$now,$now]);
-                // The workflow, provisioning intent and delivery command are in
-                // this very same payment transaction. A lost queue/worker can
-                // therefore be recovered from PostgreSQL without guessing.
-                (new DurableWorkflow($this->db,$this->outbox))->startFulfillment($orderId,$sub,[
-                    'expires_at'=>$expiry,'traffic_limit_bytes'=>(int)$order['traffic_bytes'],
-                    'device_limit'=>(int)$order['devices'],'provider'=>$order['provision_driver']??'demo',
-                ],$op['correlation_id']);
-                $this->db->execute('UPDATE outbox SET correlation_id=? WHERE dedup_key=?',[$op['correlation_id'],'provision:'.$sub]);
+                $syncSubscriptionId=$sub;
             }
             if (!$renewSub && $order['renewal_subscription_id']===null) $this->referrals?->processPaidSubscription($orderId);
             $analyticsSnapshot=['order'=>$order,'payment'=>$payment,'purpose'=>$purpose,'subscription_id'=>$renewSub['id']??($sub??null)];
             $this->audit('provider:'.$provider,'payment.settled',$orderId);
-            $operations->event($op['id'],'provisioning.queued','processing','Provisioning queued',['metadata'=>['order_id'=>$orderId]]);
-        }); if(!($op['existing']??false))$operations->complete($op['id']);
-            if($analyticsSnapshot&&$this->analytics)try{$this->analytics->trackSettledOrder($analyticsSnapshot['order'],$analyticsSnapshot['payment'],$analyticsSnapshot['purpose'],$analyticsSnapshot['subscription_id']);}catch(\Throwable $analyticsError){error_log('analytics.payment_settled failed: '.get_class($analyticsError));}
+            $operations->event($op['id'],'subscription.sync_pending','processing','Subscription saved; Remnawave sync pending',['metadata'=>['order_id'=>$orderId]]);
+        });
+            // settle() can run inside a wallet transaction. External calls and
+            // operation completion must wait for its outermost commit.
+            $this->db->afterCommit(function() use($op,$operations,$syncSubscriptionId,$analyticsSnapshot): void {
+                if(!($op['existing']??false)) {
+                    try{$operations->complete($op['id']);}
+                    catch(\Throwable $e){error_log(json_encode(['event'=>'payment.operation_complete_failed','order_id'=>$op['order_id']??null,'error_type'=>get_class($e)],JSON_UNESCAPED_SLASHES));}
+                }
+                if($syncSubscriptionId!==null)$this->subscriptionSync?->syncOne($syncSubscriptionId);
+                if($analyticsSnapshot&&$this->analytics)try{$this->analytics->trackSettledOrder($analyticsSnapshot['order'],$analyticsSnapshot['payment'],$analyticsSnapshot['purpose'],$analyticsSnapshot['subscription_id']);}catch(\Throwable $analyticsError){error_log('analytics.payment_settled failed: '.get_class($analyticsError));}
+            });
         } catch (\Throwable $e) { if(!($op['existing']??false))$operations->fail($op['id'],$e); throw $e; }
     }
     /** Personal discounts do not stack with landing discounts. */
@@ -356,10 +371,10 @@ final class BillingService
             // Extend from now (never stack onto a stale anchor), keep paid time.
             $anchor=max($now,(int)$sub['expires_at']);
             $newExpiry=$anchor+$period;
-            $this->db->execute('UPDATE subscriptions SET expires_at=?,last_daily_charge_at=?,renew_at=?,renew_failed_at=NULL,updated_at=?,version=version+1 WHERE id=?',[$newExpiry,$now,$now+$period,$now,$subscriptionId]);
+            $this->db->execute("UPDATE subscriptions SET expires_at=?,last_daily_charge_at=?,renew_at=?,renew_failed_at=NULL,sync_status='pending',sync_error=NULL,updated_at=?,version=version+1 WHERE id=?",[$newExpiry,$now,$now+$period,$now,$subscriptionId]);
             $txId=Database::id();
             (new Wallet($this->db))->debit($sub['user_id'],$price,'subscription_daily','Ежедневное автосписание: '.$plan['name'],'balance',$txId);
-            $this->outbox->enqueue('subscription.extend','daily-extend:'.$subscriptionId.':'.$newExpiry,['subscription_id'=>$subscriptionId]);
+            $this->db->afterCommit(function() use($subscriptionId): void { $this->subscriptionSync?->syncOne($subscriptionId); });
             $this->audit('system','subscription.daily_debited',$subscriptionId);
             return true;
         });

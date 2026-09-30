@@ -25,7 +25,7 @@
     <span class="badge active">{{ primary.status == 'trial' ? 'Пробный период' : 'Активна' }}</span>{% if primary.plan_archived %}<span class="badge plain">Архив · тариф больше не продаётся</span>{% endif %}
   </div>
   <div class="meta-grid">
-    <div class="meta-item"><span class="meta-label">Статус</span><span class="meta-value">● Работает</span></div>
+    <div class="meta-item"><span class="meta-label">Статус</span><span class="meta-value">{{ primary.sync_status|default('synced') == 'synced' ? '● Работает' : '◌ Обновляем доступ' }}</span>{% if primary.sync_status|default('synced') != 'synced' %}<small class="muted">Оплата учтена. Повторим подключение автоматически.</small>{% endif %}</div>
     <div class="meta-item"><span class="meta-label">Действует до</span><span class="meta-value">{{ primary.expires_at|date('d.m.Y') }}</span></div>
     <div class="meta-item"><span class="meta-label">Трафик</span><span class="meta-value">{% if primary.traffic_limit_gb > 0 %}{{ (primary.traffic_used_gb|default(0))|round(3) }} / {{ primary.traffic_limit_gb|round }} ГБ{% else %}{{ (primary.traffic_used_gb|default(0))|round(3) }} ГБ использовано · безлимит{% endif %}</span>{% if primary.traffic_usage_synced_at|default(null) %}<small class="muted">Обновлено {{ primary.traffic_usage_synced_at|date('d.m.Y H:i') }}</small>{% else %}<small class="muted">Ожидается первая синхронизация</small>{% endif %}</div>
     <div class="meta-item"><span class="meta-label">Устройства</span><span class="meta-value">{{ primary.devices == 0 ? 'Без ограничений' : ('до ' ~ primary.devices) }}</span></div>

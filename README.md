@@ -77,7 +77,7 @@ ZeleBoba была построена — и закалена в живом produ
 - **PHP 8.4** (строгие типы), компоненты **Symfony 7.4**, **Twig 3**
 - **PostgreSQL 17** — система записи для состояния, outbox и workflow
 - **Docker / Docker Compose** (единый объединённый runtime-контейнер)
-- **OpenTelemetry** (OTLP exporter) для наблюдаемости
+- **Структурированные журналы приложения** и состояние интеграций в PostgreSQL
 - CI: PHPUnit, PSR-12 lint, `composer validate --strict`, `composer audit`, сборка Docker
 
 ---
@@ -119,10 +119,12 @@ ZeleBoba была построена — и закалена в живом produ
    docker compose up -d db
    docker compose run --rm migrate
    docker compose run --rm app php bin/console app:install owner@example.com
-   docker compose up -d app worker scheduler web
+   docker compose up -d app
    ```
 
    `app:install` запрашивает пароль скрытым вводом. Встроенных учётных данных нет.
+   `GET /health` проверяет PostgreSQL, доступность Remnawave и наличие ключей Platega; `GET /health/live` остаётся быстрой проверкой процесса.
+   Процесс `app` раз в минуту запускает `subscriptions:sync` в существующем цикле обслуживания. Команду можно также запустить вручную: `docker compose exec -T app php bin/console subscriptions:sync`.
 3. Настройте HTTPS-прокси по `infra/reverse-proxy.example.conf`. **Не открывайте порт 8080** в интернет.
 4. Откройте `/login`, включите 2FA, сохраните резервные коды. Затем `/admin/config`: публичный HTTPS URL, ключи, username бота, squad Remnawave. Держите продажи **выключенными** до проверки.
 5. Зарегистрируйте webhook Telegram; в кабинете Platega укажите URL оповещения `https://ваш-домен/webhooks/platega` (POST) и настройте `PLATEGA_SECRET`.

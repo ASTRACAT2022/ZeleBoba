@@ -93,6 +93,8 @@ final class AutoRenewTest extends TestCase
         $order=$billing->order('u','p','daily-autorenew-order');
         $billing->settle($order['id'],'demo','demo_'.$order['id'],19900,'RUB');
         $sub=$db->one('SELECT * FROM subscriptions WHERE order_id=?',[$order['id']]);
+        self::assertSame(1,(int)$sub['auto_renew']);
+        self::assertSame('p',$sub['renew_plan_id']);
         $db->execute("UPDATE subscriptions SET status='active',lifecycle_status='active',expires_at=? WHERE id=?",[time()+86400,$sub['id']]);
         $enabled=$billing->setAutoRenew('u',$sub['id'],true);
         self::assertGreaterThan(time()+60,(int)$enabled['renew_at']);
@@ -103,6 +105,7 @@ final class AutoRenewTest extends TestCase
         self::assertTrue($billing->autoRenewFromBalance($sub['id']));
         $renewed=$db->one('SELECT * FROM subscriptions WHERE id=?',[$sub['id']]);
         self::assertGreaterThan(time()+86400,(int)$renewed['expires_at']);
+        self::assertSame('pending',$renewed['sync_status']);
         self::assertGreaterThan(time()+60,(int)$renewed['renew_at']);
         self::assertSame(0,(new \App\Billing\Wallet($db))->balance('u')['balance_kopeks']);
         self::assertCount(1,$db->all("SELECT id FROM orders WHERE idempotency_key LIKE 'autorenew-balance:%'"));

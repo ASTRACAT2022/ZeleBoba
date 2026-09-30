@@ -24,17 +24,16 @@ final class DurabilityEmulationTest extends TestCase
         $db->execute("UPDATE outbox SET status='done' WHERE topic='subscription.provision'");
         // Simulate a duplicated verified webhook: no second financial or service effect.
         $billing->settle($order['id'],'demo','durability-provider-payment',19900,'RUB');
-        (new DurableWorkflow($db,$outbox))->recover();
-
         self::assertSame(1,(int)$db->one('SELECT COUNT(*) n FROM payments')['n']);
         self::assertSame(2,(int)$db->one('SELECT COUNT(*) n FROM ledger_entries')['n']);
         self::assertSame(1,(int)$db->one('SELECT COUNT(*) n FROM subscriptions')['n']);
-        self::assertSame(1,(int)$db->one('SELECT COUNT(*) n FROM workflows')['n']);
-        self::assertSame(1,(int)$db->one('SELECT COUNT(*) n FROM provisioning_operations')['n']);
-        self::assertGreaterThanOrEqual(1,(int)$db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.provision' AND status='pending'")['n']);
+        self::assertSame('pending',$db->one('SELECT sync_status FROM subscriptions')['sync_status']);
+        self::assertSame(0,(int)$db->one('SELECT COUNT(*) n FROM workflows')['n']);
+        self::assertSame(0,(int)$db->one('SELECT COUNT(*) n FROM provisioning_operations')['n']);
+        self::assertSame(0,(int)$db->one("SELECT COUNT(*) n FROM outbox WHERE topic='subscription.provision'")['n']);
     }
 
-    public function testExhaustedProvisioningCreatesVisibleIncidentState(): void
+    public function testPaidSubscriptionStoresPendingSyncWithoutFulfillmentWorkflow(): void
     {
         $db=new Database('sqlite::memory:'); $db->migrate(__DIR__.'/../migrations');
         $user=(new Auth($db))->register('escalation@example.test','correct horse battery staple');
@@ -42,13 +41,10 @@ final class DurabilityEmulationTest extends TestCase
         $outbox=new Outbox($db); $billing=new BillingService($db,$outbox,'demo');
         $order=$billing->order($user,'escalation','durability-escalation-key');
         $billing->settle($order['id'],'demo','escalation-provider-payment',19900,'RUB');
-        $subscription=$db->one('SELECT id FROM subscriptions WHERE order_id=?',[$order['id']]);
-        $db->execute("UPDATE provisioning_operations SET attempts=1,max_attempts=1,next_attempt_at=0 WHERE subscription_id=?",[$subscription['id']]);
-
-        self::assertNull((new DurableWorkflow($db,$outbox))->claimActivation($subscription['id'],'test-worker'));
-        self::assertSame('failed_needs_attention',$db->one('SELECT status FROM provisioning_operations WHERE subscription_id=?',[$subscription['id']])['status']);
-        self::assertSame('failed_needs_attention',$db->one('SELECT state FROM workflows WHERE entity_id=?',[$order['id']])['state']);
-        self::assertSame(1,(int)$db->one("SELECT COUNT(*) n FROM operational_cases WHERE subscription_id=? AND status='open'",[$subscription['id']])['n']);
+        $subscription=$db->one('SELECT id,sync_status FROM subscriptions WHERE order_id=?',[$order['id']]);
+        self::assertSame('pending',$subscription['sync_status']);
+        self::assertSame('succeeded',$db->one("SELECT status FROM payments WHERE provider_payment_id='escalation-provider-payment'")['status']);
+        self::assertSame(0,(int)$db->one('SELECT COUNT(*) n FROM workflows')['n']);
     }
 
     public function testStaleUnknownCheckoutBecomesVisibleForReconciliation(): void

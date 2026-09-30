@@ -66,6 +66,7 @@ final class Container
     public readonly InvestigationService $investigations;
     public readonly DemoEvents $demoEvents;
     public readonly SubscriptionMergeService $merger;
+    public readonly \App\Subscriptions\SubscriptionSyncService $subscriptionSync;
     public readonly array $config;
     public function __construct(array $config)
     {
@@ -120,6 +121,8 @@ final class Container
         $http=HttpClient::create();
         $this->payments=new Payments($this->db,$this->billing,$http,$config);
         $remnawave=new RemnawaveProvisioner($http,$config['REMNAWAVE_URL'],$config['REMNAWAVE_TOKEN'],$config['REMNAWAVE_SQUAD_UUID'],$this->circuitBreaker);
+        $this->subscriptionSync=new \App\Subscriptions\SubscriptionSyncService($this->db,$remnawave,$config['PROVISION_DRIVER'],$config['REMNAWAVE_TOKEN']);
+        $this->billing->setSubscriptionSync($this->subscriptionSync);
         $this->investigations=new InvestigationService($this->db,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null);
         $this->userAdmin=new UserAdminService($this->db,$this->wallet,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->outbox,$this->timeline);
         $this->merger=new \App\Subscriptions\SubscriptionMergeService($this->db,$this->outbox,$config['PROVISION_DRIVER']==='remnawave'?$remnawave:null,$this->timeline);

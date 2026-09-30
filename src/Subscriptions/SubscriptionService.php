@@ -23,7 +23,7 @@ final class SubscriptionService
     }
 
     /** Called inside the payment transaction after the payment and order are locked. */
-    public function extend(string $subscriptionId, array $order, int $now): int
+    public function extend(string $subscriptionId, array $order, int $now, bool $queueProvision=true): int
     {
         $sub=$this->db->one('SELECT * FROM subscriptions WHERE id=?'.$this->db->lock(),[$subscriptionId]);
         if (!$sub) throw new \RuntimeException('Subscription not found');
@@ -34,8 +34,8 @@ final class SubscriptionService
         // The bonus is captured on the renewal order at checkout and is only
         // applied here, after verified payment, inside the same transaction.
         $expires+=max(0,min(365,(int)($order['early_renewal_bonus_days']??0)))*86400;
-        $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',lifecycle_status='active',updated_at=?,version=version+1 WHERE id=?",[$expires,$now,$subscriptionId]);
-        $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
+        $this->db->execute("UPDATE subscriptions SET expires_at=?,status='active',lifecycle_status='active',sync_status='pending',sync_error=NULL,updated_at=?,version=version+1 WHERE id=?",[$expires,$now,$subscriptionId]);
+        if($queueProvision)$this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
             Database::id(),'subscription.extend','extend:'.$subscriptionId.':'.$order['id'],json_encode(['subscription_id'=>$subscriptionId,'order_id'=>$order['id']],JSON_THROW_ON_ERROR),80,$now,$now,$order['id']
         ]);
         return $expires;

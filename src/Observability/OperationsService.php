@@ -16,10 +16,18 @@ final class OperationsService
         if ($existing) { $existing['existing'] = true; return $existing; }
         $traceId = bin2hex(random_bytes(16));
         $now = time();
-        $this->db->execute(
-            'INSERT INTO operations(id,correlation_id,trace_id,type,status,user_id,subscription_id,order_id,payment_id,started_at,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+        $created=$this->db->execute(
+            'INSERT INTO operations(id,correlation_id,trace_id,type,status,user_id,subscription_id,order_id,payment_id,started_at,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(correlation_id) DO NOTHING',
             [$operationId, $correlationId, $traceId, $type, 'processing', $refs['user_id'] ?? null, $refs['subscription_id'] ?? null, $refs['order_id'] ?? null, $refs['payment_id'] ?? null, $now, $this->json($refs['metadata'] ?? [])]
         );
+        if (!$created) {
+            // Another request may have inserted the same correlation between
+            // our first SELECT and INSERT. The unique key is the arbiter.
+            $existing=$this->db->one('SELECT id,correlation_id,trace_id FROM operations WHERE correlation_id=?',[$correlationId]);
+            if (!$existing) throw new \RuntimeException('Concurrent operation was not visible');
+            $existing['existing']=true;
+            return $existing;
+        }
         $this->event($operationId, $type . '.started', 'processing', 'Operation started', $refs);
         return ['id' => $operationId, 'correlation_id' => $correlationId, 'trace_id' => $traceId, 'existing' => false];
     }

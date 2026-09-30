@@ -15,14 +15,18 @@ numeric ID; `users.telegram_id` пока остаётся read-проекцие�
 
 Заказ описывает намерение и его snapshot, строки находятся в `order_items`.
 Попытка/факт оплаты — отдельная строка `payments`; принятые webhooks сначала
-попадают в `payment_events`. Worker получает команду из outbox и выполняет
-авторитетную проверку у провайдера, только затем запускает атомарный settlement.
+попадают в `payment_events`, затем обработчик в том же HTTP-запросе проверяет
+`payment_id` через API Platega и выполняет атомарный settlement. Повтор webhook
+безопасен благодаря уникальному ключу провайдера и идемпотентной обработке.
 
 `subscriptions.expires_at` — единственный бизнес-срок. Для тарифов с
 `duration_months` период добавляется календарно с ограничением последним днём
 целевого месяца; для legacy-тарифов используется `duration_days`.
-`provisioning_accounts` хранит внешнее состояние отдельно от права пользователя:
-оплата и продление завершатся, даже если Remnawave временно недоступен.
+`subscriptions.sync_status` хранит состояние интеграции (`synced`, `pending`,
+`error`) рядом с правом пользователя. Оплата и срок фиксируются в PostgreSQL
+до вызова Remnawave; ошибка панели не откатывает settlement. Повтор выполняет
+`php bin/console subscriptions:sync` раз в минуту из существующего процесса `app`. Старые таблицы provisioning/workflow
+пока остаются для прежних потоков и экранов, но новая покупка ими не управляется.
 
 Полный список неизменяемых правил находится в [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
@@ -30,10 +34,15 @@ numeric ID; `users.telegram_id` пока остаётся read-проекцие�
 flowchart LR
     Web[Веб-кабинет / админка] --> App[PHP: Web / Identity / Billing]
     TG[Telegram webhook] --> App
-    PL[Platega webhook] --> Verify[Проверка через API Platega]
+    PL[Platega webhook] --> App
+    App --> Verify[Проверка payment_id через API Platega]
     Verify --> App
-    App --> DB[(PostgreSQL: заказы / квитанции / учёт / outbox)]
-    DB --> Worker[Фоновые workers]
+    App --> DB[(PostgreSQL: заказы / платежи / подписки)]
+    App --> Remna[Попытка синхронизации Remnawave после commit]
+    Remna --> App
+    DB --> Cron[subscriptions:sync, раз в минуту]
+    Cron --> Remna
+    DB --> Worker[Остальные фоновые функции]
     Worker --> Payment[Создание платежа]
     Worker --> Remna[Remnawave]
     Worker --> Bot[Telegram Bot API]
@@ -111,7 +120,7 @@ Runtime PostgreSQL отделён от владельца. Скрипт backup �
 
 ### Стек и процессы
 - **PHP 8.4+, Symfony 7.4 LTS** (HttpClient/HttpFoundation/Routing), **Twig**, **PDO + PostgreSQL 17**. UI — серверный HTML/Twig, без SPA, покупка работает без JS.
-- 4 PHP-контейнера: `app` (FPM, веб/кабинет/админка), `worker` (outbox-джобы), `scheduler` (Reconciler по таймеру), `bot` (Telegram long-polling/webhook). Все читают одну PostgreSQL `billing` и общий outbox. Nginx отдаёт статику из `public/`, PHP — из `/app/src`.
+- Compose запускает один runtime-сервис `app` (FPM, outbox worker, Reconciler и Telegram long-polling) и PostgreSQL `db`; роли приложения используют одну БД. Миграции запускаются отдельной maintenance-командой. Nginx в legacy-профиле отдаёт статику из `public/` и передаёт PHP-FPM запросы.
 - Все зависимости собираются вручную в `Container.php` (не Symfony DI). Конфиг = `Settings::DEFAULTS` + env + переопределения из `app_settings` (секреты шифруются XChaCha20-Poly1305, master key в отдельном файле).
 
 ### Поток покупки (полный путь)
@@ -119,15 +128,15 @@ Runtime PostgreSQL отделён от владельца. Скрипт backup �
 2. **Worker: `payment.create`** → `PaymentService::createOrder()` → провайдер (Platega: `POST /v2/transaction/process` с `X-MerchantId`+`X-Secret`) → сохраняет `provider_payment_id`+`checkout_url`. Пользователь платит на `pay.platega.io`.
 3. **Уведомление провайдера** (webhook) приходит на `/webhooks/{provider}`:
    - `WebhookGuard::claim()` — replay/tamper detection (sha256 payload, UNIQUE(provider, id), mismatch ⇒ tamper).
-   - `PaymentEventStore::receive()` — durable inbox: вставляет `payment_events` (ack только после фикса), ставит `payment.event.process` в outbox. Webhook ≠ команда: settlement всегда через авторитетную проверку.
-4. **Worker: `payment.event.process`** → `PaymentService::processEvent()` → `PaymentEventStore::claim()` (lease/блокировка) → если статус `canceled` — short-circuit (помечает заказы/topups отменёнными, ничего не списывает) → иначе `PaymentService::verify()`.
+   - `PaymentEventStore::receive()` — durable inbox: фиксирует `payment_events`, чтобы повтор webhook был идемпотентным. После commit обработчик сразу проверяет платёж у провайдера в рамках этого HTTP-запроса.
+4. **`PaymentService::processEvent()`** → проверка статуса у провайдера; если оплата не подтверждена, деньги и подписка не меняются. При временной ошибке событие остаётся доступно Reconciler для повтора.
 5. **`PaymentService::verify(payment_id)`** — авторитетная проверка у провайдера (`PlategaProvider::verify()` ⇨ `GET /transaction/{id}`, Platega возвращает `paymentDetails.amount` gross, `comission`; net = amount − comission). Возвращает `paid/canceled/pending` + net-копейки + привязку.
 6. **Settlement → `BillingService::settle()`** — атомарно в одной транзакции (pg_advisory_xact_lock по `provider:payment_id`):
    - проверка привязки (заказ=провайдер, сумма net=price_minor, currency, `provider_payment_id` совпадает, не «уже использован», не «принадлежит другому заказу», заказ `pending`);
-   - `payment_receipts` (UNIQUE provider+payment_id, один платёж = один заказ) + `payments` (UNIQUE provider+provider_payment_id) + две противоположные `ledger_entries` (двойная запись, нулевая сумма) + `orders→paid` + подписка (renewal ⇒ `extend()` существующей; новая ⇒ insert `subscriptions` + `provisioning_accounts` + `subscription.provision` в outbox) + `transactions` + аудит + timeline.
+   - `payment_receipts` (UNIQUE provider+payment_id, один платёж = один заказ) + `payments` (UNIQUE provider+provider_payment_id) + две противоположные `ledger_entries` (двойная запись, нулевая сумма) + `orders→paid` + подписка (renewal ⇒ `extend()` существующей и `sync_status='pending'`; новая ⇒ insert `subscriptions` с `sync_status='pending'`) + `transactions` + аудит + timeline.
    - **Идемпотентно**: повторный verify/ретрай не создаёт вторую подписку (UNIQUE + advisory lock + payment_receipts).
-7. **Worker: `subscription.provision`** → `RemnawaveProvisioner` (или demo). Успех ⇒ `subscriptions→active`, `remote_id`. Детерминированный username, GET-перед-таймаутом.
-8. **`subscriptions.expires_at`** — единственный бизнес-срок. Оплата закрепляет права независимо от Remnawave: простой выдачи не отменяет оплату (только продление срока через отдельную компенсацию).
+7. После commit `SubscriptionSyncService::syncOne()` сразу вызывает Remnawave. Успех ⇒ `sync_status='synced'`; ошибка ⇒ `sync_status='error'` и короткий `sync_error`. `subscriptions:sync` повторяет строки `pending/error` (до 100 за запуск). Новые подписки больше не создают fulfillment workflow или outbox job.
+8. **`subscriptions.expires_at`** — единственный бизнес-срок. Оплата закрепляет права независимо от Remnawave: простой выдачи не отменяет оплату.
 
 ### Wallet / topups / бонусы
 - `TopupService` — пополнение баланса (allowlist провайдеров, idempotency, settle по net аналогично заказу). `Wallet` — баланс из approved минус applied.
@@ -136,7 +145,7 @@ Runtime PostgreSQL отделён от владельца. Скрипт backup �
 
 ### Очередь (outbox) — сердце надёжности
 - `Outbox` — durable-очередь в PostgreSQL. `FOR UPDATE SKIP LOCKED` раздаёт разным workers разные задания. Lease 120с + lock_token (чужой lease не завершишь). **at-least-once**: повторы безопасны благодаря идемпотентности денег.
-- Retry: exp-boosted backoff + jitter, 8 попыток → `dead` (админ может повторить из панели). `JobDeferred` (safe mode/пауза) — не тратит попытки.
+- Retry: exp-boosted backoff + jitter, 8 попыток → `dead` (админ может повторить из панели). `JobDeferred` (safe mode/пауза) — не тратит попытки. Успешный webhook закрывается синхронно; outbox остаётся для создания checkout, выдачи подписки и уведомлений.
 - Приоритеты: `payment.verify`/`payment.event.process`=100, `payment.create`/`topup.create`=90, provisioning=80, telegram=60, broadcast=10.
 - Payload шифруется (enc:) и очищается после done.
 

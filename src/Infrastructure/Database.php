@@ -6,6 +6,8 @@ final class Database
 {
     public readonly PDO $pdo;
     private int $depth=0;
+    /** Callbacks belonging to each transaction/savepoint level. */
+    private array $afterCommit=[];
     public function __construct(string $dsn, string $user = '', string $password = '')
     {
         $this->pdo = new PDO($dsn, $user, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]);
@@ -26,23 +28,61 @@ final class Database
     }
     public function one(string $sql, array $params = []): ?array { return $this->all($sql, $params)[0] ?? null; }
     public function lock(): string { return $this->postgres() ? ' FOR UPDATE' : ''; }
+    public function afterCommit(callable $callback): void
+    {
+        if ($this->depth===0) {
+            $this->runAfterCommit([$callback]);
+            return;
+        }
+        $this->afterCommit[$this->depth-1][]=$callback;
+    }
+    private function runAfterCommit(array $callbacks): void
+    {
+        foreach ($callbacks as $callback) {
+            try { $callback(); }
+            catch (\Throwable $e) {
+                // The commit already succeeded. Report the failed side effect
+                // without making the caller believe its money was rolled back.
+                error_log(json_encode(['event'=>'db.after_commit_failed','error_type'=>get_class($e)],JSON_UNESCAPED_SLASHES));
+            }
+        }
+    }
     public function transaction(callable $fn): mixed
     {
         if($this->depth>0){
-            $name='nested_'.$this->depth++;$this->pdo->exec('SAVEPOINT '.$name);
-            try{$result=$fn();$this->pdo->exec('RELEASE SAVEPOINT '.$name);return $result;}catch(\Throwable $e){$this->pdo->exec('ROLLBACK TO SAVEPOINT '.$name);$this->pdo->exec('RELEASE SAVEPOINT '.$name);throw $e;}finally{$this->depth--;}
+            $name='nested_'.$this->depth;
+            $this->pdo->exec('SAVEPOINT '.$name);
+            $this->depth++;
+            $this->afterCommit[$this->depth-1]=[];
+            try {
+                $result=$fn();
+                $this->pdo->exec('RELEASE SAVEPOINT '.$name);
+                $callbacks=array_pop($this->afterCommit);
+                array_push($this->afterCommit[$this->depth-2],...$callbacks);
+                return $result;
+            } catch(\Throwable $e) {
+                $this->pdo->exec('ROLLBACK TO SAVEPOINT '.$name);
+                $this->pdo->exec('RELEASE SAVEPOINT '.$name);
+                array_pop($this->afterCommit);
+                throw $e;
+            } finally { $this->depth--; }
         }
         // SQLite is only a development backend. IMMEDIATE serializes writers there.
         $this->postgres() ? $this->pdo->beginTransaction() : $this->pdo->exec('BEGIN IMMEDIATE');
         $this->depth=1;
+        $this->afterCommit=[[]];
         try {
             $result = $fn();
             $this->postgres() ? $this->pdo->commit() : $this->pdo->exec('COMMIT');
+            $callbacks=$this->afterCommit[0];
+            $this->afterCommit=[];
+            $this->depth=0;
+            $this->runAfterCommit($callbacks);
             return $result;
         } catch (\Throwable $e) {
             $this->postgres() ? $this->pdo->rollBack() : $this->pdo->exec('ROLLBACK');
             throw $e;
-        } finally { $this->depth=0; }
+        } finally { $this->depth=0; $this->afterCommit=[]; }
     }
     public function migrate(string $directory): void
     {

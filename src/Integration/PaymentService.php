@@ -188,9 +188,11 @@ final class PaymentService
         $status = $result['status'];
         if (!is_string($paymentId) || $paymentId==='' || strlen($paymentId)>100) return false;
         if (in_array($status,['paid','canceled'],true)) {
-            // Acknowledge only after a durable inbox row and its outbox command
-            // are committed. The provider API remains authoritative for settlement.
-            $this->db->transaction(function () use ($paymentId,$providerId,$status,$result,$request) {
+            // Persist the deduplicated delivery first, then verify and settle in
+            // this request. Remnawave provisioning remains independent and is
+            // retried from PostgreSQL if the panel is unavailable.
+            $eventToProcess=null;
+            $this->db->transaction(function () use ($paymentId,$providerId,$status,$result,$request,&$eventToProcess) {
                 $eventId=(string)($result['event_id'] ?? ($paymentId.':'.$status));
                 // Tamper guard (only defense in depth since Platega webhooks
                 // carry no HMAC/timestamp): same provider_event_id but changed
@@ -237,6 +239,7 @@ final class PaymentService
                 }
                 $id=$this->events?->receive($providerId,$eventId,$paymentId,$result,true,$this->webhookHeaders($request)) ?? '';
                 if ($id!=='') {
+                    $eventToProcess=$id;
                     // Replay guard: if this event was already fully processed, a
                     // repeated delivery of the same provId/eventId is a benign
                     // duplicate (or a replay) — ack it but do NOT re-enqueue a
@@ -249,11 +252,15 @@ final class PaymentService
                     if ($already !== null && $already['status'] === 'processed') {
                         return; // benign replay/duplicate: already handled
                     }
-                    $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
+                    // Older deployments without a durable event store still
+                    // use the outbox. The normal Platega path processes the
+                    // committed event synchronously just below.
+                    if ($this->events===null) $this->db->execute('INSERT INTO outbox(id,topic,dedup_key,payload,priority,available_at,created_at,correlation_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedup_key) DO NOTHING',[
                         Database::id(),'payment.event.process','payment-event:'.$id,json_encode(['event_id'=>$id],JSON_THROW_ON_ERROR),100,time(),time(),$id
                     ]);
                 } else $this->outboxEnqueueVerify($paymentId,$providerId,$status);
             });
+            if ($eventToProcess!==null) $this->processEvent($eventToProcess);
         }
         return true;
     }

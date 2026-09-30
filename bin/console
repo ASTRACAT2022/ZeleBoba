@@ -35,6 +35,11 @@ $cli->add((new Command('billing:recover'))->setDescription('Recreate delivery co
     $o->writeln('Recovered inbox events: '.$events.', fulfillment workflows: '.$workflows);
     return 0;
 }));
+$cli->add((new Command('subscriptions:sync'))->setDescription('Sync pending subscriptions with Remnawave')->addOption('limit',null,InputOption::VALUE_REQUIRED,'Maximum subscriptions',100)->setCode(function(InputInterface $i,OutputInterface $o) use($c){
+    $result=$c->subscriptionSync->run(max(1,min(1000,(int)$i->getOption('limit'))));
+    $o->writeln(sprintf('Checked %d, synced %d, pending %d, errors %d',$result['checked'],$result['synced'],$result['pending'],$result['errors']));
+    return $result['errors']>0?1:0;
+}));
 $cli->add((new Command('billing:audit'))->setDescription('Check ledger and paid order invariants')->setCode(function(InputInterface $i,OutputInterface $o) use($c){
     $errors=$c->db->all("SELECT o.id FROM orders o LEFT JOIN ledger_entries l ON l.order_id=o.id WHERE o.status IN ('paid','fulfilled') GROUP BY o.id HAVING COUNT(l.id)<>2 OR SUM(l.amount_minor)<>0");
     $missing=$c->db->all("SELECT o.id FROM orders o LEFT JOIN subscriptions s ON s.order_id=o.id LEFT JOIN payment_receipts p ON p.order_id=o.id WHERE o.status IN ('paid','fulfilled') AND (s.id IS NULL OR p.order_id IS NULL)");

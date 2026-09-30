@@ -20,8 +20,17 @@ mkdir -p "$TMP_DIR" || die "cannot create $TMP_DIR"
 
 run_scheduler() {
     while true; do
-        php bin/console billing:reconcile
-        sleep "$SLEEP_SECONDS"
+        STARTED=$(date +%s)
+        if php bin/console billing:reconcile; then :; else
+            echo "[scheduler] billing:reconcile failed; retrying next cycle" >&2
+        fi
+        if php bin/console subscriptions:sync; then :; else
+            echo "[scheduler] subscriptions:sync failed; retrying next cycle" >&2
+        fi
+        ELAPSED=$(( $(date +%s) - STARTED ))
+        WAIT=$(( SLEEP_SECONDS - ELAPSED ))
+        [ "$WAIT" -ge 1 ] || WAIT=1
+        sleep "$WAIT"
     done
 }
 

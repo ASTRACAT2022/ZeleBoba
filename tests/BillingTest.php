@@ -33,7 +33,8 @@ final class BillingTest extends TestCase
         $o=$this->order();$this->pay($o);$this->pay($o);
         self::assertCount(1,$this->db->all('SELECT * FROM payment_receipts'));self::assertCount(1,$this->db->all('SELECT * FROM subscriptions'));
         self::assertCount(2,$this->db->all('SELECT * FROM ledger_entries'));self::assertSame(0,(int)$this->db->one('SELECT SUM(amount_minor) AS total FROM ledger_entries')['total']);
-        self::assertCount(1,$this->db->all("SELECT * FROM outbox WHERE topic='subscription.provision'"));
+        self::assertSame('pending',$this->db->one('SELECT sync_status FROM subscriptions')['sync_status']);
+        self::assertCount(0,$this->db->all("SELECT * FROM outbox WHERE topic='subscription.provision'"));
     }
     public function testWrongAmountRollsBackEverything():void
     {
@@ -49,6 +50,18 @@ final class BillingTest extends TestCase
     {
         $a=$this->order();$b=$this->order('second-key-123');$this->pay($a);
         $this->expectException(BillingError::class);$this->pay($b);
+    }
+    public function testOrphanPaymentCannotSettleAnotherOrder():void
+    {
+        $a=$this->order();$b=$this->order('second-key-123');
+        $this->db->execute("INSERT INTO payments(id,order_id,user_id,provider,provider_payment_id,amount_minor,currency,status,created_at,paid_at) VALUES(?,?,?,?,?,?,?,'succeeded',?,?)",[
+            Database::id(),$a['id'],$this->uid,'demo','orphan-payment',19900,'RUB',time(),time()
+        ]);
+        try{$this->pay($b,'orphan-payment');self::fail('Payment collision must be rejected');}
+        catch(BillingError $e){self::assertStringContainsString('другому заказу',$e->getMessage());}
+        self::assertSame(0,(int)$this->db->one('SELECT COUNT(*) n FROM payment_receipts')['n']);
+        self::assertSame(0,(int)$this->db->one('SELECT COUNT(*) n FROM subscriptions')['n']);
+        self::assertSame('pending',$this->db->one('SELECT status FROM orders WHERE id=?',[$b['id']])['status']);
     }
     public function testTransactionFailureRollsBackReceiptAndLedger():void
     {
@@ -91,21 +104,22 @@ final class BillingTest extends TestCase
     {
         $o=$this->order('panel-readback-key');
         $this->db->execute("UPDATE orders SET provision_driver='remnawave',squad_uuid='squad' WHERE id=?",[$o['id']]);
-        $this->pay($o,'panel-readback-payment');
-        $id=$this->db->one('SELECT id FROM subscriptions WHERE order_id=?',[$o['id']])['id'];
         $gets=0;
-        $http=new MockHttpClient(function($method,$url)use(&$gets,$id){
-            if ($method==='POST') return new MockResponse(json_encode(['response'=>['id'=>777,'username'=>'zb_'.$id,'subscriptionUrl'=>'https://panel.example/sub']]));
+        $username='';
+        $http=new MockHttpClient(function($method,$url)use(&$gets,&$username){
+            if ($method==='POST') return new MockResponse(json_encode(['response'=>['id'=>777,'username'=>$username,'subscriptionUrl'=>'https://panel.example/sub']]));
             $gets++;
+            if(str_contains($url,'/by-username/'))$username=substr($url,strrpos($url,'/')+1);
             return new MockResponse('{}',['http_code'=>404]);
         });
-        $worker=new Worker($this->db,$this->outbox,new Payments($this->db,$this->billing,$http,[]),new RemnawaveProvisioner($http,'https://panel.example','token','squad'),$http,'',defaultProvisionDriver:'remnawave',workflows:new \App\Infrastructure\DurableWorkflow($this->db,$this->outbox));
-        try {$worker->handle('subscription.provision',['subscription_id'=>$id]);self::fail('Missing panel account was accepted');}
-        catch (\RuntimeException $e) {self::assertSame('Remnawave user not found after activation',$e->getMessage());}
+        $this->billing->setSubscriptionSync(new \App\Subscriptions\SubscriptionSyncService($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad'),'remnawave','token'));
+        $this->pay($o,'panel-readback-payment');
+        $id=$this->db->one('SELECT id FROM subscriptions WHERE order_id=?',[$o['id']])['id'];
         self::assertGreaterThanOrEqual(2,$gets);
-        self::assertSame('provisioning',$this->db->one('SELECT status FROM subscriptions WHERE id=?',[$id])['status']);
+        self::assertSame('active',$this->db->one('SELECT status FROM subscriptions WHERE id=?',[$id])['status']);
+        self::assertSame('active',$this->db->one('SELECT lifecycle_status FROM subscriptions WHERE id=?',[$id])['lifecycle_status']);
         self::assertSame('paid',$this->db->one('SELECT status FROM orders WHERE id=?',[$o['id']])['status']);
-        self::assertSame('unknown',$this->db->one('SELECT status FROM provisioning_operations WHERE subscription_id=?',[$id])['status']);
+        self::assertSame('error',$this->db->one('SELECT sync_status FROM subscriptions WHERE id=?',[$id])['sync_status']);
         self::assertSame(0,(int)$this->db->one("SELECT COUNT(*) n FROM outbox WHERE topic='telegram.send'")['n']);
     }
     public function testRecoveryDoesNotCompleteWorkflowForMissingPanelAccount():void
@@ -116,10 +130,9 @@ final class BillingTest extends TestCase
         $id=$this->db->one('SELECT id FROM subscriptions WHERE order_id=?',[$o['id']])['id'];
         $this->db->execute("UPDATE subscriptions SET status='active',remote_id='777' WHERE id=?",[$id]);
         $http=new MockHttpClient(fn()=>new MockResponse('{}',['http_code'=>404]));
-        $worker=new Worker($this->db,$this->outbox,new Payments($this->db,$this->billing,$http,[]),new RemnawaveProvisioner($http,'https://panel.example','token','squad'),$http,'',defaultProvisionDriver:'remnawave',workflows:new \App\Infrastructure\DurableWorkflow($this->db,$this->outbox));
-        try {$worker->handle('subscription.provision',['subscription_id'=>$id]);self::fail('Missing panel account completed workflow');}
-        catch (\RuntimeException $e) {self::assertSame('Remnawave user not found after activation',$e->getMessage());}
-        self::assertSame('unknown',$this->db->one('SELECT status FROM provisioning_operations WHERE subscription_id=?',[$id])['status']);
+        $sync=new \App\Subscriptions\SubscriptionSyncService($this->db,new RemnawaveProvisioner($http,'https://panel.example','token','squad'),'remnawave','token');
+        self::assertSame('error',$sync->syncOne($id));
+        self::assertSame('error',$this->db->one('SELECT sync_status FROM subscriptions WHERE id=?',[$id])['sync_status']);
         self::assertSame('paid',$this->db->one('SELECT status FROM orders WHERE id=?',[$o['id']])['status']);
     }
     public function testLegacyPanelIdDoesNotCreateDuplicateAccount():void
