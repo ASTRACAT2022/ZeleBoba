@@ -77,6 +77,10 @@ final class Application
             if ($handler==='ready') { $this->app->db->one('SELECT version FROM migrations LIMIT 1'); return new JsonResponse(['status'=>'ready']); }
             if (strlen($r->getContent())>65536) return new JsonResponse(['error'=>'Request too large'],413);
             if (in_array($handler,['telegram','platega'],true)) return $this->webhook($handler);
+            // ZeleBoba service has moved: every user-facing page shows the move
+            // notice. Health checks and channel webhooks stay reachable above so
+            // monitoring and payment/bot plumbing keep working.
+            return new Response($this->twig->render('moved.html.twig',['style_nonce'=>$this->styleNonce,'site_name'=>$this->app->branding->name(),'footer_text'=>$this->app->branding->footerText(),'support_url'=>'','path'=>$r->getPathInfo(),'now'=>time(),'logo'=>$this->app->branding->logo(),'favicon'=>$this->app->branding->favicon(),'css_vars'=>$this->app->branding->cssVars(),'user'=>null,'is_staff'=>false,'creator_active'=>false,'demo'=>false,'telegram_enabled'=>false,'purchases_enabled'=>false,'receipt_required'=>false,'freekassa_email_required'=>false,'payment_driver'=>$this->app->config['PAYMENT_DRIVER'],'balance_kopeks'=>0]),200);
             $this->user=$this->app->auth->session($r->cookies->get('zb_session',''));
             if(in_array($handler,['home','plans','register','login','order'],true))$this->analyticsVisit=$this->app->analytics->captureVisit($r,$handler,$this->user['id']??null);
             if(str_starts_with($handler,'tg-')) return $this->telegramAuth($handler);

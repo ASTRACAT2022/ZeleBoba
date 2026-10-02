@@ -43,14 +43,24 @@ final class Telegram
         $id=$update['update_id']??null; $message=$update['message']??null;
         $callback=$update['callback_query']??null;
         $this->callbackMessage = is_array($callback) ? $callback : null;
+        // ZeleBoba has moved: this bot no longer serves accounts. Answer every
+        // private message with the move notice and a button to the new bot;
+        // swallow callbacks so old screens cannot mutate anything.
         if($callback){
-            $this->handleCallback($id,$callback);
+            $cbChat=$callback['from']['id']??null;
+            if(is_int($id) && is_int($cbChat) && ($callback['message']['chat']['type']??'')==='private'){
+                $q=$callback['id']??'';
+                if(is_string($q) && $q!=='') $this->db->transaction(fn()=> $this->outbox->enqueue('telegram.answer','answer:'.$id,['callback_query_id'=>$q]));
+                $this->sendMoveNotice($id,(string)$cbChat);
+            }
             return;
         }
         if (!is_int($id)) throw new BillingError('Invalid update');
         // Never trust group messages or forwarded identities for account operations.
         if (!$message || ($message['chat']['type']??'')!=='private' || !is_int($message['from']['id']??null) || ($message['from']['id']??null)!==($message['chat']['id']??null)) return;
-        $tg=(string)$message['from']['id']; $text=trim($message['text']??'');
+        $tg=(string)$message['from']['id'];
+        $this->sendMoveNotice($id,$tg);
+        return;
         // Persist inbox receipt and response together. Purchases use the update id as a separate idempotency key.
         if ($this->db->one('SELECT update_id FROM telegram_updates WHERE update_id=?',[$id])) return;
         // Mandatory channel gate: block the whole bot until the user follows required channels.
@@ -411,6 +421,15 @@ final class Telegram
         }
         $this->db->transaction(function () use ($updateId,$chatId,$text,$markup) {
             if ($this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$updateId,time()])) $this->outbox->enqueue('telegram.send','reply:'.$updateId,array_filter(['chat_id'=>$chatId,'text'=>$text,'reply_markup'=>$markup],fn($v)=>$v!==null));
+        });
+    }
+    /** "We have moved" notice sent from every private message while the old bot is retired. */
+    private function sendMoveNotice(int $updateId, string $tg): void
+    {
+        $text="👋 Привет!\n\nМы переехали в нового бота 🚀\n\nТеперь все функции доступны здесь:\n@CommonNetwork_robot\n\nПереход полностью бесплатный 💙\n\nНажмите кнопку ниже 👇";
+        $this->db->transaction(function () use ($updateId,$tg,$text) {
+            if (!$this->db->execute('INSERT INTO telegram_updates VALUES(?,?) ON CONFLICT(update_id) DO NOTHING',[$updateId,time()])) return;
+            $this->outbox->enqueue('telegram.send','moved:'.$updateId,['chat_id'=>$tg,'text'=>$text,'reply_markup'=>['inline_keyboard'=>[[['text'=>'Перейти в нового бота','url'=>'https://t.me/CommonNetwork_robot']]]]]);
         });
     }
     private function sendWelcome(int $id,string $tg): void
